@@ -10,7 +10,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-STORAGE_AVATAR = "https://github.com/FireJester/Media/blob/main/Group_avatar_in_note_module.jpeg"
+STORAGE_AVATAR = "https://github.com/FireJester/Media/raw/main/Group_avatar_in_note_module.jpeg"
 
 @loader.tds
 class Note(loader.Module):
