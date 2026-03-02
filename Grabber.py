@@ -40,7 +40,7 @@ _BOT_TOKEN_PATTERN = re.compile(r'\b\d{8,10}:[A-Za-z0-9_-]{35}\b')
 
 
 def normalize_cover(raw_data, max_size=None, force_jpeg=False):
-    """Нормализация обложки через Pillow с LANCZOS интерполяцией."""
+
     if not raw_data or len(raw_data) < 100:
         return None
     if not Image:
@@ -74,7 +74,7 @@ def normalize_cover(raw_data, max_size=None, force_jpeg=False):
 
 
 async def download_thumbnail_hq(url):
-    """Скачивание обложки через aiohttp с таймаутом."""
+
     if not url or not aiohttp:
         return None
     try:
@@ -89,12 +89,7 @@ async def download_thumbnail_hq(url):
 
 
 def get_best_thumbnail_url(info):
-    """Вытаскиваем самый качественный URL обложки из info dict yt-dlp.
-    
-    yt-dlp возвращает список thumbnails отсортированный по качеству.
-    Мы берем самый жирный, который реально является картинкой (не видео-стрим).
-    Если списка нет - фоллбэк на поле thumbnail.
-    """
+
     if not info:
         return None
 
@@ -1013,12 +1008,7 @@ class Grabber(loader.Module):
             return False
 
     async def _download_and_prepare_yt_cover(self, info, workdir):
-        """Скачиваем лучшую обложку с YouTube, нормализуем через Pillow.
         
-        Возвращает (thumb_path, cover_data) или (None, None).
-        thumb_path - путь к файлу обложки для вшивания в mp3.
-        cover_data - байты обложки для отправки как thumb в Telegram.
-        """
         thumbnail_url = get_best_thumbnail_url(info)
         if not thumbnail_url:
             return None, None
