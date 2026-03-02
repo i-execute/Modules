@@ -1,4 +1,4 @@
-__version__ = (1, 0, 5)
+__version__ = (2, 0, 0)
 # meta developer: FireJester.t.me
 
 import io
@@ -14,6 +14,7 @@ import sys
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.types import Message
+from telethon.errors import SessionPasswordNeededError
 
 from aiogram.types import Message as AiogramMessage
 
@@ -61,7 +62,8 @@ class QRAuthDumper(loader.Module):
             "<b>Via bot:</b>\n"
             "Send <code>/dumpqr</code> to inline bot DM\n\n"
             "<b>Via userbot:</b>\n"
-            "<code>.qrstart</code> -- fallback command\n\n"
+            "<code>.dumpqr</code> -- start QR auth\n"
+            "<code>.dumpqr pass [password]</code> -- provide 2FA password\n\n"
             "<b>Config:</b>\n"
             "<code>.qrauth</code> -- this help\n"
             "<code>.qrauth status</code> -- status\n"
@@ -116,9 +118,6 @@ class QRAuthDumper(loader.Module):
             "<b>Auth Key (HEX):</b>\n"
             "<code>{auth_key_hex}</code>\n"
             "{line}\n"
-            "<b>String Session:</b>\n"
-            "<code>{string_session}</code>\n"
-            "{line}\n"
             "<b>Auth Key SHA256:</b>\n"
             "<code>{auth_key_sha}</code>\n"
             "{line}\n"
@@ -139,8 +138,17 @@ class QRAuthDumper(loader.Module):
         ),
         "generating": "<b>Generating QR...</b>",
         "not_owner": "<b>Access denied.</b>",
-        "config_updated": "<b>{key} updated:</b> <code>{value}</code>",
+        "config_updated": "<b>{key} updated.</b>",
         "provide_value": "<b>Provide value.</b>",
+        "password_needed": (
+            "<b>2FA Password Required</b>\n"
+            "{line}\n"
+            "Use: <code>.dumpqr pass YOUR_PASSWORD</code>\n"
+            "{line}"
+        ),
+        "provide_password": "<b>Provide password.</b>",
+        "no_active_process": "<b>No active QR auth process.</b>",
+        "wrong_step": "<b>Wrong step. Current: {step}</b>",
     }
 
     _DC_IP_MAP = {
@@ -153,13 +161,34 @@ class QRAuthDumper(loader.Module):
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "API_ID", 2040, "Telegram API ID",
-            "API_HASH", "b18441a1ff607e10a989891a5462e627", "Telegram API Hash",
-            "QR_TIMEOUT", 60, "QR scan timeout in seconds",
-            "QR_REFRESH", 15, "QR refresh interval in seconds",
+            loader.ConfigValue(
+                "API_ID",
+                2040,
+                "Telegram API ID",
+                validator=loader.validators.Integer(minimum=1),
+            ),
+            loader.ConfigValue(
+                "API_HASH",
+                "b18441a1ff607e10a989891a5462e627",
+                "Telegram API Hash",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "QR_TIMEOUT",
+                60,
+                "QR scan timeout in seconds",
+                validator=loader.validators.Integer(minimum=10, maximum=300),
+            ),
+            loader.ConfigValue(
+                "QR_REFRESH",
+                15,
+                "QR refresh interval in seconds",
+                validator=loader.validators.Integer(minimum=5, maximum=60),
+            ),
         )
         self._owner_id = None
         self._active_sessions = {}
+        self._pending_2fa = {}
         self.inline_bot = None
 
     async def client_ready(self, client, db):
@@ -235,7 +264,7 @@ class QRAuthDumper(loader.Module):
             logger.error("[QRAuth] extract error: %s", e)
             return f"ERROR: {e}", None
 
-    def _format_result(self, user, ss, hex_key, dc_id, sha):
+    def _format_result(self, user, hex_key, dc_id, sha):
         line = self.strings["line"]
         fn = getattr(user, 'first_name', '') or ''
         ln = getattr(user, 'last_name', '') or ''
@@ -246,11 +275,11 @@ class QRAuthDumper(loader.Module):
         return self.strings["auth_success"].format(
             line=line, name=_escape(name), user_id=uid,
             username=_escape(uname_s), dc_id=dc_id,
-            auth_key_hex=hex_key, string_session=ss,
+            auth_key_hex=hex_key,
             auth_key_sha=sha,
         )
 
-    async def _run_qr(self, api_id: int, api_hash: str, send_func, delete_func):
+    async def _run_qr(self, api_id: int, api_hash: str, send_func, delete_func, uid: int):
         timeout = int(self.config["QR_TIMEOUT"])
         refresh = int(self.config["QR_REFRESH"])
         line = self.strings["line"]
@@ -278,12 +307,16 @@ class QRAuthDumper(loader.Module):
 
             user = None
             elapsed = 0
+            need_2fa = False
 
             while elapsed < timeout:
                 wt = min(refresh, timeout - elapsed)
                 try:
                     user = await asyncio.wait_for(qr.wait(), timeout=wt)
                     logger.info("[QRAuth] QR scanned!")
+                    break
+                except SessionPasswordNeededError:
+                    need_2fa = True
                     break
                 except asyncio.TimeoutError:
                     elapsed += wt
@@ -315,10 +348,30 @@ class QRAuthDumper(loader.Module):
             except Exception:
                 pass
 
+            if need_2fa:
+                self._pending_2fa[uid] = {
+                    'client': tc,
+                    'send_func': send_func,
+                    'delete_func': delete_func,
+                }
+                return self.strings["password_needed"].format(line=line)
+
             if user is None:
+                await tc.disconnect()
                 logger.info("[QRAuth] Timeout")
                 return self.strings["auth_timeout"].format(line=line)
 
+            return await self._finalize_auth(tc, user)
+
+        except Exception:
+            try:
+                await tc.disconnect()
+            except Exception:
+                pass
+            raise
+
+    async def _finalize_auth(self, tc, user):
+        try:
             logger.info(
                 "[QRAuth] Success: %s id=%d",
                 getattr(user, 'first_name', '?'),
@@ -338,14 +391,33 @@ class QRAuthDumper(loader.Module):
             except Exception:
                 sha = "N/A"
 
-            return self._format_result(user, ss, hex_key, dc_id, sha)
-
+            return self._format_result(user, hex_key, dc_id, sha)
         finally:
             try:
                 await tc.disconnect()
                 logger.info("[QRAuth] Temp client disconnected")
             except Exception:
                 pass
+
+    async def _handle_2fa(self, uid, password, send_func_override=None):
+        pending = self._pending_2fa.get(uid)
+        if not pending:
+            return None
+
+        tc = pending['client']
+        send_func = send_func_override or pending['send_func']
+
+        try:
+            del self._pending_2fa[uid]
+            await tc.sign_in(password=password)
+            user = await tc.get_me()
+            return await self._finalize_auth(tc, user)
+        except Exception as e:
+            try:
+                await tc.disconnect()
+            except Exception:
+                pass
+            raise
 
     async def aiogram_watcher(self, message: AiogramMessage):
 
@@ -368,9 +440,41 @@ class QRAuthDumper(loader.Module):
             )
             return
 
+        parts = text.split(maxsplit=2)
+        line = self.strings["line"]
+
+        if len(parts) >= 2 and parts[1].lower() == "pass":
+            pwd = parts[2] if len(parts) > 2 else None
+            if not pwd:
+                await message.answer(
+                    self.strings["provide_password"], parse_mode="HTML"
+                )
+                return
+            if uid not in self._pending_2fa:
+                await message.answer(
+                    self.strings["no_active_process"], parse_mode="HTML"
+                )
+                return
+            try:
+                result_text = await self._handle_2fa(uid, pwd)
+                await self.inline_bot.send_message(
+                    cid, result_text, parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.error("[QRAuth] 2FA error: %s", e, exc_info=True)
+                await self.inline_bot.send_message(
+                    cid,
+                    self.strings["auth_error"].format(
+                        line=line, error=_escape(str(e))
+                    ),
+                    parse_mode="HTML",
+                )
+            finally:
+                self._active_sessions.pop(uid, None)
+            return
+
         api_id = self.config["API_ID"]
         api_hash = self.config["API_HASH"]
-        line = self.strings["line"]
 
         if not api_id or not api_hash:
             await message.answer(
@@ -420,7 +524,7 @@ class QRAuthDumper(loader.Module):
                 pass
 
             result_text = await self._run_qr(
-                int(api_id), str(api_hash), send_func, delete_func
+                int(api_id), str(api_hash), send_func, delete_func, uid
             )
 
             await self.inline_bot.send_message(
@@ -440,7 +544,8 @@ class QRAuthDumper(loader.Module):
             except Exception:
                 pass
         finally:
-            self._active_sessions.pop(uid, None)
+            if uid not in self._pending_2fa:
+                self._active_sessions.pop(uid, None)
 
     @loader.command(ru_doc="QR Auth Dumper - help and config")
     async def qrauth(self, message: Message):
@@ -502,30 +607,71 @@ class QRAuthDumper(loader.Module):
             if is_int:
                 val = int(val)
             self.config[key] = val
-            await utils.answer(message, self.strings["config_updated"].format(
-                key=key, value=val
-            ))
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            topic_id = self._get_topic_id(message)
+            await self._client.send_message(
+                message.chat_id,
+                self.strings["config_updated"].format(key=key),
+                parse_mode="html",
+                reply_to=topic_id,
+            )
         except ValueError:
             await utils.answer(message, "<b>Error:</b> Invalid value")
 
-    @loader.command(ru_doc="QR auth fallback via userbot")
-    async def qrstart(self, message: Message):
-        """Fallback QR auth through userbot messages"""
+    @loader.command(ru_doc="QR auth через юзербот")
+    async def dumpqr(self, message: Message):
+        """QR auth through userbot messages / 2FA password"""
+        args = utils.get_args_raw(message).split()
+        line = self.strings["line"]
+        uid = self._owner_id
+        peer = message.peer_id
+        topic_id = self._get_topic_id(message)
+
+        if args and args[0].lower() == "pass":
+            pwd = args[1] if len(args) > 1 else None
+            if not pwd:
+                await utils.answer(message, self.strings["provide_password"])
+                return
+            if uid not in self._pending_2fa:
+                await utils.answer(message, self.strings["no_active_process"])
+                return
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            try:
+                result_text = await self._handle_2fa(uid, pwd)
+                await self._client.send_message(
+                    peer, result_text, parse_mode="html",
+                    reply_to=topic_id,
+                )
+            except Exception as e:
+                logger.error("[QRAuth] 2FA error: %s", e, exc_info=True)
+                await self._client.send_message(
+                    peer,
+                    self.strings["auth_error"].format(
+                        line=line, error=_escape(str(e))
+                    ),
+                    parse_mode="html",
+                    reply_to=topic_id,
+                )
+            finally:
+                self._active_sessions.pop(uid, None)
+            return
+
         api_id = self.config["API_ID"]
         api_hash = self.config["API_HASH"]
-        line = self.strings["line"]
 
         if not api_id or not api_hash:
             await utils.answer(message, self.strings["no_config"].format(line=line))
             return
 
-        uid = self._owner_id
         if self._active_sessions.get(uid):
             await utils.answer(message, self.strings["already_running"].format(line=line))
             return
-
-        peer = message.peer_id
-        topic_id = self._get_topic_id(message)
 
         await utils.answer(message, self.strings["generating"])
         try:
@@ -533,9 +679,9 @@ class QRAuthDumper(loader.Module):
         except Exception:
             pass
 
-        asyncio.create_task(self._qrstart_task(uid, peer, topic_id, api_id, api_hash))
+        asyncio.create_task(self._dumpqr_task(uid, peer, topic_id, api_id, api_hash))
 
-    async def _qrstart_task(self, uid, peer, topic_id, api_id, api_hash):
+    async def _dumpqr_task(self, uid, peer, topic_id, api_id, api_hash):
         line = self.strings["line"]
         self._active_sessions[uid] = True
 
@@ -560,7 +706,7 @@ class QRAuthDumper(loader.Module):
                     pass
 
             result_text = await self._run_qr(
-                int(api_id), str(api_hash), send_func, delete_func
+                int(api_id), str(api_hash), send_func, delete_func, uid
             )
 
             await self._client.send_message(
@@ -569,7 +715,7 @@ class QRAuthDumper(loader.Module):
             )
 
         except Exception as e:
-            logger.error("[QRAuth] qrstart task error: %s", e, exc_info=True)
+            logger.error("[QRAuth] dumpqr task error: %s", e, exc_info=True)
             try:
                 await self._client.send_message(
                     peer,
@@ -582,4 +728,5 @@ class QRAuthDumper(loader.Module):
             except Exception:
                 pass
         finally:
-            self._active_sessions.pop(uid, None)
+            if uid not in self._pending_2fa:
+                self._active_sessions.pop(uid, None)
