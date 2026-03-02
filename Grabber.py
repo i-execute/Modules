@@ -1,7 +1,8 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 # meta developer: FireJester.t.me 
 
 import os
+import io
 import asyncio
 import logging
 import shutil
@@ -22,10 +23,102 @@ try:
 except ImportError:
     pass
 
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
+
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
+
 logger = logging.getLogger(__name__)
 
 _URL_PATTERN = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
 _BOT_TOKEN_PATTERN = re.compile(r'\b\d{8,10}:[A-Za-z0-9_-]{35}\b')
+
+
+def normalize_cover(raw_data, max_size=None, force_jpeg=False):
+    """Нормализация обложки через Pillow с LANCZOS интерполяцией."""
+    if not raw_data or len(raw_data) < 100:
+        return None
+    if not Image:
+        return raw_data
+    try:
+        img = Image.open(io.BytesIO(raw_data))
+        w, h = img.size
+        needs_resize = max_size is not None and (w > max_size or h > max_size)
+        if force_jpeg:
+            img = img.convert("RGB")
+            if needs_resize:
+                ratio = min(max_size / w, max_size / h)
+                img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=95)
+            result = buf.getvalue()
+            return result if len(result) >= 100 else None
+        is_png = raw_data[:8] == b'\x89PNG\r\n\x1a\n'
+        if is_png and not needs_resize:
+            return raw_data
+        img = img.convert("RGB")
+        if needs_resize:
+            ratio = min(max_size / w, max_size / h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=95)
+        result = buf.getvalue()
+        return result if len(result) >= 100 else None
+    except Exception:
+        return raw_data
+
+
+async def download_thumbnail_hq(url):
+    """Скачивание обложки через aiohttp с таймаутом."""
+    if not url or not aiohttp:
+        return None
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.read()
+                return data if len(data) >= 1000 else None
+    except Exception:
+        return None
+
+
+def get_best_thumbnail_url(info):
+    """Вытаскиваем самый качественный URL обложки из info dict yt-dlp.
+    
+    yt-dlp возвращает список thumbnails отсортированный по качеству.
+    Мы берем самый жирный, который реально является картинкой (не видео-стрим).
+    Если списка нет - фоллбэк на поле thumbnail.
+    """
+    if not info:
+        return None
+
+    thumbnails = info.get('thumbnails')
+    if thumbnails and isinstance(thumbnails, list):
+        best_url = None
+        best_preference = -9999
+        best_resolution = 0
+        for t in thumbnails:
+            url = t.get('url')
+            if not url:
+                continue
+            w = t.get('width') or 0
+            h = t.get('height') or 0
+            pref = t.get('preference') or 0
+            resolution = w * h
+            if pref > best_preference or (pref == best_preference and resolution > best_resolution):
+                best_preference = pref
+                best_resolution = resolution
+                best_url = url
+        if best_url:
+            return best_url
+
+    return info.get('thumbnail') or None
 
 
 class SafeList:
@@ -457,6 +550,7 @@ class Grabber(loader.Module):
             'cryptg': 'cryptg',
             'Pillow': 'PIL',
             'hachoir': 'hachoir',
+            'aiohttp': 'aiohttp',
         }
         
         results = {}
@@ -917,6 +1011,37 @@ class Grabber(loader.Module):
         except Exception as e:
             logger.error(f"[GRABBER] FFmpeg cover error: {e}")
             return False
+
+    async def _download_and_prepare_yt_cover(self, info, workdir):
+        """Скачиваем лучшую обложку с YouTube, нормализуем через Pillow.
+        
+        Возвращает (thumb_path, cover_data) или (None, None).
+        thumb_path - путь к файлу обложки для вшивания в mp3.
+        cover_data - байты обложки для отправки как thumb в Telegram.
+        """
+        thumbnail_url = get_best_thumbnail_url(info)
+        if not thumbnail_url:
+            return None, None
+        
+        raw_data = await download_thumbnail_hq(thumbnail_url)
+        if not raw_data:
+            return None, None
+        
+        cover_data = normalize_cover(raw_data, force_jpeg=True)
+        if not cover_data:
+            return None, None
+        
+        thumb_path = os.path.join(workdir, "yt_cover_hq.jpg")
+        try:
+            with open(thumb_path, "wb") as f:
+                f.write(cover_data)
+        except Exception:
+            return None, None
+        
+        if not os.path.exists(thumb_path) or os.path.getsize(thumb_path) < 100:
+            return None, None
+        
+        return thumb_path, cover_data
 
     @loader.command()
     async def grabber(self, message):
@@ -1396,6 +1521,18 @@ class Grabber(loader.Module):
             if meta_dict.get('thumb_path') and os.path.exists(meta_dict['thumb_path']):
                 thumb_path = meta_dict['thumb_path']
                 
+                try:
+                    with open(thumb_path, "rb") as f:
+                        raw_thumb_data = f.read()
+                    normalized = normalize_cover(raw_thumb_data, force_jpeg=True)
+                    if normalized:
+                        norm_path = os.path.join(workdir, "normalized_custom_cover.jpg")
+                        with open(norm_path, "wb") as f:
+                            f.write(normalized)
+                        thumb_path = norm_path
+                except Exception as e:
+                    logger.error(f"[GRABBER] Custom thumb normalize error: {e}")
+                
                 temp_output = os.path.join(workdir, "temp_with_cover.mp3")
                 success = await self._embed_cover_ffmpeg(filepath, thumb_path, temp_output)
                 
@@ -1407,16 +1544,18 @@ class Grabber(loader.Module):
                 send_thumb = thumb_path
             
             elif meta_dict.get('use_yt_thumb'):
-                thumbnail_url = info.get('thumbnail')
-                if thumbnail_url:
-                    try:
-                        import urllib.request
-                        thumb_path = os.path.join(workdir, "yt_thumb.jpg")
-                        urllib.request.urlretrieve(thumbnail_url, thumb_path)
-                        if os.path.exists(thumb_path):
-                            send_thumb = thumb_path
-                    except Exception as e:
-                        logger.error(f"[GRABBER] Thumb download error: {e}")
+                thumb_path, cover_data = await self._download_and_prepare_yt_cover(info, workdir)
+                
+                if thumb_path and os.path.exists(thumb_path):
+                    temp_output = os.path.join(workdir, "temp_with_yt_cover.mp3")
+                    success = await self._embed_cover_ffmpeg(filepath, thumb_path, temp_output)
+                    
+                    if success and os.path.exists(temp_output):
+                        os.remove(filepath)
+                        os.rename(temp_output, filepath)
+                        filesize = os.path.getsize(filepath) / (1024 * 1024)
+                    
+                    send_thumb = thumb_path
         
         self._current_download['stage'] = 'probe'
         await self._edit_message(chat_id, msg_id, self._build_status_message(), parse_mode='html')
