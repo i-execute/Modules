@@ -1,4 +1,4 @@
-__version__ = (1, 0, 4)
+__version__ = (1, 0, 5)
 # meta developer: FireJester.t.me
 
 import io
@@ -174,6 +174,12 @@ class QRAuthDumper(loader.Module):
             logger.info("[QRAuth] Inline bot found")
         else:
             logger.warning("[QRAuth] No inline bot, /dumpqr unavailable")
+
+    def _get_topic_id(self, message: Message):
+        reply_to = getattr(message, 'reply_to', None)
+        if reply_to:
+            return getattr(reply_to, 'reply_to_top_id', None) or getattr(reply_to, 'reply_to_msg_id', None)
+        return None
 
     def _make_qr(self, url: str) -> io.BytesIO:
         import qrcode
@@ -518,21 +524,33 @@ class QRAuthDumper(loader.Module):
             await utils.answer(message, self.strings["already_running"].format(line=line))
             return
 
-        self._active_sessions[uid] = True
         peer = message.peer_id
+        topic_id = self._get_topic_id(message)
+
+        await utils.answer(message, self.strings["generating"])
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+        asyncio.create_task(self._qrstart_task(uid, peer, topic_id, api_id, api_hash))
+
+    async def _qrstart_task(self, uid, peer, topic_id, api_id, api_hash):
+        line = self.strings["line"]
+        self._active_sessions[uid] = True
 
         try:
-            await utils.answer(message, self.strings["generating"])
-
             async def send_func(file_obj, caption):
                 if file_obj:
                     return await self._client.send_file(
                         peer, file_obj,
                         caption=caption, parse_mode="html",
+                        reply_to=topic_id,
                     )
                 else:
                     return await self._client.send_message(
                         peer, caption, parse_mode="html",
+                        reply_to=topic_id,
                     )
 
             async def delete_func(msg):
@@ -541,27 +559,27 @@ class QRAuthDumper(loader.Module):
                 except Exception:
                     pass
 
-            try:
-                await message.delete()
-            except Exception:
-                pass
-
             result_text = await self._run_qr(
                 int(api_id), str(api_hash), send_func, delete_func
             )
 
             await self._client.send_message(
-                peer, result_text, parse_mode="html"
+                peer, result_text, parse_mode="html",
+                reply_to=topic_id,
             )
 
         except Exception as e:
-            logger.error("[QRAuth] qrstart error: %s", e, exc_info=True)
-            await self._client.send_message(
-                peer,
-                self.strings["auth_error"].format(
-                    line=line, error=_escape(str(e))
-                ),
-                parse_mode="html",
-            )
+            logger.error("[QRAuth] qrstart task error: %s", e, exc_info=True)
+            try:
+                await self._client.send_message(
+                    peer,
+                    self.strings["auth_error"].format(
+                        line=line, error=_escape(str(e))
+                    ),
+                    parse_mode="html",
+                    reply_to=topic_id,
+                )
+            except Exception:
+                pass
         finally:
             self._active_sessions.pop(uid, None)
