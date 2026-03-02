@@ -1,4 +1,4 @@
-__version__ = (2, 2, 2)
+__version__ = (2, 2, 3)
 # meta developer: FireJester.t.me
 
 import logging
@@ -338,6 +338,10 @@ class Note(loader.Module):
                 reply = await message.get_reply_message()
                 is_forum = await self._is_forum_chat(message)
                 topic_id = self._get_topic_id(message) if is_forum else None
+                chat_id = message.chat_id
+                reply_id = reply.id if reply else None
+
+                await message.delete()
 
                 is_first_group = True
                 for group in groups:
@@ -358,15 +362,15 @@ class Note(loader.Module):
                         continue
 
                     if is_forum:
-                        if is_first_group and reply:
-                            reply_to = reply.id
+                        if is_first_group and reply_id:
+                            reply_to = reply_id
                         elif topic_id:
                             reply_to = topic_id
                         else:
                             reply_to = None
                     else:
-                        if is_first_group and reply:
-                            reply_to = reply.id
+                        if is_first_group and reply_id:
+                            reply_to = reply_id
                         else:
                             reply_to = None
 
@@ -379,19 +383,21 @@ class Note(loader.Module):
                                     r = topic_id
                                 else:
                                     r = None
-                            await self._client.send_file(message.chat_id, m, reply_to=r)
+                            await self._client.send_file(chat_id, m, reply_to=r)
                     else:
                         await self._client.send_file(
-                            message.chat_id, media_to_send, reply_to=reply_to
+                            chat_id, media_to_send, reply_to=reply_to
                         )
 
                     is_first_group = False
 
-                await message.delete()
-
         except Exception as e:
             logger.exception(f"[Note] Error: {e}")
             try:
-                await utils.answer(message, self._get_str("storage_error"))
+                await self._client.send_message(
+                    message.chat_id,
+                    self._get_str("storage_error"),
+                    reply_to=topic_id if (is_forum and topic_id) else None,
+                )
             except Exception:
                 pass
