@@ -1,4 +1,4 @@
-__version__ = (2, 2, 1)
+__version__ = (2, 2, 2)
 # meta developer: FireJester.t.me
 
 import logging
@@ -202,6 +202,16 @@ class Note(loader.Module):
 
         return stored_ids
 
+    async def _is_forum_chat(self, message):
+        """Проверяем является ли чат форумом с топиками."""
+        if message.is_private:
+            return False
+        try:
+            chat = await message.get_chat()
+            return getattr(chat, 'forum', False)
+        except Exception:
+            return False
+
     def _get_topic_id(self, message):
         """Вытаскиваем ID топика из сообщения."""
         reply_to = getattr(message, 'reply_to', None)
@@ -326,7 +336,8 @@ class Note(loader.Module):
 
                 groups = notes[name]
                 reply = await message.get_reply_message()
-                topic_id = self._get_topic_id(message)
+                is_forum = await self._is_forum_chat(message)
+                topic_id = self._get_topic_id(message) if is_forum else None
 
                 is_first_group = True
                 for group in groups:
@@ -346,21 +357,28 @@ class Note(loader.Module):
                     if not media_to_send:
                         continue
 
-                    if is_first_group and reply:
-                        reply_to = reply.id
-                    elif topic_id:
-                        reply_to = topic_id
+                    if is_forum:
+                        if is_first_group and reply:
+                            reply_to = reply.id
+                        elif topic_id:
+                            reply_to = topic_id
+                        else:
+                            reply_to = None
                     else:
-                        reply_to = None
+                        if is_first_group and reply:
+                            reply_to = reply.id
+                        else:
+                            reply_to = None
 
                     if any(not self._is_albumable(m) for m in media_to_send) or len(media_to_send) == 1:
                         for idx, m in enumerate(media_to_send):
                             if idx == 0:
                                 r = reply_to
-                            elif topic_id:
-                                r = topic_id
                             else:
-                                r = None
+                                if is_forum and topic_id:
+                                    r = topic_id
+                                else:
+                                    r = None
                             await self._client.send_file(message.chat_id, m, reply_to=r)
                     else:
                         await self._client.send_file(
