@@ -1,4 +1,4 @@
-__version__ = (2, 2, 3)
+__version__ = (2, 2, 4)
 # meta developer: FireJester.t.me
 
 import logging
@@ -30,27 +30,27 @@ class Note(loader.Module):
             "<code>.note [name]</code> - post note"
         ),
         "created": "<b>Note</b> <code>{name}</code> <b>saved!</b>",
-        "created_prem": "<emoji document_id=5265214770537075100>&#x1F920;</emoji><emoji document_id=5265253528321954044>&#x1F920;</emoji> <b>Note</b> <code>{name}</code> <b>saved!</b>",
+        "created_prem": "<emoji document_id=5265214770537075100>\U0001f920</emoji><emoji document_id=5265253528321954044>\U0001f920</emoji> <b>Note</b> <code>{name}</code> <b>saved!</b>",
         "added": "<b>Media added to note</b> <code>{name}</code><b>!</b>",
-        "added_prem": "<emoji document_id=5265214770537075100>&#x1F920;</emoji><emoji document_id=5265253528321954044>&#x1F920;</emoji> <b>Media added to note</b> <code>{name}</code><b>!</b>",
+        "added_prem": "<emoji document_id=5265214770537075100>\U0001f920</emoji><emoji document_id=5265253528321954044>\U0001f920</emoji> <b>Media added to note</b> <code>{name}</code><b>!</b>",
         "no_media": "<b>Error: reply to media!</b>",
-        "no_media_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>Error: reply to media!</b>",
+        "no_media_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Error: reply to media!</b>",
         "no_reply": "<b>Error: reply to a message!</b>",
-        "no_reply_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>Error: reply to a message!</b>",
+        "no_reply_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Error: reply to a message!</b>",
         "name_required": "<b>Error: specify a name!</b>",
-        "name_required_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>Error: specify a name!</b>",
+        "name_required_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Error: specify a name!</b>",
         "exists": "<b>Error: note <code>{name}</code> already exists!</b>",
-        "exists_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>Error: note <code>{name}</code> already exists!</b>",
+        "exists_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Error: note <code>{name}</code> already exists!</b>",
         "not_found": "<b>Error: note <code>{name}</code> not found!</b>",
-        "not_found_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>Error: note <code>{name}</code> not found!</b>",
+        "not_found_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Error: note <code>{name}</code> not found!</b>",
         "removed": "<b>Note <code>{name}</code> removed!</b>",
-        "removed_prem": "<emoji document_id=5265050947599508098>&#x2B50;</emoji> <b>Note <code>{name}</code> removed!</b>",
+        "removed_prem": "<emoji document_id=5265050947599508098>\u2b50</emoji> <b>Note <code>{name}</code> removed!</b>",
         "list_header": "<b>Your notes list:</b>\n<blockquote expandable>{notes}</blockquote>",
-        "list_header_prem": "<emoji document_id=5264781623085276513>&#x2764;&#xFE0F;</emoji> <b>Your notes list:</b>\n<blockquote expandable>{notes}</blockquote>",
+        "list_header_prem": "<emoji document_id=5264781623085276513>\u2764\ufe0f</emoji> <b>Your notes list:</b>\n<blockquote expandable>{notes}</blockquote>",
         "no_notes": "<b>No notes saved yet.</b>",
-        "no_notes_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>No notes saved yet.</b>",
+        "no_notes_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>No notes saved yet.</b>",
         "storage_error": "<b>Error interacting with storage. Please try again.</b>",
-        "storage_error_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>Storage error. Please try again.</b>",
+        "storage_error_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Storage error. Please try again.</b>",
     }
 
     strings_ru = {
@@ -63,27 +63,27 @@ class Note(loader.Module):
             "<code>.note [название]</code> - отправить заметку"
         ),
         "created": "<b>Заметка</b> <code>{name}</code> <b>сохранена!</b>",
-        "created_prem": "<emoji document_id=5265214770537075100>&#x1F920;</emoji><emoji document_id=5265253528321954044>&#x1F920;</emoji> <b>Заметка</b> <code>{name}</code> <b>сохранена!</b>",
+        "created_prem": "<emoji document_id=5265214770537075100>\U0001f920</emoji><emoji document_id=5265253528321954044>\U0001f920</emoji> <b>Заметка</b> <code>{name}</code> <b>сохранена!</b>",
         "added": "<b>Медиа добавлено в заметку</b> <code>{name}</code><b>!</b>",
-        "added_prem": "<emoji document_id=5265214770537075100>&#x1F920;</emoji><emoji document_id=5265253528321954044>&#x1F920;</emoji> <b>Медиа добавлено в заметку</b> <code>{name}</code><b>!</b>",
+        "added_prem": "<emoji document_id=5265214770537075100>\U0001f920</emoji><emoji document_id=5265253528321954044>\U0001f920</emoji> <b>Медиа добавлено в заметку</b> <code>{name}</code><b>!</b>",
         "no_media": "<b>Ошибка: ответьте на медиа!</b>",
-        "no_media_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>Ошибка: ответьте на медиа!</b>",
+        "no_media_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Ошибка: ответьте на медиа!</b>",
         "no_reply": "<b>Ошибка: ответьте на сообщение!</b>",
-        "no_reply_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>Ошибка: ответьте на сообщение!</b>",
+        "no_reply_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Ошибка: ответьте на сообщение!</b>",
         "name_required": "<b>Ошибка: укажите название!</b>",
-        "name_required_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>Ошибка: укажите название!</b>",
+        "name_required_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Ошибка: укажите название!</b>",
         "exists": "<b>Ошибка: заметка <code>{name}</code> уже существует!</b>",
-        "exists_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>Ошибка: заметка <code>{name}</code> уже существует!</b>",
+        "exists_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Ошибка: заметка <code>{name}</code> уже существует!</b>",
         "not_found": "<b>Ошибка: заметка <code>{name}</code> не найдена!</b>",
-        "not_found_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>Ошибка: заметка <code>{name}</code> не найдена!</b>",
+        "not_found_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Ошибка: заметка <code>{name}</code> не найдена!</b>",
         "removed": "<b>Заметка <code>{name}</code> удалена!</b>",
-        "removed_prem": "<emoji document_id=5265050947599508098>&#x2B50;</emoji> <b>Заметка <code>{name}</code> удалена!</b>",
+        "removed_prem": "<emoji document_id=5265050947599508098>\u2b50</emoji> <b>Заметка <code>{name}</code> удалена!</b>",
         "list_header": "<b>Список ваших заметок:</b>\n<blockquote expandable>{notes}</blockquote>",
-        "list_header_prem": "<emoji document_id=5264781623085276513>&#x2764;&#xFE0F;</emoji> <b>Список ваших заметок:</b>\n<blockquote expandable>{notes}</blockquote>",
+        "list_header_prem": "<emoji document_id=5264781623085276513>\u2764\ufe0f</emoji> <b>Список ваших заметок:</b>\n<blockquote expandable>{notes}</blockquote>",
         "no_notes": "<b>У вас пока нет сохраненных заметок.</b>",
-        "no_notes_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>У вас пока нет сохраненных заметок.</b>",
+        "no_notes_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>У вас пока нет сохраненных заметок.</b>",
         "storage_error": "<b>Ошибка взаимодействия с хранилищем. Попробуйте снова.</b>",
-        "storage_error_prem": "<emoji document_id=5265046712761748665>&#x270F;&#xFE0F;</emoji> <b>Ошибка хранилища. Попробуйте снова.</b>",
+        "storage_error_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Ошибка хранилища. Попробуйте снова.</b>",
     }
 
     def __init__(self):
