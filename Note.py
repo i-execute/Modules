@@ -1,4 +1,4 @@
-__version__ = (2, 2, 0)
+__version__ = (2, 2, 1)
 # meta developer: FireJester.t.me
 
 import logging
@@ -118,7 +118,7 @@ class Note(loader.Module):
                 return entity
             except Exception:
                 self.config["NOTES"] = {}
-        
+
         try:
             chat_entity, _ = await utils.asset_channel(
                 self._client, "Note Storage", "Notes storage. @FireJester with \u26a1",
@@ -131,7 +131,7 @@ class Note(loader.Module):
             except Exception as e:
                 logger.error(f"[Note] Create storage error: {e}")
                 return None
-        
+
         self.config["STORAGE_CHAT_ID"] = chat_entity.id
         self._storage_chat_entity = chat_entity
         return chat_entity
@@ -228,7 +228,7 @@ class Note(loader.Module):
         if not parts:
             await utils.answer(message, self._get_str("help"))
             return
-        
+
         cmd = parts[0].lower()
 
         try:
@@ -237,7 +237,7 @@ class Note(loader.Module):
                 if not name:
                     await utils.answer(message, self._get_str("name_required"))
                     return
-                
+
                 notes = self.config["NOTES"]
                 if name in notes:
                     await utils.answer(message, self._get_str("exists").format(name=name))
@@ -287,24 +287,24 @@ class Note(loader.Module):
                 if not name:
                     await utils.answer(message, self._get_str("name_required"))
                     return
-                
+
                 notes = self.config["NOTES"]
                 if name not in notes:
                     await utils.answer(message, self._get_str("not_found").format(name=name))
                     return
-                
+
                 all_ids = []
                 for group in notes[name]:
                     if isinstance(group, list):
                         all_ids.extend(group)
                     else:
                         all_ids.append(group)
-                
+
                 try:
                     await self._send_with_flood_wait(self._client.delete_messages, storage.id, all_ids)
                 except Exception:
                     pass
-                
+
                 del notes[name]
                 self.config["NOTES"] = notes
                 await utils.answer(message, self._get_str("removed").format(name=name))
@@ -323,7 +323,7 @@ class Note(loader.Module):
                 if name not in notes:
                     await utils.answer(message, self._get_str("not_found").format(name=name))
                     return
-                
+
                 groups = notes[name]
                 reply = await message.get_reply_message()
                 topic_id = self._get_topic_id(message)
@@ -332,7 +332,9 @@ class Note(loader.Module):
                 for group in groups:
                     msg_ids = group if isinstance(group, list) else [group]
 
-                    fetched = await self._send_with_flood_wait(self._client.get_messages, storage.id, ids=msg_ids)
+                    fetched = await self._send_with_flood_wait(
+                        self._client.get_messages, storage.id, ids=msg_ids
+                    )
                     if not fetched:
                         continue
 
@@ -344,22 +346,26 @@ class Note(loader.Module):
                     if not media_to_send:
                         continue
 
-                    if is_first_group:
-                        if reply:
-                            reply_to = reply.id
-                        elif topic_id:
-                            reply_to = topic_id
-                        else:
-                            reply_to = None
+                    if is_first_group and reply:
+                        reply_to = reply.id
+                    elif topic_id:
+                        reply_to = topic_id
                     else:
-                        reply_to = topic_id if topic_id else None
+                        reply_to = None
 
                     if any(not self._is_albumable(m) for m in media_to_send) or len(media_to_send) == 1:
                         for idx, m in enumerate(media_to_send):
-                            r = reply_to if idx == 0 else (topic_id if topic_id else None)
+                            if idx == 0:
+                                r = reply_to
+                            elif topic_id:
+                                r = topic_id
+                            else:
+                                r = None
                             await self._client.send_file(message.chat_id, m, reply_to=r)
                     else:
-                        await self._client.send_file(message.chat_id, media_to_send, reply_to=reply_to)
+                        await self._client.send_file(
+                            message.chat_id, media_to_send, reply_to=reply_to
+                        )
 
                     is_first_group = False
 
