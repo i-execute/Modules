@@ -1,4 +1,4 @@
-__version__ = (3, 3, 0)
+__version__ = (3, 3, 1)
 # meta developer: FireJester.t.me
 
 import os
@@ -88,27 +88,36 @@ class XRay(loader.Module):
 
         "status_on": (
             "<b>XRay Status</b>\n\n"
+            "<blockquote>"
             "<b>State:</b> running\n"
             "<b>PID:</b> <code>{pid}</code>\n"
-            "<b>Uptime:</b> <code>{uptime}</code>\n\n"
+            "<b>Uptime:</b> <code>{uptime}</code>"
+            "</blockquote>\n\n"
             "<b>Traffic:</b>\n"
-            "  RX: <code>{rx}</code>\n"
-            "  TX: <code>{tx}</code>\n"
-            "  Total: <code>{total}</code>\n\n"
+            "<blockquote>"
+            "RX: <code>{rx}</code>\n"
+            "TX: <code>{tx}</code>\n"
+            "Total: <code>{total}</code>"
+            "</blockquote>\n\n"
             "<b>Connections:</b>\n"
-            "  Active now: <code>{active}</code>\n"
-            "  Unique IPs (24h): <code>{unique_ips}</code>\n\n"
+            "<blockquote>"
+            "Active now: <code>{active}</code>\n"
+            "Unique IPs (24h): <code>{unique_ips}</code>"
+            "</blockquote>\n\n"
             "<b>Trusted users:</b> <code>{trusted_count}</code>\n"
             "<b>Port:</b> <code>{port}</code>"
         ),
-        "status_off": "<b>XRay Status</b>\n\n<b>State:</b> stopped",
+        "status_off": "<b>XRay Status</b>\n\n<blockquote><b>State:</b> stopped</blockquote>",
 
         "keys_info": (
-            "<b>Reality keys:</b>\n\n"
-            "<b>Private:</b>\n<code>{private_key}</code>\n\n"
-            "<b>Public:</b>\n<code>{public_key}</code>\n\n"
+            "<b>Reality keys</b>\n\n"
+            "<b>Private:</b>\n"
+            "<blockquote><code>{private_key}</code></blockquote>\n\n"
+            "<b>Public:</b>\n"
+            "<blockquote><code>{public_key}</code></blockquote>\n\n"
+            "<b>UUID:</b>\n"
+            "<blockquote><code>{uid}</code></blockquote>\n\n"
             "<b>Short ID:</b> <code>{short_id}</code>\n"
-            "<b>UUID:</b>\n<code>{uid}</code>\n\n"
             "<b>SNI:</b> <code>{sni}</code>\n"
             "<b>Dest:</b> <code>{dest}</code>\n"
             "<b>Port:</b> <code>{port}</code>"
@@ -133,7 +142,7 @@ class XRay(loader.Module):
         "user_removed": "<b>Removed:</b> <code>{uid}</code>",
         "user_not_found": "<b>Not found</b>",
         "user_need_reply": "<b>Reply to a message to add/remove user</b>",
-        "users_list": "<b>Trusted users:</b>\n\n{users}",
+        "users_list": "<b>Trusted users:</b>\n\n<blockquote>{users}</blockquote>",
         "users_empty": "<b>No trusted users</b>",
 
         "log_empty": "<b>Log empty</b>",
@@ -149,39 +158,50 @@ class XRay(loader.Module):
         "overwrite_progress": "<b>Overwriting all credentials...</b>",
         "overwrite_done": (
             "<b>All credentials overwritten!</b>\n\n"
+            "<blockquote>"
             "Old links are now dead.\n"
             "Get new link via /xray in bot."
+            "</blockquote>"
         ),
         "overwrite_fail": "<b>Overwrite failed</b>\n\n<code>{error}</code>",
 
         "debug_info": (
             "<b>XRay Debug</b>\n\n"
             "<b>System:</b>\n"
+            "<blockquote>"
             "OS: <code>{os_name}</code>\n"
             "Arch: <code>{arch}</code>\n"
-            "Python: <code>{python}</code>\n\n"
+            "Python: <code>{python}</code>"
+            "</blockquote>\n\n"
             "<b>XRay:</b>\n"
+            "<blockquote>"
             "Installed: {installed}\n"
             "Path: <code>{xray_path}</code>\n"
-            "Version: <code>{xray_version}</code>\n\n"
+            "Version: <code>{xray_version}</code>"
+            "</blockquote>\n\n"
             "<b>Proxy:</b>\n"
+            "<blockquote>"
             "Status: {status}\n"
             "PID: <code>{pid}</code>\n"
             "Port: <code>{port}</code>\n"
             "SNI: <code>{sni}</code>\n"
             "Dest: <code>{dest}</code>\n"
-            "IP: <code>{ip}</code>\n\n"
-            "<b>Port listening:</b> {port_listening}\n"
-            "<b>Config:</b> {config_exists}\n"
-            "<b>Work dir:</b> <code>{work_dir}</code>"
+            "IP: <code>{ip}</code>"
+            "</blockquote>\n\n"
+            "<b>Checks:</b>\n"
+            "<blockquote>"
+            "Port listening: {port_listening}\n"
+            "Config: {config_exists}\n"
+            "Work dir: <code>{work_dir}</code>"
+            "</blockquote>"
         ),
 
         "diagnose_title": "<b>Diagnostics</b>\n\n",
 
         "bot_link_response": (
             "<b>Your VLESS link:</b>\n\n"
-            "<code>{link}</code>\n\n"
-            "<b>Use client:</b> v2RayTun\n"
+            "<blockquote><code>{link}</code></blockquote>\n\n"
+            "<b>Client:</b> v2RayTun\n"
             "Copy link, open app, add server, paste"
         ),
         "bot_not_configured": "<b>Proxy not configured yet</b>",
@@ -192,9 +212,12 @@ class XRay(loader.Module):
         "ping_progress": "<b>Running speed test...</b>",
         "ping_result": (
             "<b>Host Speed Test</b>\n\n"
-            "<b>Download:</b>\n{download}\n\n"
-            "<b>Upload:</b>\n{upload}\n\n"
-            "<b>Latency:</b>\n{latency}"
+            "<b>Download:</b>\n"
+            "<blockquote>{download}</blockquote>\n\n"
+            "<b>Upload:</b>\n"
+            "<blockquote>{upload}</blockquote>\n\n"
+            "<b>Latency:</b>\n"
+            "<blockquote>{latency}</blockquote>"
         ),
         "ping_fail": "<b>Speed test failed</b>\n\n<code>{error}</code>",
     }
@@ -694,9 +717,8 @@ class XRay(loader.Module):
         latency_results = []
 
         test_files = [
-            ("Cloudflare 10MB", "https://speed.cloudflare.com/__down?bytes=10000000", 10_000_000),
-            ("Cloudflare 25MB", "https://speed.cloudflare.com/__down?bytes=25000000", 25_000_000),
-            ("Hetzner 10MB", "http://speed.hetzner.de/10MB.bin", 10_000_000),
+            ("Cloudflare", "https://speed.cloudflare.com/__down?bytes=10000000", 10_000_000),
+            ("Hetzner", "http://speed.hetzner.de/10MB.bin", 10_000_000),
         ]
 
         if progress_cb:
@@ -845,7 +867,7 @@ class XRay(loader.Module):
                     if elapsed > 0:
                         speed = upload_size / elapsed
                         upload_results.append(
-                            ("Cloudflare PUT", speed, elapsed, upload_size)
+                            ("Cloudflare", speed, elapsed, upload_size)
                         )
                 except Exception:
                     pass
@@ -913,21 +935,21 @@ class XRay(loader.Module):
         if download:
             for name, speed, elapsed, size in download:
                 dl_lines.append(
-                    f"  {name}: <code>{self._format_speed(speed)}</code>"
-                    f" ({self._format_bytes(size)} in {elapsed:.1f}s)"
+                    f"{name}: <code>{self._format_speed(speed)}</code>"
+                    f"\n{self._format_bytes(size)} in {elapsed:.1f}s"
                 )
         else:
-            dl_lines.append("  n/a (curl/wget not available or timed out)")
+            dl_lines.append("n/a")
 
         ul_lines = []
         if upload:
             for name, speed, elapsed, size in upload:
                 ul_lines.append(
-                    f"  {name}: <code>{self._format_speed(speed)}</code>"
-                    f" ({self._format_bytes(size)} in {elapsed:.1f}s)"
+                    f"{name}: <code>{self._format_speed(speed)}</code>"
+                    f"\n{self._format_bytes(size)} in {elapsed:.1f}s"
                 )
         else:
-            ul_lines.append("  n/a")
+            ul_lines.append("n/a")
 
         lat_lines = []
         if latency:
@@ -935,18 +957,18 @@ class XRay(loader.Module):
                 if len(item) == 5:
                     name, host, rtt_min, rtt_avg, rtt_max = item
                     lat_lines.append(
-                        f"  {name} ({host}): "
+                        f"{name} ({host}): "
                         f"<code>{rtt_avg:.1f}ms</code>"
                         f" (min {rtt_min:.1f} / max {rtt_max:.1f})"
                     )
                 elif len(item) == 6:
                     name, host, _, _, _, loss = item
                     lat_lines.append(
-                        f"  {name} ({host}): "
+                        f"{name} ({host}): "
                         f"<code>{loss}% loss</code>"
                     )
         else:
-            lat_lines.append("  n/a (ping not available)")
+            lat_lines.append("n/a")
 
         return "\n".join(dl_lines), "\n".join(ul_lines), "\n".join(lat_lines)
 
@@ -1567,7 +1589,7 @@ class XRay(loader.Module):
             logger.error("[XR] aiogram_watcher error: %s", e)
 
     @loader.command(
-        ru_doc="- инструкция к модулю XRay ",
+        ru_doc="- инструкция к модулю XRay",
         en_doc="- instruction for XRay module",
     )
     async def xr(self, message):
