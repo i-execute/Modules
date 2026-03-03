@@ -1,4 +1,4 @@
-__version__ = (3, 3, 1)
+__version__ = (3, 4, 0)
 # meta developer: FireJester.t.me
 
 import os
@@ -93,7 +93,7 @@ class XRay(loader.Module):
             "<b>PID:</b> <code>{pid}</code>\n"
             "<b>Uptime:</b> <code>{uptime}</code>"
             "</blockquote>\n\n"
-            "<b>Traffic:</b>\n"
+            "<b>Traffic (since start):</b>\n"
             "<blockquote>"
             "RX: <code>{rx}</code>\n"
             "TX: <code>{tx}</code>\n"
@@ -138,15 +138,16 @@ class XRay(loader.Module):
         "ip_fail": "<b>IP not detected</b>\n<code>.xr ip [address]</code>",
         "ip_invalid": "<b>Invalid IP address</b>",
 
-        "user_added": "<b>Added:</b> <code>{uid}</code>",
-        "user_removed": "<b>Removed:</b> <code>{uid}</code>",
-        "user_not_found": "<b>Not found</b>",
-        "user_need_reply": "<b>Reply to a message to add/remove user</b>",
+        "user_added": "<blockquote><b>Added:</b> <code>{uid}</code></blockquote>",
+        "user_removed": "<blockquote><b>Removed:</b> <code>{uid}</code></blockquote>",
+        "user_not_found": "<blockquote><b>Not found</b></blockquote>",
+        "user_need_reply": "<blockquote><b>Reply to a message to add/remove user</b></blockquote>",
         "users_list": "<b>Trusted users:</b>\n\n<blockquote>{users}</blockquote>",
         "users_empty": "<b>No trusted users</b>",
 
         "log_empty": "<b>Log empty</b>",
-        "log_title": "<b>XRay log:</b>\n\n",
+        "log_title": "<b>XRay log:</b>\n\n<blockquote>",
+        "log_suffix": "</blockquote>",
 
         "need_setup": "<b>Setup first!</b>\n<code>.xr setup</code>",
         "no_config": (
@@ -196,7 +197,8 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
 
-        "diagnose_title": "<b>Diagnostics</b>\n\n",
+        "diagnose_title": "<b>Diagnostics</b>\n\n<blockquote>",
+        "diagnose_suffix": "</blockquote>",
 
         "bot_link_response": (
             "<b>Your VLESS link:</b>\n\n"
@@ -206,7 +208,6 @@ class XRay(loader.Module):
         ),
         "bot_not_configured": "<b>Proxy not configured yet</b>",
 
-        "checkout_title": "<b>IPs connected (last 24h):</b>\n\n",
         "checkout_empty": "<b>No connections in last 24h</b>",
 
         "ping_progress": "<b>Running speed test...</b>",
@@ -233,6 +234,9 @@ class XRay(loader.Module):
         self._log_reader_task = None
         self._log_fd = None
         self._proxy_lock = asyncio.Lock()
+        self._traffic_rx = 0
+        self._traffic_tx = 0
+        self._traffic_task = None
 
     async def client_ready(self, client, db):
         self._client = client
@@ -274,6 +278,14 @@ class XRay(loader.Module):
         await self._full_cleanup()
 
     async def _full_cleanup(self):
+        if self._traffic_task:
+            self._traffic_task.cancel()
+            try:
+                await self._traffic_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._traffic_task = None
+
         if self._log_reader_task:
             self._log_reader_task.cancel()
             try:
@@ -593,67 +605,69 @@ class XRay(loader.Module):
             return f"{bps / (1024 * 1024):.1f} MB/s"
         return f"{bps / (1024 * 1024 * 1024):.2f} GB/s"
 
-    def _get_traffic_stats(self):
-        rx = 0
-        tx = 0
-        acc_log = os.path.join(self._root, "access.log")
-        if not os.path.exists(acc_log):
-            return rx, tx
-
+    def _get_net_iface_bytes(self):
         try:
-            with open(acc_log, "r") as f:
-                for line in f:
-                    m = re.search(
-                        r"(\d+)\s*bytes\s*received.*?(\d+)\s*bytes\s*sent",
-                        line, re.IGNORECASE
-                    )
-                    if m:
-                        rx += int(m.group(1))
-                        tx += int(m.group(2))
-                        continue
-
-                    m = re.search(
-                        r"(\d+)\s*bytes.*?(\d+)\s*bytes",
-                        line, re.IGNORECASE
-                    )
-                    if m:
-                        rx += int(m.group(1))
-                        tx += int(m.group(2))
+            with open("/proc/net/dev", "r") as f:
+                lines = f.readlines()
+            total_rx = 0
+            total_tx = 0
+            for line in lines[2:]:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                iface = parts[0].rstrip(":")
+                if iface == "lo":
+                    continue
+                total_rx += int(parts[1])
+                total_tx += int(parts[9])
+            return total_rx, total_tx
         except Exception:
-            pass
+            return 0, 0
 
-        if rx == 0 and tx == 0:
+    def _start_traffic_monitor(self):
+        self._traffic_rx = 0
+        self._traffic_tx = 0
+        initial_rx, initial_tx = self._get_net_iface_bytes()
+        self._traffic_base_rx = initial_rx
+        self._traffic_base_tx = initial_tx
+
+        async def monitor():
             try:
-                port = self._db.get("XR", "port", 8443)
-                p = subprocess.run(
-                    ["ss", "-tn", f"sport = :{port}"],
-                    capture_output=True, text=True, timeout=5
-                )
-                if p.returncode == 0:
-                    for line in p.stdout.split("\n")[1:]:
-                        parts = line.split()
-                        if len(parts) >= 3:
-                            try:
-                                rx += int(parts[1])
-                                tx += int(parts[2])
-                            except ValueError:
-                                pass
-            except Exception:
+                while self._proxy_running():
+                    cur_rx, cur_tx = self._get_net_iface_bytes()
+                    self._traffic_rx = cur_rx - self._traffic_base_rx
+                    self._traffic_tx = cur_tx - self._traffic_base_tx
+                    if self._traffic_rx < 0:
+                        self._traffic_rx = 0
+                    if self._traffic_tx < 0:
+                        self._traffic_tx = 0
+                    await asyncio.sleep(3)
+            except asyncio.CancelledError:
                 pass
 
-        return rx, tx
+        if self._traffic_task:
+            self._traffic_task.cancel()
+        self._traffic_task = asyncio.ensure_future(monitor())
 
     def _get_active_connections(self):
         port = self._db.get("XR", "port", 8443)
         active = 0
         try:
             p = subprocess.run(
-                ["ss", "-tn", f"sport = :{port}"],
+                ["ss", "-tn", "state", "established", f"sport = :{port}"],
                 capture_output=True, text=True, timeout=5
             )
             if p.returncode == 0:
                 lines = p.stdout.strip().split("\n")
-                active = max(0, len(lines) - 1)
+                for line in lines[1:]:
+                    line = line.strip()
+                    if line:
+                        parts = line.split()
+                        if len(parts) >= 5:
+                            peer = parts[4]
+                            if "127.0.0.1" not in peer and "[::1]" not in peer:
+                                active += 1
         except Exception:
             try:
                 p = subprocess.run(
@@ -663,7 +677,8 @@ class XRay(loader.Module):
                 if p.returncode == 0:
                     for line in p.stdout.split("\n"):
                         if f":{port}" in line and "ESTABLISHED" in line:
-                            active += 1
+                            if "127.0.0.1" not in line:
+                                active += 1
             except Exception:
                 pass
         return active
@@ -742,7 +757,6 @@ class XRay(loader.Module):
                 if p.returncode == 0 and out:
                     parts = out.decode().strip().split()
                     if len(parts) >= 3:
-                        speed = float(parts[0])
                         elapsed = float(parts[1])
                         size = int(float(parts[2]))
 
@@ -834,7 +848,6 @@ class XRay(loader.Module):
                     if p.returncode == 0 and out:
                         parts = out.decode().strip().split()
                         if len(parts) >= 3:
-                            speed = float(parts[0])
                             elapsed = float(parts[1])
                             size = int(float(parts[2]))
 
@@ -1184,6 +1197,7 @@ class XRay(loader.Module):
 
                 self._db.set("XR", "proxy_autostart", True)
                 self._start_log_reader(log_path)
+                self._start_traffic_monitor()
 
                 await asyncio.sleep(1)
                 port = self._db.get("XR", "port", 8443)
@@ -1203,6 +1217,14 @@ class XRay(loader.Module):
 
     async def _do_stop_proxy(self):
         async with self._proxy_lock:
+            if self._traffic_task:
+                self._traffic_task.cancel()
+                try:
+                    await self._traffic_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                self._traffic_task = None
+
             if self._log_reader_task:
                 self._log_reader_task.cancel()
                 try:
@@ -1494,10 +1516,12 @@ class XRay(loader.Module):
     async def _txt_status(self):
         if self._proxy_running():
             port = self._db.get("XR", "port", 8443)
-            rx, tx = self._get_traffic_stats()
             active = self._get_active_connections()
             unique_ips = self._get_unique_ips_24h()
             trusted = self._db.get("XR", "trusted_users", [])
+
+            rx = max(0, self._traffic_rx)
+            tx = max(0, self._traffic_tx)
 
             return self.strings["status_on"].format(
                 pid=self._proc.pid,
@@ -1523,6 +1547,7 @@ class XRay(loader.Module):
         return (
             self.strings["log_title"]
             + "<code>" + _escape(c) + "</code>"
+            + self.strings["log_suffix"]
         )
 
     async def _txt_debug(self):
@@ -1589,7 +1614,7 @@ class XRay(loader.Module):
             logger.error("[XR] aiogram_watcher error: %s", e)
 
     @loader.command(
-        ru_doc="- инструкция к модулю XRay",
+        ru_doc="- instruction for XRay module",
         en_doc="- instruction for XRay module",
     )
     async def xr(self, message):
@@ -1894,9 +1919,16 @@ class XRay(loader.Module):
 
     async def _u_log(self, msg, parts):
         if len(parts) >= 2 and parts[1].lower() == "full":
-            files_sent = await self._send_log_files(msg.chat_id)
+            chat_id = msg.chat_id
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            files_sent = await self._send_log_files(chat_id)
             if not files_sent:
-                await utils.answer(msg, self.strings["log_empty"])
+                await self._client.send_message(
+                    chat_id, self.strings["log_empty"], parse_mode="html"
+                )
             return
         await utils.answer(msg, self._txt_log())
 
@@ -1907,13 +1939,24 @@ class XRay(loader.Module):
         m = await utils.answer(msg, "<b>Diagnosing...</b>")
         r = await self._run_diagnose()
         await self._safe_edit(
-            m, self.strings["diagnose_title"] + "\n".join(r)
+            m,
+            self.strings["diagnose_title"]
+            + "\n".join(r)
+            + self.strings["diagnose_suffix"]
         )
 
     async def _u_checkout(self, msg, parts):
         ips = self._get_unique_ips_24h()
+        chat_id = msg.chat_id
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+
         if not ips:
-            await utils.answer(msg, self.strings["checkout_empty"])
+            await self._client.send_message(
+                chat_id, self.strings["checkout_empty"], parse_mode="html"
+            )
             return
 
         content = f"XRay connected IPs (last 24h)\n"
@@ -1928,11 +1971,12 @@ class XRay(loader.Module):
         try:
             with open(file_path, "w") as f:
                 f.write(content)
-            await self._client.send_file(msg.chat_id, file_path)
+            await self._client.send_file(chat_id, file_path)
         except Exception as e:
-            await utils.answer(
-                msg,
-                f"<b>Error:</b> <code>{_escape(str(e)[:200])}</code>"
+            await self._client.send_message(
+                chat_id,
+                f"<b>Error:</b> <code>{_escape(str(e)[:200])}</code>",
+                parse_mode="html",
             )
         finally:
             try:
