@@ -1,4 +1,4 @@
-__version__ = (1, 2, 0)
+__version__ = (1, 3, 0)
 # meta developer: FireJester.t.me
 
 import logging
@@ -75,6 +75,12 @@ def get_full_name(entity):
     first = getattr(entity, "first_name", "") or ""
     last = getattr(entity, "last_name", "") or ""
     return f"{first} {last}".strip() or "Unknown"
+
+
+class AccountFloodError(Exception):
+    def __init__(self, seconds):
+        self.seconds = seconds
+        super().__init__(f"Account flood wait {seconds}s")
 
 
 @loader.tds
@@ -178,6 +184,7 @@ class Manager(loader.Module):
         self._sessions_runtime = []
         self._status_msg = None
         self._processing_lock = asyncio.Lock()
+        self._flood_until = {}
 
     def _get_timezone_str(self, offset):
         if offset >= 0:
@@ -190,6 +197,12 @@ class Manager(loader.Module):
         now = datetime.now(tz)
         resume = now + timedelta(seconds=wait_seconds)
         return resume.strftime("%H:%M:%S")
+
+    def _get_time_str_from_timestamp(self, ts):
+        offset = self.config["timezone_offset"]
+        tz = timezone(timedelta(hours=offset))
+        dt = datetime.fromtimestamp(ts, tz=tz)
+        return dt.strftime("%H:%M:%S")
 
     async def client_ready(self, client, db):
         self._client = client
@@ -206,7 +219,6 @@ class Manager(loader.Module):
         self._clients.clear()
         self._sessions_runtime.clear()
 
-
     def _get_api_credentials(self):
         api_id = self.config["api_id"]
         api_hash = self.config["api_hash"]
@@ -218,28 +230,53 @@ class Manager(loader.Module):
         if not client.is_connected():
             await client.connect()
 
-    async def _handle_flood(self, e, context=""):
-        wait_time = e.seconds + FLOOD_EXTRA_WAIT
-        resume_time = self._get_resume_time_str(wait_time)
+    def _mark_flood(self, client, seconds):
+        resume_at = time.time() + seconds + FLOOD_EXTRA_WAIT
+        self._flood_until[id(client)] = resume_at
         logger.warning(
-            f"[MANAGER] FloodWait {context}: resuming at {resume_time}"
+            f"[MANAGER] Client {id(client)} flood until "
+            f"{self._get_time_str_from_timestamp(resume_at)}"
         )
-        if self._status_msg:
-            try:
-                await utils.answer(
-                    self._status_msg,
-                    self.strings["processing_flood"].format(
-                        resume_time=resume_time
-                    ),
-                )
-            except Exception:
-                pass
-        await asyncio.sleep(wait_time)
-        if self._status_msg:
+
+    def _is_flooded(self, client):
+        deadline = self._flood_until.get(id(client))
+        if deadline is None:
+            return False
+        if time.time() >= deadline:
+            del self._flood_until[id(client)]
+            return False
+        return True
+
+    def _get_flood_remaining(self, client):
+        deadline = self._flood_until.get(id(client))
+        if deadline is None:
+            return 0
+        remaining = deadline - time.time()
+        return max(0, remaining)
+
+    async def _update_flood_status(self):
+        if not self._status_msg:
+            return
+        flooded = {
+            cid: deadline
+            for cid, deadline in self._flood_until.items()
+            if time.time() < deadline
+        }
+        if not flooded:
             try:
                 await utils.answer(self._status_msg, self.strings["processing"])
             except Exception:
                 pass
+            return
+        min_deadline = min(flooded.values())
+        resume_time = self._get_time_str_from_timestamp(min_deadline)
+        try:
+            await utils.answer(
+                self._status_msg,
+                self.strings["processing_flood"].format(resume_time=resume_time),
+            )
+        except Exception:
+            pass
 
     async def _safe_request(self, client, request, context="", max_retries=3):
         for attempt in range(max_retries):
@@ -247,7 +284,8 @@ class Manager(loader.Module):
                 await self._ensure_connected(client)
                 return await client(request)
             except FloodWaitError as e:
-                await self._handle_flood(e, context=context)
+                self._mark_flood(client, e.seconds)
+                raise AccountFloodError(e.seconds)
             except (ConnectionError, OSError) as e:
                 logger.warning(
                     f"[MANAGER] Connection error in {context} "
@@ -261,7 +299,6 @@ class Manager(loader.Module):
             except Exception:
                 raise
         raise Exception(f"Max retries exceeded for {context}")
-
 
     async def _connect_session(self, session_str):
         api_id, api_hash = self._get_api_credentials()
@@ -429,7 +466,6 @@ class Manager(loader.Module):
         return None
 
     def _clone_filter(self, folder, **overrides):
-        """Clone a DialogFilter preserving ALL original settings."""
         fields = {
             "id": folder.id,
             "title": folder.title,
@@ -619,14 +655,11 @@ class Manager(loader.Module):
             await self._ensure_connected(client)
             await client.edit_folder(peer, 1)
             return True
+        except AccountFloodError:
+            raise
         except FloodWaitError as e:
-            await self._handle_flood(e, context="MuteAndArchive_editFolder")
-            try:
-                await self._ensure_connected(client)
-                await client.edit_folder(peer, 1)
-                return True
-            except Exception:
-                return False
+            self._mark_flood(client, e.seconds)
+            raise AccountFloodError(e.seconds)
         except (ConnectionError, OSError) as e:
             logger.warning(f"[MANAGER] Connection lost in mute_and_archive: {e}")
             await asyncio.sleep(2)
@@ -634,6 +667,9 @@ class Manager(loader.Module):
                 await self._ensure_connected(client)
                 await client.edit_folder(peer, 1)
                 return True
+            except FloodWaitError as e2:
+                self._mark_flood(client, e2.seconds)
+                raise AccountFloodError(e2.seconds)
             except Exception:
                 return False
         except Exception as e:
@@ -664,9 +700,13 @@ class Manager(loader.Module):
                         archived.append(f"{name} (ID: {eid})")
                     else:
                         errors.append(f"Archive {eid}: returned False")
+                except AccountFloodError:
+                    raise
                 except Exception as e:
                     errors.append(f"Archive {eid}: {e}")
                 await asyncio.sleep(0.3)
+        except AccountFloodError:
+            raise
         except Exception as e:
             errors.append(f"Archive iteration: {e}")
         return archived, errors
@@ -689,6 +729,8 @@ class Manager(loader.Module):
                     ToggleDialogPinRequest(peer=inp, pinned=True),
                     context=f"PinDialog_{uid}",
                 )
+            except AccountFloodError:
+                raise
             except Exception as e:
                 errors.append(f"Pin {uid}: {e}")
             await asyncio.sleep(0.3)
@@ -710,10 +752,11 @@ class Manager(loader.Module):
                     ),
                     context="ReorderPinnedDialogs",
                 )
+        except AccountFloodError:
+            raise
         except Exception as e:
             errors.append(f"Reorder pins: {e}")
         return errors
-
 
     async def _get_all_stories(self, client, func, **kwargs):
         stories = []
@@ -800,6 +843,8 @@ class Manager(loader.Module):
                             )
                             deleted_stories_count += 1
                             await asyncio.sleep(0.3)
+                        except AccountFloodError:
+                            raise
                         except Exception as e:
                             errors.append(
                                 f"Delete story {s.id} from album "
@@ -817,12 +862,18 @@ class Manager(loader.Module):
                         deleted_albums.append(
                             f"{album.title} ({len(album_stories)} stories)"
                         )
+                    except AccountFloodError:
+                        raise
                     except Exception as e:
                         errors.append(f"Delete album '{album.title}': {e}")
+                except AccountFloodError:
+                    raise
                 except Exception as e:
                     errors.append(
                         f"Process album '{getattr(album, 'title', '?')}': {e}"
                     )
+        except AccountFloodError:
+            raise
         except Exception as e:
             errors.append(f"Get albums: {e}")
 
@@ -841,8 +892,12 @@ class Manager(loader.Module):
                     )
                     deleted_stories_count += 1
                     await asyncio.sleep(0.3)
+                except AccountFloodError:
+                    raise
                 except Exception as e:
                     errors.append(f"Delete active story {s.id}: {e}")
+        except AccountFloodError:
+            raise
         except Exception as e:
             errors.append(f"Get active stories: {e}")
 
@@ -861,13 +916,16 @@ class Manager(loader.Module):
                     )
                     deleted_stories_count += 1
                     await asyncio.sleep(0.3)
+                except AccountFloodError:
+                    raise
                 except Exception as e:
                     errors.append(f"Delete archive story {s.id}: {e}")
+        except AccountFloodError:
+            raise
         except Exception as e:
             errors.append(f"Get archive stories: {e}")
 
         return deleted_albums, deleted_stories_count, errors
-
 
     async def _delete_all_profile_photos(self, client, me):
         deleted_count = 0
@@ -902,6 +960,8 @@ class Manager(loader.Module):
                     )
                     batch_deleted = len(input_photos)
                     deleted_count += batch_deleted
+                except AccountFloodError:
+                    raise
                 except Exception as e:
                     errors.append(f"Batch delete photos: {e}")
                     for inp in input_photos:
@@ -913,6 +973,8 @@ class Manager(loader.Module):
                             )
                             deleted_count += 1
                             batch_deleted += 1
+                        except AccountFloodError:
+                            raise
                         except Exception as e2:
                             errors.append(f"Delete photo {inp.id}: {e2}")
                         await asyncio.sleep(0.2)
@@ -921,10 +983,11 @@ class Manager(loader.Module):
                 if len(result.photos) < 100:
                     break
                 await asyncio.sleep(0.3)
+        except AccountFloodError:
+            raise
         except Exception as e:
             errors.append(f"Get photos: {e}")
         return deleted_count, errors
-
 
     async def _set_avatar(self, client, url):
         try:
@@ -945,6 +1008,8 @@ class Manager(loader.Module):
                 context="UploadProfilePhoto",
             )
             return True, None
+        except AccountFloodError:
+            raise
         except Exception as e:
             logger.error(f"[MANAGER] Set avatar error: {e}")
             return False, str(e)
@@ -971,6 +1036,8 @@ class Manager(loader.Module):
                 if pid:
                     joined_peers.append(pid)
             return True, None, joined_peers
+        except AccountFloodError:
+            raise
         except Exception as e:
             if "already" in str(e).lower():
                 try:
@@ -980,6 +1047,8 @@ class Manager(loader.Module):
                         context="JoinChatlistInvite_refresh",
                     )
                     return True, "Already joined, refreshed", []
+                except AccountFloodError:
+                    raise
                 except Exception as e2:
                     return False, str(e2), []
             return False, str(e), []
@@ -1004,6 +1073,11 @@ class Manager(loader.Module):
                 )
                 muted.append(f"{name} (ID: {pid})")
                 await asyncio.sleep(0.3)
+            except AccountFloodError:
+                raise
+            except FloodWaitError as e:
+                self._mark_flood(client, e.seconds)
+                raise AccountFloodError(e.seconds)
             except Exception as e:
                 errors.append(f"Mute folder chat {pid}: {e}")
         return muted, errors
@@ -1147,6 +1221,8 @@ class Manager(loader.Module):
                         context=f"DeleteHistory_{uid}",
                     )
                     deleted_pm.append(f"{get_full_name(ent)} (ID: {uid})")
+                except AccountFloodError:
+                    raise
                 except Exception as e:
                     s6_err.append(f"Delete history {uid}: {e}")
                 try:
@@ -1154,9 +1230,13 @@ class Manager(loader.Module):
                         client, BlockRequest(id=ent), context=f"Block_{uid}"
                     )
                     blocked.append(f"{get_full_name(ent)} (ID: {uid})")
+                except AccountFloodError:
+                    raise
                 except Exception as e:
                     s6_err.append(f"Block {uid}: {e}")
                 await asyncio.sleep(0.3)
+        except AccountFloodError:
+            raise
         except Exception as e:
             s6_err.append(f"Dialog iteration: {e}")
 
@@ -1172,7 +1252,6 @@ class Manager(loader.Module):
             detailed.append("\n--- Step 6 Errors ---")
             for e in s6_err:
                 detailed.append(f"  {e}")
-
 
         left = []
         s7_err = []
@@ -1219,9 +1298,13 @@ class Manager(loader.Module):
                             s7_err.append(f"Creator of {ent.title} ({eid})")
                         except ChatIdInvalidError:
                             s7_err.append(f"Invalid chat ID: {ent.title} ({eid})")
+                except AccountFloodError:
+                    raise
                 except Exception as e:
                     s7_err.append(f"Leave {eid}: {e}")
                 await asyncio.sleep(0.3)
+        except AccountFloodError:
+            raise
         except Exception as e:
             s7_err.append(f"Leave iteration: {e}")
 
@@ -1249,6 +1332,8 @@ class Manager(loader.Module):
                     )
                     for cu in cr.users:
                         del_contacts.append(f"{get_full_name(cu)} (ID: {cu.id})")
+                except AccountFloodError:
+                    raise
                 except Exception as e:
                     s8_err.append(f"Batch delete contacts: {e}")
                     for cu in cr.users:
@@ -1261,9 +1346,13 @@ class Manager(loader.Module):
                             del_contacts.append(
                                 f"{get_full_name(cu)} (ID: {cu.id})"
                             )
+                        except AccountFloodError:
+                            raise
                         except Exception as e2:
                             s8_err.append(f"Delete contact {cu.id}: {e2}")
                         await asyncio.sleep(0.2)
+        except AccountFloodError:
+            raise
         except Exception as e:
             s8_err.append(f"Get contacts: {e}")
 
@@ -1532,27 +1621,120 @@ class Manager(loader.Module):
         async with self._processing_lock:
             status = await utils.answer(message, self.strings["processing"])
             self._status_msg = status[0] if isinstance(status, list) else status
+            self._flood_until.clear()
+
+            all_results = {}
+            pending = {}
+
+            for i, (sdata, client) in enumerate(
+                zip(self._sessions_runtime, self._clients)
+            ):
+                pending[i] = {
+                    "sdata": sdata,
+                    "client": client,
+                    "summary": [],
+                    "detailed": [],
+                    "done": False,
+                    "error": None,
+                }
+
+            while True:
+                ran_any = False
+                all_flooded_now = True
+
+                for i, info in pending.items():
+                    if info["done"]:
+                        continue
+
+                    client = info["client"]
+
+                    if self._is_flooded(client):
+                        continue
+
+                    all_flooded_now = False
+                    ran_any = True
+
+                    try:
+                        await self._ensure_connected(client)
+                        me = await client.get_me()
+                        name = get_full_name(me)
+                        s, d = await self._process_account(client, me)
+                        info["summary"] = [f"\n=== [{i + 1}] {name} (ID: {me.id}) ==="] + s
+                        info["detailed"] = [f"\n{'=' * 50}"] + d
+                        info["done"] = True
+                    except AccountFloodError:
+                        logger.info(
+                            f"[MANAGER] Account [{i + 1}] {info['sdata']['name']} "
+                            f"got flood, switching to next"
+                        )
+                        await self._update_flood_status()
+                    except Exception as e:
+                        info["summary"] = [
+                            f"\n=== [{i + 1}] {info['sdata']['name']} ===",
+                            f"FATAL ERROR: {e}",
+                        ]
+                        info["detailed"] = [
+                            f"\n=== [{i + 1}] {info['sdata']['name']} ===",
+                            f"FATAL ERROR: {e}",
+                        ]
+                        info["done"] = True
+                        info["error"] = str(e)
+                        logger.error(
+                            f"[MANAGER] Process account [{i + 1}] error: {e}"
+                        )
+
+                if all(info["done"] for info in pending.values()):
+                    break
+
+                not_done = [
+                    i for i, info in pending.items() if not info["done"]
+                ]
+
+                if not not_done:
+                    break
+
+                if not ran_any or all_flooded_now:
+                    flood_times = []
+                    for i in not_done:
+                        remaining = self._get_flood_remaining(pending[i]["client"])
+                        if remaining > 0:
+                            flood_times.append(remaining)
+
+                    if flood_times:
+                        wait_time = min(flood_times)
+                        resume_ts = time.time() + wait_time
+                        resume_time_str = self._get_time_str_from_timestamp(resume_ts)
+                        logger.info(
+                            f"[MANAGER] All accounts flooded, waiting {wait_time:.0f}s "
+                            f"until {resume_time_str}"
+                        )
+                        if self._status_msg:
+                            try:
+                                await utils.answer(
+                                    self._status_msg,
+                                    self.strings["processing_flood"].format(
+                                        resume_time=resume_time_str
+                                    ),
+                                )
+                            except Exception:
+                                pass
+                        await asyncio.sleep(wait_time)
+                        if self._status_msg:
+                            try:
+                                await utils.answer(
+                                    self._status_msg,
+                                    self.strings["processing"],
+                                )
+                            except Exception:
+                                pass
+                    else:
+                        await asyncio.sleep(1)
 
             all_summary = []
             all_detailed = []
-
-            snapshots = list(zip(self._sessions_runtime, self._clients))
-            for i, (sdata, client) in enumerate(snapshots, 1):
-                try:
-                    await self._ensure_connected(client)
-                    me = await client.get_me()
-                    name = get_full_name(me)
-                    all_summary.append(f"\n=== [{i}] {name} (ID: {me.id}) ===")
-                    all_detailed.append(f"\n{'=' * 50}")
-                    s, d = await self._process_account(client, me)
-                    all_summary.extend(s)
-                    all_detailed.extend(d)
-                except Exception as e:
-                    all_summary.append(f"\n=== [{i}] {sdata['name']} ===")
-                    all_summary.append(f"FATAL ERROR: {e}")
-                    all_detailed.append(f"\n=== [{i}] {sdata['name']} ===")
-                    all_detailed.append(f"FATAL ERROR: {e}")
-                    logger.error(f"[MANAGER] Process account [{i}] error: {e}")
+            for i in sorted(pending.keys()):
+                all_summary.extend(pending[i]["summary"])
+                all_detailed.extend(pending[i]["detailed"])
 
             ts = time.strftime("%Y-%m-%d %H:%M:%S")
             cnt = len(self._sessions_runtime)
@@ -1614,3 +1796,4 @@ class Manager(loader.Module):
                 self._sessions_runtime.pop(i)
                 self._clients.pop(i)
             self._save_sessions()
+            self._flood_until.clear()
