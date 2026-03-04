@@ -1,4 +1,4 @@
-__version__ = (1, 1, 0)
+__version__ = (1, 2, 0)
 # meta developer: FireJester.t.me
 
 import logging
@@ -7,6 +7,8 @@ import re
 import time
 import io
 import aiohttp
+
+from datetime import datetime, timezone, timedelta
 
 from telethon import TelegramClient, functions, types
 from telethon.sessions import StringSession
@@ -63,7 +65,7 @@ STRING_SESSION_PATTERN = re.compile(r"(?<!\w)1[A-Za-z0-9_-]{200,}={0,2}(?!\w)")
 MAX_SESSIONS = 10
 TELEGRAM_ID = 777000
 SPAMBOT_USERNAME = "SpamBot"
-FLOOD_EXTRA_WAIT = 10
+FLOOD_EXTRA_WAIT = 600
 MAX_PHOTO_ITERATIONS = 20
 
 
@@ -90,6 +92,7 @@ class Manager(loader.Module):
             "<code>.manage remove [number]</code> - remove session by number\n"
             "<code>.manage folder [link]</code> - set folder link\n"
             "<code>.manage ava [url]</code> - set avatar image url\n"
+            "<code>.manage set [offset]</code> - set timezone (from -12 to 12)\n"
             "<code>.manage start</code> - start cleanup process\n"
         ),
         "session_added": (
@@ -115,7 +118,7 @@ class Manager(loader.Module):
         "session_removed": "<b>Session #{num} removed</b>",
         "session_remove_invalid": "<b>Error:</b> Invalid session number",
         "processing": "<b>Processing... Please wait</b>",
-        "processing_flood": "<b>Processing... FloodWait {minutes}m {seconds}s</b>",
+        "processing_flood": "<b>Processing... FloodWait: resuming at {resume_time}</b>",
         "already_processing": "<b>Error:</b> Already processing, please wait",
         "success": "<b>Cleanup completed successfully</b>",
         "error_no_sessions": "<b>Error:</b> No sessions to process",
@@ -128,6 +131,8 @@ class Manager(loader.Module):
         "ava_set": "<b>Avatar URL saved:</b>\n<code>{url}</code>",
         "ava_cleared": "<b>Avatar URL cleared</b>",
         "ava_provide": "<b>Error:</b> Provide image URL",
+        "timezone_set": "<b>Timezone set:</b> UTC{timezone_str}",
+        "timezone_invalid": "<b>Error:</b> Invalid timezone. Use a number from -12 to 12",
     }
 
     def __init__(self):
@@ -162,11 +167,29 @@ class Manager(loader.Module):
                 "Avatar image URL",
                 validator=loader.validators.Hidden(loader.validators.String()),
             ),
+            loader.ConfigValue(
+                "timezone_offset",
+                3,
+                "Timezone offset from UTC (from -12 to 12)",
+                validator=loader.validators.Integer(minimum=-12, maximum=12),
+            ),
         )
         self._clients = []
         self._sessions_runtime = []
         self._status_msg = None
         self._processing_lock = asyncio.Lock()
+
+    def _get_timezone_str(self, offset):
+        if offset >= 0:
+            return f"+{offset}"
+        return str(offset)
+
+    def _get_resume_time_str(self, wait_seconds):
+        offset = self.config["timezone_offset"]
+        tz = timezone(timedelta(hours=offset))
+        now = datetime.now(tz)
+        resume = now + timedelta(seconds=wait_seconds)
+        return resume.strftime("%H:%M:%S")
 
     async def client_ready(self, client, db):
         self._client = client
@@ -197,17 +220,16 @@ class Manager(loader.Module):
 
     async def _handle_flood(self, e, context=""):
         wait_time = e.seconds + FLOOD_EXTRA_WAIT
-        minutes = wait_time // 60
-        seconds = wait_time % 60
+        resume_time = self._get_resume_time_str(wait_time)
         logger.warning(
-            f"[MANAGER] FloodWait {context}: waiting {minutes}m {seconds}s"
+            f"[MANAGER] FloodWait {context}: resuming at {resume_time}"
         )
         if self._status_msg:
             try:
                 await utils.answer(
                     self._status_msg,
                     self.strings["processing_flood"].format(
-                        minutes=minutes, seconds=seconds
+                        resume_time=resume_time
                     ),
                 )
             except Exception:
@@ -1309,11 +1331,12 @@ class Manager(loader.Module):
             "remove": self._cmd_remove,
             "folder": self._cmd_folder,
             "ava": self._cmd_ava,
+            "set": self._cmd_set,
             "start": self._cmd_start,
         }
         handler = handlers.get(cmd)
         if handler:
-            if cmd in ("add", "remove", "folder", "ava"):
+            if cmd in ("add", "remove", "folder", "ava", "set"):
                 await handler(message, args_list)
             else:
                 await handler(message)
@@ -1474,6 +1497,26 @@ class Manager(loader.Module):
         await utils.answer(
             message, self.strings["ava_set"].format(url=args[1])
         )
+
+    async def _cmd_set(self, message: Message, args):
+        if len(args) < 2:
+            return await utils.answer(message, self.strings["timezone_invalid"])
+        try:
+            offset_str = args[1].replace("+", "")
+            offset = int(offset_str)
+            if not -12 <= offset <= 12:
+                return await utils.answer(
+                    message, self.strings["timezone_invalid"]
+                )
+            self.config["timezone_offset"] = offset
+            await utils.answer(
+                message,
+                self.strings["timezone_set"].format(
+                    timezone_str=self._get_timezone_str(offset)
+                ),
+            )
+        except (ValueError, IndexError):
+            await utils.answer(message, self.strings["timezone_invalid"])
 
     async def _cmd_start(self, message: Message):
         api_id, _ = self._get_api_credentials()
