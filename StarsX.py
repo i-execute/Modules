@@ -335,16 +335,6 @@ class StarsX(loader.Module):
         super().__init__()
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
-                "sessions_data", [],
-                "Stored user sessions (internal)",
-                validator=loader.validators.Hidden(loader.validators.Series()),
-            ),
-            loader.ConfigValue(
-                "bot_tokens_data", [],
-                "Stored bot tokens (internal)",
-                validator=loader.validators.Hidden(loader.validators.Series()),
-            ),
-            loader.ConfigValue(
                 "invoice_photo", "",
                 "Invoice photo URL",
                 validator=loader.validators.String(),
@@ -404,13 +394,11 @@ class StarsX(loader.Module):
         me = await client.get_me()
         self._owner_id = me.id
 
-        self._temp_dir = os.path.join(tempfile.gettempdir(), "starsx_module")
-        if os.path.exists(self._temp_dir):
-            shutil.rmtree(self._temp_dir)
+        self._temp_dir = os.path.join(tempfile.gettempdir(), f"StarsX_{self._owner_id}")
         os.makedirs(self._temp_dir, exist_ok=True)
 
         self._pending_gifts = self._db.get("StarsX", "pending_gifts", {})
-        await self._load_accounts_from_config()
+        await self._load_accounts_from_db()
 
         if hasattr(self, "inline") and hasattr(self.inline, "bot"):
             self.inline_bot = self.inline.bot
@@ -433,11 +421,11 @@ class StarsX(loader.Module):
             await self._unpatch_handlers()
             await self._setup_payment_handler()
 
-    async def _load_accounts_from_config(self):
+    async def _load_accounts_from_db(self):
         self._accounts = {}
         self._next_num = 1
 
-        for item in (self.config["sessions_data"] or []):
+        for item in (self._db.get("StarsX", "sessions_data", []) or []):
             if not isinstance(item, str):
                 continue
             try:
@@ -465,7 +453,7 @@ class StarsX(loader.Module):
             except Exception:
                 pass
 
-        for item in (self.config["bot_tokens_data"] or []):
+        for item in (self._db.get("StarsX", "bot_tokens_data", []) or []):
             if not isinstance(item, str):
                 continue
             try:
@@ -532,14 +520,14 @@ class StarsX(loader.Module):
             "username": username, "client": bot_client,
         }
 
-    def _save_accounts_to_config(self):
+    def _save_accounts_to_db(self):
         sessions, tokens = [], []
         for num in sorted(self._accounts.keys()):
             acc = self._accounts[num]
             entry = f"{acc['user_id']}|{acc['name']}|{acc.get('username') or 'None'}|{acc['credential']}"
             (sessions if acc["type"] == "user" else tokens).append(entry)
-        self.config["sessions_data"] = sessions
-        self.config["bot_tokens_data"] = tokens
+        self._db.set("StarsX", "sessions_data", sessions)
+        self._db.set("StarsX", "bot_tokens_data", tokens)
 
     def _save_pending_gifts(self):
         self._db.set("StarsX", "pending_gifts", self._pending_gifts)
@@ -561,7 +549,7 @@ class StarsX(loader.Module):
                 self._aiogram_bots[new_num] = old_aiogram[old_num]
             new_num += 1
         self._next_num = new_num
-        self._save_accounts_to_config()
+        self._save_accounts_to_db()
 
     async def _setup_payment_handler(self):
         try:
@@ -958,15 +946,6 @@ class StarsX(loader.Module):
         except Exception:
             return None, None
 
-    def _get_aiogram_for_source(self, from_src):
-        if from_src == "bot":
-            return self._aiogram_bot
-        try:
-            num = int(from_src)
-            return self._aiogram_bots.get(num)
-        except ValueError:
-            return None
-
     @loader.command(
         ru_doc="- show gift sticker or list gifts",
         en_doc="- show gift sticker or list gifts",
@@ -1122,7 +1101,6 @@ class StarsX(loader.Module):
             price = "?"
             if hasattr(form, 'invoice') and form.invoice and form.invoice.prices:
                 price = form.invoice.prices[0].amount
-
             await self._client.send_message(
                 message.chat_id,
                 f"<blockquote>{self.strings['show_hidden_gift_info'].format(id=gift_val, stars=price)}</blockquote>",
@@ -1179,11 +1157,11 @@ class StarsX(loader.Module):
         await utils.answer(status_msg, self.strings["show_collections_header"].format(count=len(self._collections_cache)))
 
         total = len(lines)
-        chunks = (total + CHUNK_SIZE_COLLECTIONS - 1) // CHUNK_SIZE_COLLECTIONS
+        chunks_count = (total + CHUNK_SIZE_COLLECTIONS - 1) // CHUNK_SIZE_COLLECTIONS
         for i in range(0, total, CHUNK_SIZE_COLLECTIONS):
             part = (i // CHUNK_SIZE_COLLECTIONS) + 1
             chunk = lines[i:i + CHUNK_SIZE_COLLECTIONS]
-            header = f"<b>Part {part}/{chunks}</b>\n\n" if chunks > 1 else ""
+            header = f"<b>Part {part}/{chunks_count}</b>\n\n" if chunks_count > 1 else ""
             await self._client.send_message(
                 message.chat_id,
                 f"<blockquote expandable>{header}{chr(10).join(chunk)}</blockquote>",
@@ -1390,11 +1368,11 @@ class StarsX(loader.Module):
                 lines.append(self.strings["show_get_item"].format(index=i + 1, id=gid))
 
         total = len(lines)
-        chunks = (total + CHUNK_SIZE_LIST - 1) // CHUNK_SIZE_LIST
+        chunks_count = (total + CHUNK_SIZE_LIST - 1) // CHUNK_SIZE_LIST
         for i in range(0, total, CHUNK_SIZE_LIST):
             part = (i // CHUNK_SIZE_LIST) + 1
             chunk = lines[i:i + CHUNK_SIZE_LIST]
-            header = self.strings["show_get_chunk"].format(current=part, total=chunks)
+            header = self.strings["show_get_chunk"].format(current=part, total=chunks_count)
             await self._client.send_message(
                 message.chat_id,
                 f"<blockquote expandable>{header}{chr(10).join(chunk)}</blockquote>",
@@ -1456,11 +1434,11 @@ class StarsX(loader.Module):
         await utils.answer(status_msg, self.strings["show_list_header"].format(count=len(gifts), source=source_name))
 
         total = len(lines)
-        chunks = (total + CHUNK_SIZE_LIST - 1) // CHUNK_SIZE_LIST
+        chunks_count = (total + CHUNK_SIZE_LIST - 1) // CHUNK_SIZE_LIST
         for i in range(0, total, CHUNK_SIZE_LIST):
             part = (i // CHUNK_SIZE_LIST) + 1
             chunk = lines[i:i + CHUNK_SIZE_LIST]
-            header = self.strings["show_list_chunk"].format(current=part, total=chunks)
+            header = self.strings["show_list_chunk"].format(current=part, total=chunks_count)
             await self._client.send_message(
                 message.chat_id,
                 f"<blockquote expandable>{header}{chr(10).join(chunk)}</blockquote>",
@@ -1826,7 +1804,7 @@ class StarsX(loader.Module):
                 num = self._next_num
                 self._next_num += 1
                 await self._start_bot_session(num, credential, user_id, name, username)
-                self._save_accounts_to_config()
+                self._save_accounts_to_db()
             else:
                 cl = TelegramClient(StringSession(credential), api_id=self._client.api_id,
                                     api_hash=self._client.api_hash)
@@ -1850,7 +1828,7 @@ class StarsX(loader.Module):
                     "type": "user", "credential": credential,
                     "user_id": user_id, "name": name, "username": username, "client": cl,
                 }
-                self._save_accounts_to_config()
+                self._save_accounts_to_db()
 
             await utils.answer(status_msg, self.strings["starsx_added"].format(
                 num=num, type="Bot" if cred_type == "bot" else "User",
@@ -1901,7 +1879,7 @@ class StarsX(loader.Module):
                 pass
         self._bot_clients, self._bot_tasks, self._accounts, self._aiogram_bots = {}, {}, {}, {}
         self._next_num = 1
-        self._save_accounts_to_config()
+        self._save_accounts_to_db()
         await utils.answer(message, self.strings["starsx_removed_all"])
 
     async def _starsx_list(self, message):
@@ -2046,9 +2024,8 @@ class StarsX(loader.Module):
                 await utils.answer(message, self.strings["link_not_enough_stars"].format(need=need, have=balance))
                 return
 
-        token = self._generate_gift_token(target.lower() if target.lower() == "all" else target, gift_id, count,
-                                           comment)
-        link = f"https://t.me/{self.inline_bot_username}?start=gift_{token}"
+        token = self._generate_gift_token(target.lower() if target.lower() == "all" else target, gift_id, count, comment)
+        link_url = f"https://t.me/{self.inline_bot_username}?start=gift_{token}"
         reply_id = await self._get_reply_id(message)
 
         try:
@@ -2069,7 +2046,7 @@ class StarsX(loader.Module):
 
         await self._client.send_message(
             message.chat_id,
-            f'<a href="{link}">{self.strings["link_gift_anchor"]}</a>',
+            f'<a href="{link_url}">{self.strings["link_gift_anchor"]}</a>',
             parse_mode="html", reply_to=reply_id,
         )
 
@@ -2091,31 +2068,27 @@ class StarsX(loader.Module):
                 self.config["invoice_res_w"], self.config["invoice_res_h"],
             )
             await utils.answer(message,
-                               self.strings["link_invoice_created"].format(num=num,
-                                                                           amount=amount) + f'\n\n<a href="{url}">Open</a>',
-                               )
+                self.strings["link_invoice_created"].format(num=num, amount=amount) + f'\n\n<a href="{url}">Open</a>',
+            )
         except Exception as e:
             await utils.answer(message, self.strings["link_error"].format(error=str(e)[:200]))
 
-    @loader.inline_handler(
-        ru_doc="[amount] - create invoice",
-        en_doc="[amount] - create invoice",
-    )
+    @loader.inline_handler(ru_doc="stars [amount] - create invoice")
     async def stars_inline_handler(self, query: InlineQuery):
         m = re.match(r'^stars\s*(\d+)$', query.query.strip().lower())
         if not m:
             return
-        stars = int(m.group(1))
-        if stars <= 0 or stars > 10000:
+        stars_amount = int(m.group(1))
+        if stars_amount <= 0 or stars_amount > 10000:
             return
 
         photo = self.config["invoice_photo"]
         params = {
-            "title": self._get_invoice_text(1, stars),
-            "description": self._get_invoice_text(2, stars),
-            "payload": f"inline_{stars}_{query.from_user.id}_{int(time.time())}",
+            "title": self._get_invoice_text(1, stars_amount),
+            "description": self._get_invoice_text(2, stars_amount),
+            "payload": f"inline_{stars_amount}_{query.from_user.id}_{int(time.time())}",
             "provider_token": "", "currency": "XTR",
-            "prices": [LabeledPrice(label=f"{stars} Stars", amount=stars)],
+            "prices": [LabeledPrice(label=f"{stars_amount} Stars", amount=stars_amount)],
         }
         if photo:
             params.update(photo_url=photo, photo_width=self.config["invoice_res_w"],
@@ -2125,8 +2098,8 @@ class StarsX(loader.Module):
             await self.inline_bot.answer_inline_query(
                 query.id,
                 [InlineQueryResultArticle(
-                    id=f"stars_{stars}_{int(time.time())}",
-                    title=self.strings["inline_title"].format(stars=stars),
+                    id=f"stars_{stars_amount}_{int(time.time())}",
+                    title=self.strings["inline_title"].format(stars=stars_amount),
                     description=self.strings["inline_description"],
                     input_message_content=InputInvoiceMessageContent(**params),
                     thumbnail_url=photo or None,
@@ -2154,9 +2127,9 @@ class StarsX(loader.Module):
                 param = parts[1]
                 if param.startswith("invoice_"):
                     try:
-                        stars = int(param.split("_")[1])
-                        if stars > 0:
-                            await self._send_inline_invoice(uid, stars)
+                        s = int(param.split("_")[1])
+                        if s > 0:
+                            await self._send_inline_invoice(uid, s)
                             return
                     except Exception:
                         pass
@@ -2164,9 +2137,11 @@ class StarsX(loader.Module):
                     token = param[5:]
                     valid, result = self._validate_gift_token(token, uid, message.from_user.username)
                     if not valid:
-                        msgs = {"expired": self.strings["bot_gift_expired"],
-                                "claimed": self.strings["bot_gift_already_claimed"],
-                                "not_for_you": self.strings["bot_gift_not_for_you"]}
+                        msgs = {
+                            "expired": self.strings["bot_gift_expired"],
+                            "claimed": self.strings["bot_gift_already_claimed"],
+                            "not_for_you": self.strings["bot_gift_not_for_you"],
+                        }
                         await message.answer(msgs.get(result, self.strings["bot_gift_error"].format(error=result)),
                                              parse_mode="HTML")
                         return
@@ -2242,9 +2217,6 @@ class StarsX(loader.Module):
                 pass
         self._bot_clients, self._bot_tasks, self._aiogram_bots = {}, {}, {}
         if self._temp_dir and os.path.exists(self._temp_dir):
-            try:
-                shutil.rmtree(self._temp_dir)
-            except Exception:
-                pass
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
         await self._unpatch_handlers()
         _MODULE_INSTANCE = None
