@@ -1,4 +1,4 @@
-__version__ = (3, 4, 0)
+__version__ = (3, 5, 0)
 # meta developer: FireJester.t.me
 
 import os
@@ -22,7 +22,9 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-MAX_LOG_CHUNK = 30 * 1024 * 1024
+LOG_MAX_SIZE = 30 * 1024 * 1024
+STATS_API_PORT = 10085
+STATS_API_TAG = "api"
 
 
 def _escape(text):
@@ -41,37 +43,37 @@ class XRay(loader.Module):
         "help": (
             "<b>XRay VLESS+Reality</b>\n\n"
             "<b>Setup:</b>\n"
-            "<code>.xr setup</code> -- install + generate keys + config\n"
-            "<code>.xr start</code> / <code>.xr stop</code> / <code>.xr restart</code>\n"
-            "<code>.xr status</code> -- status, traffic, connections\n\n"
+            "<code>{prefix}xr setup</code> - install + generate keys + config\n"
+            "<code>{prefix}xr start</code> / <code>{prefix}xr stop</code> / <code>{prefix}xr restart</code>\n"
+            "<code>{prefix}xr status</code> - status, traffic, connections\n\n"
             "<b>Settings:</b>\n"
-            "<code>.xr port [port]</code> -- port (default 8443)\n"
-            "<code>.xr dest [domain:port]</code> -- Reality dest\n"
-            "<code>.xr sni [domain]</code> -- SNI\n"
-            "<code>.xr ip [address]</code> -- external IP\n"
-            "<code>.xr keys</code> -- show all keys (PM only)\n"
-            "<code>.xr overwrite</code> -- new keys + uuid + restart\n\n"
+            "<code>{prefix}xr port [port]</code> - port (default 8443)\n"
+            "<code>{prefix}xr dest [domain:port]</code> - Reality dest\n"
+            "<code>{prefix}xr sni [domain]</code> - SNI\n"
+            "<code>{prefix}xr ip [address]</code> - external IP\n"
+            "<code>{prefix}xr keys</code> - show all keys (PM only)\n"
+            "<code>{prefix}xr overwrite</code> - new keys + uuid + restart\n\n"
             "<b>Access:</b>\n"
-            "<code>.xr add</code> -- reply to add trusted user\n"
-            "<code>.xr rm</code> -- reply to remove trusted user\n"
-            "<code>.xr users</code> -- list trusted users\n\n"
+            "<code>{prefix}xr add</code> - reply to add trusted user\n"
+            "<code>{prefix}xr rm</code> - reply to remove trusted user\n"
+            "<code>{prefix}xr users</code> - list trusted users\n\n"
             "<b>Debug:</b>\n"
-            "<code>.xr log</code> / <code>.xr log full</code>\n"
-            "<code>.xr debug</code> -- debug info\n"
-            "<code>.xr diagnose</code> -- diagnostics\n"
-            "<code>.xr checkout</code> -- IPs connected last 24h\n"
-            "<code>.xr ping</code> -- host speed test\n\n"
+            "<code>{prefix}xr log</code> / <code>{prefix}xr log full</code>\n"
+            "<code>{prefix}xr debug</code> - debug info\n"
+            "<code>{prefix}xr diagnose</code> - diagnostics\n"
+            "<code>{prefix}xr checkout</code> - IPs connected last 24h\n"
+            "<code>{prefix}xr ping</code> - host speed test\n\n"
             "<b>Bot:</b>\n"
-            "/xray -- get vless link (trusted users only)\n"
+            "/xray - get vless link (trusted users only)\n"
         ),
 
-        "not_installed": "<b>xray not installed!</b>\n<code>.xr setup</code>",
+        "not_installed": "<b>xray not installed!</b>\n<code>{prefix}xr setup</code>",
         "setup_progress": "<b>Setting up XRay...</b>",
         "setup_installing": "Downloading XRay...",
         "setup_installed": "XRay installed: {version}",
         "setup_keys": "Keys generated",
         "setup_config": "Config written",
-        "setup_done": "<b>Setup complete!</b>\n\nNow: <code>.xr start</code>",
+        "setup_done": "<b>Setup complete!</b>\n\nNow: <code>{prefix}xr start</code>",
         "setup_fail": "<b>Setup failed</b>\n\n<code>{error}</code>",
 
         "already_running": "<b>Proxy already running!</b>",
@@ -101,7 +103,7 @@ class XRay(loader.Module):
             "</blockquote>\n\n"
             "<b>Connections:</b>\n"
             "<blockquote>"
-            "Active now: <code>{active}</code>\n"
+            "Active clients: <code>{active}</code>\n"
             "Unique IPs (24h): <code>{unique_ips}</code>"
             "</blockquote>\n\n"
             "<b>Trusted users:</b> <code>{trusted_count}</code>\n"
@@ -125,17 +127,17 @@ class XRay(loader.Module):
         "keys_pm_only": "<b>Keys only in PM!</b>",
 
         "port_current": "<b>Port:</b> <code>{port}</code>",
-        "port_set": "<b>Port:</b> <code>{port}</code>\n<code>.xr restart</code>",
+        "port_set": "<b>Port:</b> <code>{port}</code>\n<code>{prefix}xr restart</code>",
         "port_invalid": "<b>Port must be 1025-65535</b>",
 
-        "dest_set": "<b>Dest:</b> <code>{dest}</code>\n<code>.xr restart</code>",
+        "dest_set": "<b>Dest:</b> <code>{dest}</code>\n<code>{prefix}xr restart</code>",
         "dest_current": "<b>Dest:</b> <code>{dest}</code>",
-        "sni_set": "<b>SNI:</b> <code>{sni}</code>\n<code>.xr restart</code>",
+        "sni_set": "<b>SNI:</b> <code>{sni}</code>\n<code>{prefix}xr restart</code>",
         "sni_current": "<b>SNI:</b> <code>{sni}</code>",
 
         "ip_set": "<b>IP:</b> <code>{ip}</code>",
         "ip_detected": "<b>IP:</b> <code>{ip}</code>",
-        "ip_fail": "<b>IP not detected</b>\n<code>.xr ip [address]</code>",
+        "ip_fail": "<b>IP not detected</b>\n<code>{prefix}xr ip [address]</code>",
         "ip_invalid": "<b>Invalid IP address</b>",
 
         "user_added": "<blockquote><b>Added:</b> <code>{uid}</code></blockquote>",
@@ -149,11 +151,11 @@ class XRay(loader.Module):
         "log_title": "<b>XRay log:</b>\n\n<blockquote>",
         "log_suffix": "</blockquote>",
 
-        "need_setup": "<b>Setup first!</b>\n<code>.xr setup</code>",
+        "need_setup": "<b>Setup first!</b>\n<code>{prefix}xr setup</code>",
         "no_config": (
             "<b>Not configured!</b>\n\n"
-            "1. <code>.xr setup</code>\n"
-            "2. <code>.xr start</code>"
+            "1. <code>{prefix}xr setup</code>\n"
+            "2. <code>{prefix}xr start</code>"
         ),
 
         "overwrite_progress": "<b>Overwriting all credentials...</b>",
@@ -237,6 +239,25 @@ class XRay(loader.Module):
         self._traffic_rx = 0
         self._traffic_tx = 0
         self._traffic_task = None
+
+    def _get_prefix(self):
+        try:
+            from .. import main
+            return main.hikka.get_prefix()
+        except Exception:
+            pass
+        try:
+            return self._db.get("hikka.main", "command_prefix", ".") or "."
+        except Exception:
+            return "."
+
+    def _s(self, key, **kwargs):
+        prefix = self._get_prefix()
+        text = self.strings.get(key, "")
+        try:
+            return text.format(prefix=prefix, **kwargs)
+        except (KeyError, IndexError):
+            return text
 
     async def client_ready(self, client, db):
         self._client = client
@@ -510,6 +531,21 @@ class XRay(loader.Module):
         sni = self._db.get("XR", "sni", "www.google.com")
 
         return {
+            "stats": {},
+            "api": {
+                "tag": STATS_API_TAG,
+                "services": [
+                    "StatsService",
+                ],
+            },
+            "policy": {
+                "system": {
+                    "statsInboundUplink": True,
+                    "statsInboundDownlink": True,
+                    "statsOutboundUplink": True,
+                    "statsOutboundDownlink": True,
+                },
+            },
             "log": {
                 "loglevel": "info",
                 "access": os.path.join(self._root, "access.log"),
@@ -548,12 +584,30 @@ class XRay(loader.Module):
                             "http", "tls", "quic",
                         ],
                     },
-                }
+                },
+                {
+                    "tag": STATS_API_TAG,
+                    "listen": "127.0.0.1",
+                    "port": STATS_API_PORT,
+                    "protocol": "dokodemo-door",
+                    "settings": {
+                        "address": "127.0.0.1",
+                    },
+                },
             ],
             "outbounds": [
                 {"tag": "direct", "protocol": "freedom"},
                 {"tag": "block", "protocol": "blackhole"},
             ],
+            "routing": {
+                "rules": [
+                    {
+                        "inboundTag": [STATS_API_TAG],
+                        "outboundTag": STATS_API_TAG,
+                        "type": "field",
+                    },
+                ],
+            },
         }
 
     def _write_config(self):
@@ -605,44 +659,57 @@ class XRay(loader.Module):
             return f"{bps / (1024 * 1024):.1f} MB/s"
         return f"{bps / (1024 * 1024 * 1024):.2f} GB/s"
 
-    def _get_net_iface_bytes(self):
-        try:
-            with open("/proc/net/dev", "r") as f:
-                lines = f.readlines()
-            total_rx = 0
-            total_tx = 0
-            for line in lines[2:]:
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split()
-                iface = parts[0].rstrip(":")
-                if iface == "lo":
-                    continue
-                total_rx += int(parts[1])
-                total_tx += int(parts[9])
-            return total_rx, total_tx
-        except Exception:
+    async def _query_xray_stats(self):
+        if not self._proxy_running():
             return 0, 0
+        try:
+            p = await asyncio.create_subprocess_exec(
+                self._xray_path, "api", "statsquery",
+                f"--server=127.0.0.1:{STATS_API_PORT}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await asyncio.wait_for(p.communicate(), timeout=5)
+            if p.returncode != 0:
+                return self._traffic_rx, self._traffic_tx
+
+            text = out.decode()
+            rx = 0
+            tx = 0
+            lines = text.strip().split("\n")
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
+                if "inbound" in line and "downlink" in line.lower():
+                    if i + 1 < len(lines):
+                        val_line = lines[i + 1].strip()
+                        m = re.search(r"(\d+)", val_line)
+                        if m:
+                            rx += int(m.group(1))
+                elif "inbound" in line and "uplink" in line.lower():
+                    if i + 1 < len(lines):
+                        val_line = lines[i + 1].strip()
+                        m = re.search(r"(\d+)", val_line)
+                        if m:
+                            tx += int(m.group(1))
+                i += 1
+
+            return rx, tx
+
+        except (asyncio.TimeoutError, Exception):
+            return self._traffic_rx, self._traffic_tx
 
     def _start_traffic_monitor(self):
         self._traffic_rx = 0
         self._traffic_tx = 0
-        initial_rx, initial_tx = self._get_net_iface_bytes()
-        self._traffic_base_rx = initial_rx
-        self._traffic_base_tx = initial_tx
 
         async def monitor():
             try:
                 while self._proxy_running():
-                    cur_rx, cur_tx = self._get_net_iface_bytes()
-                    self._traffic_rx = cur_rx - self._traffic_base_rx
-                    self._traffic_tx = cur_tx - self._traffic_base_tx
-                    if self._traffic_rx < 0:
-                        self._traffic_rx = 0
-                    if self._traffic_tx < 0:
-                        self._traffic_tx = 0
-                    await asyncio.sleep(3)
+                    rx, tx = await self._query_xray_stats()
+                    self._traffic_rx = rx
+                    self._traffic_tx = tx
+                    await asyncio.sleep(5)
             except asyncio.CancelledError:
                 pass
 
@@ -650,9 +717,81 @@ class XRay(loader.Module):
             self._traffic_task.cancel()
         self._traffic_task = asyncio.ensure_future(monitor())
 
-    def _get_active_connections(self):
+    def _get_active_clients(self):
+        if not self._proxy_running() or not self._proc:
+            return 0
+        pid = self._proc.pid
         port = self._db.get("XR", "port", 8443)
-        active = 0
+
+        try:
+            fd_dir = f"/proc/{pid}/fd"
+            if not os.path.exists(fd_dir):
+                return 0
+
+            socket_inodes = set()
+            try:
+                for fd_name in os.listdir(fd_dir):
+                    try:
+                        link = os.readlink(os.path.join(fd_dir, fd_name))
+                        if link.startswith("socket:["):
+                            inode = link[8:-1]
+                            socket_inodes.add(inode)
+                    except (OSError, ValueError):
+                        continue
+            except PermissionError:
+                return self._get_active_clients_fallback(port)
+
+            if not socket_inodes:
+                return 0
+
+            unique_ips = set()
+            hex_port = format(port, "04X")
+
+            tcp_paths = [f"/proc/{pid}/net/tcp", "/proc/net/tcp"]
+            for tcp_path in tcp_paths:
+                if not os.path.exists(tcp_path):
+                    continue
+                try:
+                    with open(tcp_path, "r") as f:
+                        for line in f:
+                            parts = line.strip().split()
+                            if len(parts) < 10:
+                                continue
+                            if parts[0] == "sl":
+                                continue
+                            state = parts[3]
+                            if state != "01":
+                                continue
+                            local = parts[1]
+                            remote = parts[2]
+                            inode = parts[9]
+                            local_port_hex = local.split(":")[1]
+                            if local_port_hex.upper() != hex_port:
+                                continue
+                            if inode not in socket_inodes:
+                                continue
+                            remote_ip_hex = remote.split(":")[0]
+                            try:
+                                ip_int = int(remote_ip_hex, 16)
+                                ip_bytes = ip_int.to_bytes(4, "little")
+                                ip_str = ".".join(str(b) for b in ip_bytes)
+                                addr = ipaddress.IPv4Address(ip_str)
+                                if not addr.is_loopback and not addr.is_private:
+                                    unique_ips.add(ip_str)
+                            except (ValueError, OverflowError):
+                                continue
+                    if unique_ips:
+                        break
+                except (PermissionError, OSError):
+                    continue
+
+            return len(unique_ips)
+
+        except Exception:
+            return 0
+
+    def _get_active_clients_fallback(self, port):
+        unique_ips = set()
         try:
             p = subprocess.run(
                 ["ss", "-tn", "state", "established", f"sport = :{port}"],
@@ -662,26 +801,23 @@ class XRay(loader.Module):
                 lines = p.stdout.strip().split("\n")
                 for line in lines[1:]:
                     line = line.strip()
-                    if line:
-                        parts = line.split()
-                        if len(parts) >= 5:
-                            peer = parts[4]
-                            if "127.0.0.1" not in peer and "[::1]" not in peer:
-                                active += 1
+                    if not line:
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 5:
+                        peer = parts[4]
+                        ip_match = re.match(r"(\d+\.\d+\.\d+\.\d+)", peer)
+                        if ip_match:
+                            ip_str = ip_match.group(1)
+                            try:
+                                addr = ipaddress.IPv4Address(ip_str)
+                                if not addr.is_loopback and not addr.is_private:
+                                    unique_ips.add(ip_str)
+                            except ValueError:
+                                continue
         except Exception:
-            try:
-                p = subprocess.run(
-                    ["netstat", "-tn"],
-                    capture_output=True, text=True, timeout=5
-                )
-                if p.returncode == 0:
-                    for line in p.stdout.split("\n"):
-                        if f":{port}" in line and "ESTABLISHED" in line:
-                            if "127.0.0.1" not in line:
-                                active += 1
-            except Exception:
-                pass
-        return active
+            pass
+        return len(unique_ips)
 
     def _get_unique_ips_24h(self):
         acc_log = os.path.join(self._root, "access.log")
@@ -1153,7 +1289,7 @@ class XRay(loader.Module):
             except Exception as e:
                 return False, f"Config error: {e}"
 
-            self._truncate_logs()
+            self._check_and_rotate_logs()
 
             env = os.environ.copy()
             env["XRAY_LOCATION_ASSET"] = self._root
@@ -1265,24 +1401,19 @@ class XRay(loader.Module):
 
             self._db.set("XR", "proxy_autostart", False)
 
-    def _truncate_logs(self):
-        max_size = 50 * 1024 * 1024
+    def _check_and_rotate_logs(self):
         for name in ["xray_run.log", "error.log", "access.log"]:
             lp = os.path.join(self._root, name)
             if os.path.exists(lp):
                 try:
-                    if os.path.getsize(lp) > max_size:
-                        with open(lp, "r") as f:
-                            f.seek(-max_size, 2)
-                            tail = f.read()
-                        with open(lp, "w") as f:
-                            f.write(tail)
+                    if os.path.getsize(lp) >= LOG_MAX_SIZE:
+                        os.remove(lp)
                 except Exception:
                     pass
 
     def _read_log_file_sync(self):
         lines = []
-        for name in ["xray_run.log", "error.log", "access.log"]:
+        for name in ["xray_run.log", "error.log"]:
             lp = os.path.join(self._root, name)
             if os.path.exists(lp):
                 try:
@@ -1302,6 +1433,7 @@ class XRay(loader.Module):
         async def reader():
             try:
                 while self._proxy_running():
+                    self._check_and_rotate_logs()
                     await self._read_log_file()
                     await asyncio.sleep(5)
             except asyncio.CancelledError:
@@ -1317,48 +1449,16 @@ class XRay(loader.Module):
             lp = os.path.join(self._root, name)
             if not os.path.exists(lp) or os.path.getsize(lp) == 0:
                 continue
-
-            fsize = os.path.getsize(lp)
-            if fsize <= MAX_LOG_CHUNK:
-                txt_path = lp + ".txt"
-                shutil.copy2(lp, txt_path)
+            txt_path = lp + ".txt"
+            shutil.copy2(lp, txt_path)
+            try:
+                await self._client.send_file(chat_id, txt_path)
+                files_sent = True
+            except Exception:
+                pass
+            finally:
                 try:
-                    await self._client.send_file(chat_id, txt_path)
-                    files_sent = True
-                except Exception:
-                    pass
-                finally:
-                    try:
-                        os.remove(txt_path)
-                    except Exception:
-                        pass
-            else:
-                part = 0
-                try:
-                    with open(lp, "rb") as f:
-                        while True:
-                            chunk = f.read(MAX_LOG_CHUNK)
-                            if not chunk:
-                                break
-                            part += 1
-                            part_path = os.path.join(
-                                self._root,
-                                f"{name}_part{part}.txt"
-                            )
-                            with open(part_path, "wb") as pf:
-                                pf.write(chunk)
-                            try:
-                                await self._client.send_file(
-                                    chat_id, part_path
-                                )
-                                files_sent = True
-                            except Exception:
-                                pass
-                            finally:
-                                try:
-                                    os.remove(part_path)
-                                except Exception:
-                                    pass
+                    os.remove(txt_path)
                 except Exception:
                     pass
         return files_sent
@@ -1371,7 +1471,7 @@ class XRay(loader.Module):
             results.append(f"OK XRay: <code>{_escape(ver[:100])}</code>")
         else:
             results.append(
-                "FAIL XRay NOT installed, use <code>.xr setup</code>"
+                f"FAIL XRay NOT installed, use <code>{self._get_prefix()}xr setup</code>"
             )
             return results
 
@@ -1421,6 +1521,12 @@ class XRay(loader.Module):
                         results.append(
                             f"   Dest: <code>{rs.get('dest', '?')}</code>"
                         )
+
+                has_stats = "stats" in cfg
+                has_api = "api" in cfg
+                results.append(
+                    f"   Stats API: {'OK' if has_stats and has_api else 'FAIL'}"
+                )
             except Exception as e:
                 results.append(f"WARN Config broken: <code>{e}</code>")
         else:
@@ -1458,6 +1564,12 @@ class XRay(loader.Module):
         results.append(
             f"{'OK' if listening else 'FAIL'} Port {port}: "
             f"{'listening' if listening else 'NOT listening'}"
+        )
+
+        stats_listening = await self._check_port_listening(STATS_API_PORT)
+        results.append(
+            f"{'OK' if stats_listening else 'FAIL'} Stats API port {STATS_API_PORT}: "
+            f"{'listening' if stats_listening else 'NOT listening'}"
         )
 
         ip = await self._get_external_ip()
@@ -1516,14 +1628,15 @@ class XRay(loader.Module):
     async def _txt_status(self):
         if self._proxy_running():
             port = self._db.get("XR", "port", 8443)
-            active = self._get_active_connections()
+            active = self._get_active_clients()
             unique_ips = self._get_unique_ips_24h()
             trusted = self._db.get("XR", "trusted_users", [])
 
             rx = max(0, self._traffic_rx)
             tx = max(0, self._traffic_tx)
 
-            return self.strings["status_on"].format(
+            return self._s(
+                "status_on",
                 pid=self._proc.pid,
                 uptime=self._get_uptime(),
                 rx=self._format_bytes(rx),
@@ -1534,18 +1647,18 @@ class XRay(loader.Module):
                 trusted_count=len(trusted),
                 port=port,
             )
-        return self.strings["status_off"]
+        return self._s("status_off")
 
     def _txt_log(self):
         self._log_lines = self._read_log_file_sync()
         if not self._log_lines:
-            return self.strings["log_empty"]
+            return self._s("log_empty")
         last = self._log_lines[-50:]
         c = "".join(last)
         if len(c) > 3800:
             c = c[-3800:]
         return (
-            self.strings["log_title"]
+            self._s("log_title")
             + "<code>" + _escape(c) + "</code>"
             + self.strings["log_suffix"]
         )
@@ -1593,7 +1706,7 @@ class XRay(loader.Module):
             ip = await self._get_external_ip()
             if not ip:
                 await message.answer(
-                    self.strings["bot_not_configured"],
+                    self._s("bot_not_configured"),
                     parse_mode="HTML",
                 )
                 return
@@ -1601,13 +1714,13 @@ class XRay(loader.Module):
             link = self._build_vless_link(ip)
             if not link:
                 await message.answer(
-                    self.strings["bot_not_configured"],
+                    self._s("bot_not_configured"),
                     parse_mode="HTML",
                 )
                 return
 
             await message.answer(
-                self.strings["bot_link_response"].format(link=link),
+                self._s("bot_link_response", link=link),
                 parse_mode="HTML",
             )
         except Exception as e:
@@ -1620,7 +1733,7 @@ class XRay(loader.Module):
     async def xr(self, message):
         args = utils.get_args_raw(message).strip()
         if not args:
-            await utils.answer(message, self.strings["help"])
+            await utils.answer(message, self._s("help"))
             return
 
         parts = args.split(maxsplit=1)
@@ -1652,15 +1765,15 @@ class XRay(loader.Module):
                     f"<b>Error:</b> <code>{_escape(str(e)[:300])}</code>"
                 )
         else:
-            await utils.answer(message, self.strings["help"])
+            await utils.answer(message, self._s("help"))
 
     async def _u_setup(self, msg, parts):
-        m = await utils.answer(msg, self.strings["setup_progress"])
+        m = await utils.answer(msg, self._s("setup_progress"))
         log_lines = []
 
         async def progress_cb(text):
             log_lines.append(text)
-            display = self.strings["setup_progress"] + "\n\n"
+            display = self._s("setup_progress") + "\n\n"
             display += "\n".join(
                 f"<code>{_escape(l)}</code>" for l in log_lines
             )
@@ -1668,52 +1781,42 @@ class XRay(loader.Module):
 
         ok, err = await self._do_setup(progress_cb=progress_cb)
         if ok:
-            t = self.strings["setup_done"]
+            t = self._s("setup_done")
         else:
-            t = self.strings["setup_fail"].format(
-                error=_escape(str(err))
-            )
+            t = self._s("setup_fail", error=_escape(str(err)))
         await self._safe_edit(m, t)
 
     async def _u_start(self, msg, parts):
-        m = await utils.answer(msg, self.strings["starting"])
+        m = await utils.answer(msg, self._s("starting"))
         ok, err = await self._do_start_proxy()
         if ok:
             port = self._db.get("XR", "port", 8443)
             ip = await self._get_external_ip()
-            t = self.strings["started"].format(
-                port=port, ip=ip or "?",
-            )
+            t = self._s("started", port=port, ip=ip or "?")
         elif err in ("already_running", "not_installed", "need_setup"):
-            t = self.strings.get(err, err)
+            t = self._s(err)
         else:
-            t = self.strings["start_fail"].format(
-                error=_escape(str(err))
-            )
+            t = self._s("start_fail", error=_escape(str(err)))
         await self._safe_edit(m, t)
 
     async def _u_stop(self, msg, parts):
         if not self._proxy_running():
-            await utils.answer(msg, self.strings["not_running"])
+            await utils.answer(msg, self._s("not_running"))
             return
         await self._do_stop_proxy()
-        await utils.answer(msg, self.strings["stopped"])
+        await utils.answer(msg, self._s("stopped"))
 
     async def _u_restart(self, msg, parts):
-        m = await utils.answer(msg, self.strings["restarting"])
+        m = await utils.answer(msg, self._s("restarting"))
         await self._do_stop_proxy()
         await asyncio.sleep(1)
         ok, err = await self._do_start_proxy()
         if ok:
             port = self._db.get("XR", "port", 8443)
             ip = await self._get_external_ip()
-            t = self.strings["started"].format(
-                port=port, ip=ip or "?",
-            )
+            t = self._s("started", port=port, ip=ip or "?")
         else:
-            t = self.strings["start_fail"].format(
-                error=_escape(str(err))
-            )
+            t = self._s("start_fail", error=_escape(str(err)))
         await self._safe_edit(m, t)
 
     async def _u_status(self, msg, parts):
@@ -1723,9 +1826,7 @@ class XRay(loader.Module):
         if len(parts) < 2:
             await utils.answer(
                 msg,
-                self.strings["port_current"].format(
-                    port=self._db.get("XR", "port", 8443)
-                ),
+                self._s("port_current", port=self._db.get("XR", "port", 8443)),
             )
             return
         try:
@@ -1733,23 +1834,18 @@ class XRay(loader.Module):
             if not (1025 <= p <= 65535):
                 raise ValueError
         except ValueError:
-            await utils.answer(msg, self.strings["port_invalid"])
+            await utils.answer(msg, self._s("port_invalid"))
             return
         self._db.set("XR", "port", p)
-        await utils.answer(
-            msg, self.strings["port_set"].format(port=p)
-        )
+        await utils.answer(msg, self._s("port_set", port=p))
 
     async def _u_dest(self, msg, parts):
         if len(parts) < 2:
             await utils.answer(
                 msg,
-                self.strings["dest_current"].format(
-                    dest=_escape(
-                        self._db.get(
-                            "XR", "dest", "www.google.com:443"
-                        )
-                    )
+                self._s(
+                    "dest_current",
+                    dest=_escape(self._db.get("XR", "dest", "www.google.com:443")),
                 ),
             )
             return
@@ -1757,50 +1853,40 @@ class XRay(loader.Module):
         if ":" not in dest:
             dest += ":443"
         self._db.set("XR", "dest", dest)
-        await utils.answer(
-            msg, self.strings["dest_set"].format(dest=_escape(dest))
-        )
+        await utils.answer(msg, self._s("dest_set", dest=_escape(dest)))
 
     async def _u_sni(self, msg, parts):
         if len(parts) < 2:
             await utils.answer(
                 msg,
-                self.strings["sni_current"].format(
-                    sni=_escape(
-                        self._db.get("XR", "sni", "www.google.com")
-                    )
+                self._s(
+                    "sni_current",
+                    sni=_escape(self._db.get("XR", "sni", "www.google.com")),
                 ),
             )
             return
         sni = parts[1].strip().lower()
         self._db.set("XR", "sni", sni)
-        await utils.answer(
-            msg, self.strings["sni_set"].format(sni=_escape(sni))
-        )
+        await utils.answer(msg, self._s("sni_set", sni=_escape(sni)))
 
     async def _u_ip(self, msg, parts):
         if len(parts) >= 2:
             ip_str = parts[1].strip()
             if not self._validate_ip(ip_str):
-                await utils.answer(msg, self.strings["ip_invalid"])
+                await utils.answer(msg, self._s("ip_invalid"))
                 return
             self._db.set("XR", "external_ip", ip_str)
-            await utils.answer(
-                msg,
-                self.strings["ip_set"].format(ip=_escape(ip_str)),
-            )
+            await utils.answer(msg, self._s("ip_set", ip=_escape(ip_str)))
             return
         ip = await self._get_external_ip()
         if ip:
-            await utils.answer(
-                msg, self.strings["ip_detected"].format(ip=ip)
-            )
+            await utils.answer(msg, self._s("ip_detected", ip=ip))
         else:
-            await utils.answer(msg, self.strings["ip_fail"])
+            await utils.answer(msg, self._s("ip_fail"))
 
     async def _u_keys(self, msg, parts):
         if not msg.is_private:
-            await utils.answer(msg, self.strings["keys_pm_only"])
+            await utils.answer(msg, self._s("keys_pm_only"))
             return
         private_key = self._db.get("XR", "private_key", "")
         public_key = self._db.get("XR", "public_key", "")
@@ -1810,11 +1896,12 @@ class XRay(loader.Module):
         dest = self._db.get("XR", "dest", "www.google.com:443")
         port = self._db.get("XR", "port", 8443)
         if not private_key:
-            await utils.answer(msg, self.strings["need_setup"])
+            await utils.answer(msg, self._s("need_setup"))
             return
         await utils.answer(
             msg,
-            self.strings["keys_info"].format(
+            self._s(
+                "keys_info",
                 private_key=private_key,
                 public_key=public_key,
                 short_id=short_id,
@@ -1827,17 +1914,15 @@ class XRay(loader.Module):
 
     async def _u_overwrite(self, msg, parts):
         if not self._xray_installed():
-            await utils.answer(msg, self.strings["not_installed"])
+            await utils.answer(msg, self._s("not_installed"))
             return
 
-        m = await utils.answer(msg, self.strings["overwrite_progress"])
+        m = await utils.answer(msg, self._s("overwrite_progress"))
 
         private_key, public_key = await self._generate_x25519()
         if not private_key:
             await self._safe_edit(
-                m, self.strings["overwrite_fail"].format(
-                    error="Key generation failed"
-                )
+                m, self._s("overwrite_fail", error="Key generation failed")
             )
             return
 
@@ -1853,9 +1938,7 @@ class XRay(loader.Module):
             self._write_config()
         except Exception as e:
             await self._safe_edit(
-                m, self.strings["overwrite_fail"].format(
-                    error=f"Config write error: {e}"
-                )
+                m, self._s("overwrite_fail", error=f"Config write error: {e}")
             )
             return
 
@@ -1867,53 +1950,48 @@ class XRay(loader.Module):
             ok, err = await self._do_start_proxy()
             if not ok:
                 await self._safe_edit(
-                    m, self.strings["overwrite_fail"].format(
-                        error=f"Restart failed: {err}"
-                    )
+                    m, self._s("overwrite_fail", error=f"Restart failed: {err}")
                 )
                 return
 
-        await self._safe_edit(m, self.strings["overwrite_done"])
+        await self._safe_edit(m, self._s("overwrite_done"))
 
     async def _u_add(self, msg, parts):
         reply = await msg.get_reply_message()
         if not reply or not reply.sender_id:
-            await utils.answer(msg, self.strings["user_need_reply"])
+            await utils.answer(msg, self._s("user_need_reply"))
             return
         uid = reply.sender_id
         t = self._db.get("XR", "trusted_users", [])
         if uid not in t:
             t.append(uid)
             self._db.set("XR", "trusted_users", t)
-        await utils.answer(
-            msg, self.strings["user_added"].format(uid=uid)
-        )
+        await utils.answer(msg, self._s("user_added", uid=uid))
 
     async def _u_rm(self, msg, parts):
         reply = await msg.get_reply_message()
         if not reply or not reply.sender_id:
-            await utils.answer(msg, self.strings["user_need_reply"])
+            await utils.answer(msg, self._s("user_need_reply"))
             return
         uid = reply.sender_id
         t = self._db.get("XR", "trusted_users", [])
         if uid in t:
             t.remove(uid)
             self._db.set("XR", "trusted_users", t)
-            await utils.answer(
-                msg, self.strings["user_removed"].format(uid=uid)
-            )
+            await utils.answer(msg, self._s("user_removed", uid=uid))
         else:
-            await utils.answer(msg, self.strings["user_not_found"])
+            await utils.answer(msg, self._s("user_not_found"))
 
     async def _u_users(self, msg, parts):
         t = self._db.get("XR", "trusted_users", [])
         if not t:
-            await utils.answer(msg, self.strings["users_empty"])
+            await utils.answer(msg, self._s("users_empty"))
             return
         await utils.answer(
             msg,
-            self.strings["users_list"].format(
-                users="\n".join(f"<code>{u}</code>" for u in t)
+            self._s(
+                "users_list",
+                users="\n".join(f"<code>{u}</code>" for u in t),
             ),
         )
 
@@ -1927,7 +2005,7 @@ class XRay(loader.Module):
             files_sent = await self._send_log_files(chat_id)
             if not files_sent:
                 await self._client.send_message(
-                    chat_id, self.strings["log_empty"], parse_mode="html"
+                    chat_id, self._s("log_empty"), parse_mode="html"
                 )
             return
         await utils.answer(msg, self._txt_log())
@@ -1955,7 +2033,7 @@ class XRay(loader.Module):
 
         if not ips:
             await self._client.send_message(
-                chat_id, self.strings["checkout_empty"], parse_mode="html"
+                chat_id, self._s("checkout_empty"), parse_mode="html"
             )
             return
 
@@ -1985,12 +2063,12 @@ class XRay(loader.Module):
                 pass
 
     async def _u_ping(self, msg, parts):
-        m = await utils.answer(msg, self.strings["ping_progress"])
+        m = await utils.answer(msg, self._s("ping_progress"))
         step_lines = []
 
         async def progress_cb(text):
             step_lines.append(text)
-            display = self.strings["ping_progress"] + "\n\n"
+            display = self._s("ping_progress") + "\n\n"
             display += "\n".join(
                 f"<code>{_escape(l)}</code>" for l in step_lines
             )
@@ -2005,7 +2083,8 @@ class XRay(loader.Module):
             )
             await self._safe_edit(
                 m,
-                self.strings["ping_result"].format(
+                self._s(
+                    "ping_result",
                     download=dl_text,
                     upload=ul_text,
                     latency=lat_text,
@@ -2014,7 +2093,5 @@ class XRay(loader.Module):
         except Exception as e:
             await self._safe_edit(
                 m,
-                self.strings["ping_fail"].format(
-                    error=_escape(str(e)[:300])
-                ),
+                self._s("ping_fail", error=_escape(str(e)[:300])),
             )
