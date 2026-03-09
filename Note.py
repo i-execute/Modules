@@ -1,4 +1,4 @@
-__version__ = (2, 2, 5)
+__version__ = (2, 2, 6)
 # meta developer: FireJester.t.me
 
 import logging
@@ -94,9 +94,6 @@ class Note(loader.Module):
         self._storage_chat_entity = None
         self._premium = None
 
-    def _get_prefix(self):
-        return self.get_prefix() if hasattr(self, "get_prefix") else "."
-
     async def _get_premium_status(self):
         if self._premium is None:
             me = await self._client.get_me()
@@ -109,9 +106,6 @@ class Note(loader.Module):
             if not prem_res.startswith("Unknown string"):
                 return prem_res
         return self.strings(key)
-
-    def _render_help(self):
-        return self._get_str("help").format(prefix=self._get_prefix())
 
     async def _ensure_storage(self):
         chat_id = self.config["STORAGE_CHAT_ID"]
@@ -240,7 +234,7 @@ class Note(loader.Module):
 
         parts = args.split(maxsplit=1)
         if not parts:
-            await utils.answer(message, self._render_help())
+            await utils.answer(message, self._get_str("help"))
             return
 
         cmd = parts[0].lower()
