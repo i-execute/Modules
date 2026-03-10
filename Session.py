@@ -1,4 +1,4 @@
-__version__ = (2, 0, 1)
+__version__ = (2, 0, 2)
 # meta developer: FireJester.t.me
 
 import logging
@@ -617,8 +617,9 @@ class Session(loader.Module):
     )
     async def session(self, message: Message):
         args = utils.get_args_raw(message).split()
+        prefix = self.get_prefix()
         if not args:
-            await utils.answer(message, self.strings["usage"])
+            await utils.answer(message, self.strings["usage"].format(prefix=prefix))
             return
         cmd = args[0].lower()
         if cmd == "create":
@@ -637,11 +638,12 @@ class Session(loader.Module):
             await self._cleanup()
             await utils.answer(message, self.strings["terminated"])
         else:
-            await utils.answer(message, self.strings["usage"])
+            await utils.answer(message, self.strings["usage"].format(prefix=prefix))
 
     async def _handle_create(self, message: Message, args):
         if self._active:
-            return await utils.answer(message, self.strings["err_running"])
+            prefix = self.get_prefix()
+            return await utils.answer(message, self.strings["err_running"].format(prefix=prefix))
         output_type = args[1].lower() if len(args) > 1 else "string"
         if output_type not in ["string", "file", "hex"]:
             output_type = "string"
@@ -768,8 +770,9 @@ class Session(loader.Module):
             self._active = False
 
     async def _handle_convert(self, message: Message, args):
+        prefix = self.get_prefix()
         if len(args) < 2:
-            return await utils.answer(message, self.strings["usage"])
+            return await utils.answer(message, self.strings["usage"].format(prefix=prefix))
         sub_cmd = args[1].lower()
         if sub_cmd == "dc":
             if not self._active or self._mode != "convert":
@@ -785,7 +788,7 @@ class Session(loader.Module):
                 await utils.answer(message, self.strings["err_invalid_dc"])
             return
         if self._active:
-            return await utils.answer(message, self.strings["err_running"])
+            return await utils.answer(message, self.strings["err_running"].format(prefix=prefix))
         reply = await message.get_reply_message()
         self._chat_id = message.chat_id
         self._topic_id = self._get_topic_id(message)
@@ -803,7 +806,7 @@ class Session(loader.Module):
         elif sub_cmd == "file_to_hex":
             await self._convert_file_to_hex(message, reply)
         else:
-            await utils.answer(message, self.strings["usage"])
+            await utils.answer(message, self.strings["usage"].format(prefix=prefix))
 
     async def _convert_hex_to_string(self, message: Message, args, reply):
         hex_key = None
@@ -1005,7 +1008,8 @@ class Session(loader.Module):
                 await utils.answer(message, self.strings["err_invalid_dc"])
             return
         if self._active:
-            return await utils.answer(message, self.strings["err_running"])
+            prefix = self.get_prefix()
+            return await utils.answer(message, self.strings["err_running"].format(prefix=prefix))
         reply = await message.get_reply_message()
         input_text = " ".join(args[1:]) if len(args) > 1 else ""
         if reply:
