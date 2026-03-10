@@ -1,4 +1,4 @@
-__version__ = (2, 2, 6)
+__version__ = (2, 2, 7)
 # meta developer: FireJester.t.me
 
 import logging
@@ -100,12 +100,14 @@ class Note(loader.Module):
             self._premium = getattr(me, "premium", False)
         return self._premium
 
-    def _get_str(self, key):
+    def _get_str(self, key, **kwargs):
         if self._premium:
-            prem_res = self.strings(f"{key}_prem")
-            if not prem_res.startswith("Unknown string"):
-                return prem_res
-        return self.strings(key)
+            prem_key = f"{key}_prem"
+            prem_res = self.strings.get(prem_key)
+            if prem_res:
+                return prem_res.format(**kwargs) if kwargs else prem_res
+        base = self.strings.get(key, f"Unknown string: {key}")
+        return base.format(**kwargs) if kwargs else base
 
     async def _ensure_storage(self):
         chat_id = self.config["STORAGE_CHAT_ID"]
@@ -226,6 +228,7 @@ class Note(loader.Module):
     async def note(self, message):
         args = utils.get_args_raw(message).strip()
         await self._get_premium_status()
+        prefix = self.get_prefix()
 
         storage = await self._ensure_storage()
         if not storage:
@@ -234,7 +237,7 @@ class Note(loader.Module):
 
         parts = args.split(maxsplit=1)
         if not parts:
-            await utils.answer(message, self._get_str("help"))
+            await utils.answer(message, self._get_str("help").format(prefix=prefix))
             return
 
         cmd = parts[0].lower()
