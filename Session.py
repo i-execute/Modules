@@ -1,4 +1,4 @@
-__version__ = (2, 0, 2)
+__version__ = (2, 1, 1)
 # meta developer: FireJester.t.me
 
 import logging
@@ -30,6 +30,15 @@ ACTION_DELAY = 1.7
 
 STRING_SESSION_PATTERN = re.compile(r'1[A-Za-z0-9_-]{200,}={0,2}')
 HEX_KEY_PATTERN = re.compile(r'[0-9a-fA-F]{512}')
+
+
+def _safe_disconnect(client):
+    """Schedule disconnect without awaiting to avoid GeneratorExit issues"""
+    if client:
+        try:
+            asyncio.ensure_future(client.disconnect())
+        except Exception:
+            pass
 
 
 @loader.tds
@@ -760,11 +769,8 @@ class Session(loader.Module):
                             parse_mode="html",
                             reply_to=self._topic_id
                         )
-            if self._session_client:
-                try:
-                    await self._session_client.disconnect()
-                except:
-                    pass
+            _safe_disconnect(self._session_client)
+            self._session_client = None
         except Exception as e:
             logger.error(f"[SESSION] Finalize error: {e}")
             self._active = False
@@ -1056,8 +1062,8 @@ class Session(loader.Module):
                 int(self.config["API_ID"]),
                 self.config["API_HASH"]
             )
-            await test_client.connect()
-            me = await test_client.get_me()
+            await asyncio.wait_for(test_client.connect(), timeout=15)
+            me = await asyncio.wait_for(test_client.get_me(), timeout=10)
             if me is None:
                 if parsed:
                     result = self.strings["test_info_only"].format(
@@ -1072,7 +1078,8 @@ class Session(loader.Module):
                         line=self.strings["line"],
                         reason=self.strings["not_authorized"],
                     )
-                return await utils.answer(message, result)
+                await utils.answer(message, result)
+                return
             username = None
             if hasattr(me, 'usernames') and me.usernames:
                 username = me.usernames[0].username
@@ -1093,6 +1100,11 @@ class Session(loader.Module):
                 line=self.strings["line"], user_link=user_link, user_id=me.id,
                 dc_id=dc_id, ip=ip, port=port, key_len=key_len,
                 premium="Yes" if getattr(me, 'premium', False) else "No"
+            )
+            await utils.answer(message, result)
+        except asyncio.TimeoutError:
+            result = self.strings["test_fail"].format(
+                line=self.strings["line"], reason="Connection timeout"
             )
             await utils.answer(message, result)
         except AuthKeyUnregisteredError:
@@ -1117,11 +1129,7 @@ class Session(loader.Module):
             result = self.strings["test_fail"].format(line=self.strings["line"], reason=str(e))
             await utils.answer(message, result)
         finally:
-            if test_client:
-                try:
-                    await test_client.disconnect()
-                except:
-                    pass
+            _safe_disconnect(test_client)
 
     async def _finalize_test(self):
         try:
@@ -1148,8 +1156,8 @@ class Session(loader.Module):
                     int(self.config["API_ID"]),
                     self.config["API_HASH"]
                 )
-                await test_client.connect()
-                me = await test_client.get_me()
+                await asyncio.wait_for(test_client.connect(), timeout=15)
+                me = await asyncio.wait_for(test_client.get_me(), timeout=10)
                 if me is None:
                     if parsed:
                         result = self.strings["test_info_only"].format(
@@ -1187,6 +1195,11 @@ class Session(loader.Module):
                     premium="Yes" if getattr(me, 'premium', False) else "No"
                 )
                 await utils.answer(self._status_msg, result)
+            except asyncio.TimeoutError:
+                result = self.strings["test_fail"].format(
+                    line=self.strings["line"], reason="Connection timeout"
+                )
+                await utils.answer(self._status_msg, result)
             except AuthKeyUnregisteredError:
                 if parsed:
                     result = self.strings["test_info_only"].format(
@@ -1209,11 +1222,7 @@ class Session(loader.Module):
                 result = self.strings["test_fail"].format(line=self.strings["line"], reason=str(e))
                 await utils.answer(self._status_msg, result)
             finally:
-                if test_client:
-                    try:
-                        await test_client.disconnect()
-                    except:
-                        pass
+                _safe_disconnect(test_client)
         except:
             self._active = False
 
@@ -1227,11 +1236,7 @@ class Session(loader.Module):
                 await self._loop_task
             except:
                 pass
-        if self._session_client:
-            try:
-                await self._session_client.disconnect()
-            except:
-                pass
+        _safe_disconnect(self._session_client)
         self._session_client = None
         self._data = {}
         self._status_msg = None
