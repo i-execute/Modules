@@ -1,4 +1,4 @@
-__version__ = (3, 5, 2)
+__version__ = (3, 5, 4)
 # meta developer: FireJester.t.me
 
 import os
@@ -17,12 +17,19 @@ import tempfile
 import re
 from datetime import datetime, timedelta
 
-from aiogram.types import Message as AiogramMessage
+from aiogram.types import (
+    Message as AiogramMessage,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CopyTextButton,
+    LinkPreviewOptions,
+)
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
 LOG_MAX_SIZE = 30 * 1024 * 1024
+LOG_KEEP_SIZE = 10 * 1024 * 1024
 STATS_API_PORT = 10085
 STATS_API_TAG = "api"
 
@@ -43,46 +50,58 @@ class XRay(loader.Module):
         "help": (
             "<b>XRay VLESS+Reality</b>\n\n"
             "<b>Setup:</b>\n"
-            "<code>{prefix}xr setup</code> - install + generate keys + config\n"
+            "<blockquote>"
+            "<code>{prefix}xr setup</code> install + generate keys + config\n"
             "<code>{prefix}xr start</code> / <code>{prefix}xr stop</code> / <code>{prefix}xr restart</code>\n"
-            "<code>{prefix}xr status</code> - status, traffic, connections\n\n"
+            "<code>{prefix}xr status</code> status, traffic, connections"
+            "</blockquote>\n\n"
             "<b>Settings:</b>\n"
-            "<code>{prefix}xr port [port]</code> - port (default 8443)\n"
-            "<code>{prefix}xr dest [domain:port]</code> - Reality dest\n"
-            "<code>{prefix}xr sni [domain]</code> - SNI\n"
-            "<code>{prefix}xr ip [address]</code> - external IP\n"
-            "<code>{prefix}xr keys</code> - show all keys (PM only)\n"
-            "<code>{prefix}xr overwrite</code> - new keys + uuid + restart\n\n"
+            "<blockquote>"
+            "<code>{prefix}xr port [port]</code> port (default 8443)\n"
+            "<code>{prefix}xr dest [domain:port]</code> Reality dest\n"
+            "<code>{prefix}xr sni [domain]</code> SNI\n"
+            "<code>{prefix}xr ip [address]</code> external IP\n"
+            "<code>{prefix}xr keys</code> show all keys (PM only)\n"
+            "<code>{prefix}xr overwrite</code> new keys + uuid + restart"
+            "</blockquote>\n\n"
             "<b>Access:</b>\n"
-            "<code>{prefix}xr add</code> - reply to add trusted user\n"
-            "<code>{prefix}xr rm</code> - reply to remove trusted user\n"
-            "<code>{prefix}xr users</code> - list trusted users\n\n"
+            "<blockquote>"
+            "<code>{prefix}xr add</code> reply to add trusted user\n"
+            "<code>{prefix}xr rm</code> reply to remove trusted user\n"
+            "<code>{prefix}xr users</code> list trusted users"
+            "</blockquote>\n\n"
             "<b>Debug:</b>\n"
+            "<blockquote>"
             "<code>{prefix}xr log</code> / <code>{prefix}xr log full</code>\n"
-            "<code>{prefix}xr debug</code> - debug info\n"
-            "<code>{prefix}xr diagnose</code> - diagnostics\n"
-            "<code>{prefix}xr checkout</code> - IPs connected last 24h\n"
-            "<code>{prefix}xr ping</code> - host speed test\n\n"
+            "<code>{prefix}xr debug</code> debug info\n"
+            "<code>{prefix}xr diagnose</code> diagnostics\n"
+            "<code>{prefix}xr checkout</code> IPs connected last 24h\n"
+            "<code>{prefix}xr ping</code> host speed test"
+            "</blockquote>\n\n"
             "<b>Bot:</b>\n"
-            "/xray - get vless link (trusted users only)\n"
+            "<blockquote>"
+            "/xray get vless link (trusted users only)"
+            "</blockquote>"
         ),
 
-        "not_installed": "<b>xray not installed!</b>\n<code>{prefix}xr setup</code>",
+        "not_installed": "<b>xray not installed</b>\n<code>{prefix}xr setup</code>",
         "setup_progress": "<b>Setting up XRay...</b>",
         "setup_installing": "Downloading XRay...",
         "setup_installed": "XRay installed: {version}",
         "setup_keys": "Keys generated",
         "setup_config": "Config written",
-        "setup_done": "<b>Setup complete!</b>\n\nNow: <code>{prefix}xr start</code>",
+        "setup_done": "<b>Setup complete</b>\n\nNow: <code>{prefix}xr start</code>",
         "setup_fail": "<b>Setup failed</b>\n\n<code>{error}</code>",
 
-        "already_running": "<b>Proxy already running!</b>",
-        "not_running": "<b>Proxy not running!</b>",
+        "already_running": "<b>Proxy already running</b>",
+        "not_running": "<b>Proxy not running</b>",
         "starting": "<b>Starting XRay...</b>",
         "started": (
-            "<b>XRay started!</b>\n\n"
+            "<b>XRay started</b>\n\n"
+            "<blockquote>"
             "Port: <code>{port}</code>\n"
             "IP: <code>{ip}</code>"
+            "</blockquote>"
         ),
         "start_fail": "<b>Start failed</b>\n\n<code>{error}</code>",
         "stopped": "<b>Proxy stopped</b>",
@@ -106,8 +125,8 @@ class XRay(loader.Module):
             "Active clients: <code>{active}</code>\n"
             "Unique IPs (24h): <code>{unique_ips}</code>"
             "</blockquote>\n\n"
-            "<b>Trusted users:</b> <code>{trusted_count}</code>\n"
-            "<b>Port:</b> <code>{port}</code>"
+            "Trusted users: <code>{trusted_count}</code>\n"
+            "Port: <code>{port}</code>"
         ),
         "status_off": "<b>XRay Status</b>\n\n<blockquote><b>State:</b> stopped</blockquote>",
 
@@ -119,31 +138,31 @@ class XRay(loader.Module):
             "<blockquote><code>{public_key}</code></blockquote>\n\n"
             "<b>UUID:</b>\n"
             "<blockquote><code>{uid}</code></blockquote>\n\n"
-            "<b>Short ID:</b> <code>{short_id}</code>\n"
-            "<b>SNI:</b> <code>{sni}</code>\n"
-            "<b>Dest:</b> <code>{dest}</code>\n"
-            "<b>Port:</b> <code>{port}</code>"
+            "Short ID: <code>{short_id}</code>\n"
+            "SNI: <code>{sni}</code>\n"
+            "Dest: <code>{dest}</code>\n"
+            "Port: <code>{port}</code>"
         ),
-        "keys_pm_only": "<b>Keys only in PM!</b>",
+        "keys_pm_only": "<b>Keys only in PM</b>",
 
-        "port_current": "<b>Port:</b> <code>{port}</code>",
-        "port_set": "<b>Port:</b> <code>{port}</code>\n<code>{prefix}xr restart</code>",
+        "port_current": "Port: <code>{port}</code>",
+        "port_set": "Port: <code>{port}</code>\n<code>{prefix}xr restart</code>",
         "port_invalid": "<b>Port must be 1025-65535</b>",
 
-        "dest_set": "<b>Dest:</b> <code>{dest}</code>\n<code>{prefix}xr restart</code>",
-        "dest_current": "<b>Dest:</b> <code>{dest}</code>",
-        "sni_set": "<b>SNI:</b> <code>{sni}</code>\n<code>{prefix}xr restart</code>",
-        "sni_current": "<b>SNI:</b> <code>{sni}</code>",
+        "dest_set": "Dest: <code>{dest}</code>\n<code>{prefix}xr restart</code>",
+        "dest_current": "Dest: <code>{dest}</code>",
+        "sni_set": "SNI: <code>{sni}</code>\n<code>{prefix}xr restart</code>",
+        "sni_current": "SNI: <code>{sni}</code>",
 
-        "ip_set": "<b>IP:</b> <code>{ip}</code>",
-        "ip_detected": "<b>IP:</b> <code>{ip}</code>",
+        "ip_set": "IP: <code>{ip}</code>",
+        "ip_detected": "IP: <code>{ip}</code>",
         "ip_fail": "<b>IP not detected</b>\n<code>{prefix}xr ip [address]</code>",
         "ip_invalid": "<b>Invalid IP address</b>",
 
-        "user_added": "<blockquote><b>Added:</b> <code>{uid}</code></blockquote>",
-        "user_removed": "<blockquote><b>Removed:</b> <code>{uid}</code></blockquote>",
-        "user_not_found": "<blockquote><b>Not found</b></blockquote>",
-        "user_need_reply": "<blockquote><b>Reply to a message to add/remove user</b></blockquote>",
+        "user_added": "<b>Added:</b> <blockquote><code>{uid}</code></blockquote>",
+        "user_removed": "<b>Removed:</b> <blockquote><code>{uid}</code></blockquote>",
+        "user_not_found": "<b>Not found</b>",
+        "user_need_reply": "<b>Reply to a message to add/remove user</b>",
         "users_list": "<b>Trusted users:</b>\n\n<blockquote>{users}</blockquote>",
         "users_empty": "<b>No trusted users</b>",
 
@@ -151,20 +170,18 @@ class XRay(loader.Module):
         "log_title": "<b>XRay log:</b>\n\n<blockquote>",
         "log_suffix": "</blockquote>",
 
-        "need_setup": "<b>Setup first!</b>\n<code>{prefix}xr setup</code>",
+        "need_setup": "<b>Setup first</b>\n<code>{prefix}xr setup</code>",
         "no_config": (
-            "<b>Not configured!</b>\n\n"
+            "<b>Not configured</b>\n\n"
             "1. <code>{prefix}xr setup</code>\n"
             "2. <code>{prefix}xr start</code>"
         ),
 
         "overwrite_progress": "<b>Overwriting all credentials...</b>",
         "overwrite_done": (
-            "<b>All credentials overwritten!</b>\n\n"
-            "<blockquote>"
+            "<b>All credentials overwritten</b>\n\n"
             "Old links are now dead.\n"
             "Get new link via /xray in bot."
-            "</blockquote>"
         ),
         "overwrite_fail": "<b>Overwrite failed</b>\n\n<code>{error}</code>",
 
@@ -203,12 +220,15 @@ class XRay(loader.Module):
         "diagnose_suffix": "</blockquote>",
 
         "bot_link_response": (
-            "<b>Your VLESS link:</b>\n\n"
-            "<blockquote><code>{link}</code></blockquote>\n\n"
-            "<b>Client:</b> v2RayTun\n"
-            "Copy link, open app, add server, paste"
+            "<b>Your VLESS link</b>\n\n"
+            "Download client:\n"
+            '<a href="https://apps.apple.com/app/id6476628951">v2RayTun for iOS</a>\n'
+            '<a href="https://play.google.com/store/apps/details?id=com.v2raytun.android">v2RayTun for Android</a>\n\n'
+            "Press the button below to copy the link, then open v2RayTun, "
+            "tap add server and paste."
         ),
         "bot_not_configured": "<b>Proxy not configured yet</b>",
+        "bot_copy_button": "VPN LINK",
 
         "checkout_empty": "<b>No connections in last 24h</b>",
 
@@ -239,6 +259,7 @@ class XRay(loader.Module):
         self._traffic_rx = 0
         self._traffic_tx = 0
         self._traffic_task = None
+        self._log_rotation_task = None
 
     def _get_prefix(self):
         try:
@@ -288,6 +309,8 @@ class XRay(loader.Module):
             if self._db.get("XR", k) is None:
                 self._db.set("XR", k, v)
 
+        self._start_log_rotation_scheduler()
+
         if self._db.get("XR", "proxy_autostart", False):
             if self._xray_installed() and os.path.exists(self._config_path):
                 try:
@@ -299,6 +322,14 @@ class XRay(loader.Module):
         await self._full_cleanup()
 
     async def _full_cleanup(self):
+        if self._log_rotation_task:
+            self._log_rotation_task.cancel()
+            try:
+                await self._log_rotation_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._log_rotation_task = None
+
         if self._traffic_task:
             self._traffic_task.cancel()
             try:
@@ -1346,9 +1377,56 @@ class XRay(loader.Module):
             if os.path.exists(lp):
                 try:
                     if os.path.getsize(lp) >= LOG_MAX_SIZE:
-                        os.remove(lp)
+                        self._trim_log_file(lp, LOG_KEEP_SIZE)
                 except Exception:
                     pass
+
+    def _trim_log_file(self, path, keep_bytes):
+        try:
+            size = os.path.getsize(path)
+            if size <= keep_bytes:
+                return
+
+            tmp_path = path + ".trim_tmp"
+            with open(path, "rb") as f:
+                f.seek(size - keep_bytes)
+                f.readline()
+                tail = f.read()
+
+            with open(tmp_path, "wb") as f:
+                f.write(tail)
+
+            os.replace(tmp_path, path)
+            logger.info(
+                "[XR] Trimmed %s: %s -> %s",
+                os.path.basename(path),
+                self._format_bytes(size),
+                self._format_bytes(len(tail)),
+            )
+        except Exception as e:
+            logger.error("[XR] Failed to trim %s: %s", path, e)
+            try:
+                os.remove(path + ".trim_tmp")
+            except Exception:
+                pass
+
+    def _start_log_rotation_scheduler(self):
+        async def rotation_loop():
+            try:
+                while True:
+                    now = datetime.now()
+                    next_midnight = (now + timedelta(days=1)).replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    )
+                    wait_seconds = (next_midnight - now).total_seconds()
+                    await asyncio.sleep(wait_seconds)
+                    self._check_and_rotate_logs()
+            except asyncio.CancelledError:
+                pass
+
+        if self._log_rotation_task:
+            self._log_rotation_task.cancel()
+        self._log_rotation_task = asyncio.ensure_future(rotation_loop())
 
     def _read_log_file_sync(self):
         lines = []
@@ -1647,6 +1725,7 @@ class XRay(loader.Module):
                 await message.answer(
                     self._s("bot_not_configured"),
                     parse_mode="HTML",
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
                 )
                 return
 
@@ -1655,19 +1734,33 @@ class XRay(loader.Module):
                 await message.answer(
                     self._s("bot_not_configured"),
                     parse_mode="HTML",
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
                 )
                 return
 
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text=self.strings["bot_copy_button"],
+                            copy_text=CopyTextButton(text=link),
+                        )
+                    ]
+                ]
+            )
+
             await message.answer(
-                self._s("bot_link_response", link=link),
+                self._s("bot_link_response"),
                 parse_mode="HTML",
+                reply_markup=keyboard,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
             )
         except Exception as e:
             logger.error("[XR] aiogram_watcher error: %s", e)
 
     @loader.command(
-        ru_doc="- instruction for XRay module",
-        en_doc="- instruction for XRay module",
+        ru_doc="XRay VLESS+Reality",
+        en_doc="XRay VLESS+Reality",
     )
     async def xr(self, message):
         args = utils.get_args_raw(message).strip()
