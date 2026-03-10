@@ -234,8 +234,8 @@ class Note(loader.Module):
             return
 
         if not parts:
-    await utils.answer(message, self._get_str("help").format(prefix=prefix))
-    return
+        await utils.answer(message, self._get_str("help").format(prefix=prefix))
+        return
 
         cmd = parts[0].lower()
 
