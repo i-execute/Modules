@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 # meta developer: FireJester.t.me 
 
 import contextlib
@@ -12,10 +12,75 @@ _URL_PATTERN = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
 
 @loader.tds
 class Buttons(loader.Module):
+    """Inline buttons constructor"""
 
     strings = {
         "name": "Buttons",
+    }
+
+    strings_en = {
+        "main_message": "Choose an action:",
         
+        "media_set": "<b>Media set</b>\nType: <code>{}</code>\nURL: <code>{}</code>",
+        "media_cleared": "<b>Media removed</b>",
+        "media_invalid": "<b>Provide a media URL</b>",
+        
+        "rows_set": "<b>Number of rows:</b> {}",
+        "rows_invalid": "<b>Specify a number from 1 to 10</b>",
+        
+        "btn_count_set": "<b>Row {}: {} buttons</b>",
+        "btn_count_invalid": "<b>Specify row (1-10) and number of buttons (1-10)</b>",
+        "row_not_exist": "<b>Row {} doesn't exist.</b> First create rows with <code>{prefix}buttons rows [1-10]</code>",
+        
+        "btn_text_set": "<b>Button [{},{}] is now:</b> <code>{}</code>",
+        "btn_text_invalid": "<b>Specify row, button number and text</b>",
+        "btn_not_exist": "<b>Button [{},{}] doesn't exist</b>",
+        
+        "response_set": "<b>Text for [{},{}] set</b>",
+        "response_invalid": "<b>Specify row, button number and text</b>",
+        
+        "default_btn_name": "none",
+        "default_response": "Text for button [{},{}] is not configured",
+        
+        "help_text": (
+            "<b>Buttons - Inline buttons setup</b>\n\n"
+            "<b>Sending:</b>\n"
+            "<code>{prefix}send</code> - Send message with buttons\n\n"
+            "<b>Media:</b>\n"
+            "<code>{prefix}buttons media [url]</code> - Set photo/video/gif\n"
+            "<code>{prefix}buttons media clear</code> - Remove media\n\n"
+            "<b>Buttons:</b>\n"
+            "<code>{prefix}buttons rows [1-10]</code> - Number of rows\n"
+            "<code>{prefix}buttons count [row] [1-10]</code> - Buttons per row\n"
+            "<code>{prefix}buttons name [row] [button] [text]</code> - Button name\n\n"
+            "<b>Texts:</b>\n"
+            "<code>{prefix}buttons response [row] [button] [text]</code> - Text on click\n"
+            "<code>{prefix}buttons msg [text]</code> - Main message\n\n"
+            "<b>Info:</b>\n"
+            "<code>{prefix}buttons status</code> - Current settings\n\n"
+            "<i>HTML markup is supported in texts</i>"
+        ),
+        
+        "status_text": (
+            "<b>Current settings</b>\n\n"
+            "<b>Media:</b> {media}\n"
+            "<b>Type:</b> {media_type}\n"
+            "<b>Message:</b>\n<code>{message}</code>\n\n"
+            "<b>Rows:</b> {rows}\n\n"
+            "{buttons_info}"
+        ),
+        
+        "status_no_media": "Not set",
+        "status_no_buttons": "Buttons not configured",
+        
+        "message_set": "<b>Main message set</b>",
+        "message_invalid": "<b>Provide message text</b>",
+        
+        "send_error": "<b>Send error:</b> <code>{}</code>",
+        "send_no_media": "<b>Media unavailable, sent without it</b>",
+    }
+
+    strings_ru = {
         "main_message": "Выберите действие:",
         
         "media_set": "<b>Медиа установлено</b>\nТип: <code>{}</code>\nURL: <code>{}</code>",
@@ -27,7 +92,7 @@ class Buttons(loader.Module):
         
         "btn_count_set": "<b>Ряд {}: {} кнопок</b>",
         "btn_count_invalid": "<b>Укажи ряд (1-10) и количество кнопок (1-10)</b>",
-        "row_not_exist": "<b>Ряд {} не существует.</b> Сначала создай ряды командой <code>.buttons rows [1-10]</code>",
+        "row_not_exist": "<b>Ряд {} не существует.</b> Сначала создай ряды командой <code>{prefix}buttons rows [1-10]</code>",
         
         "btn_text_set": "<b>Кнопка [{},{}] теперь:</b> <code>{}</code>",
         "btn_text_invalid": "<b>Укажи ряд, номер кнопки и текст</b>",
@@ -42,19 +107,19 @@ class Buttons(loader.Module):
         "help_text": (
             "<b>Buttons - Настройка инлайн кнопок</b>\n\n"
             "<b>Отправка:</b>\n"
-            "<code>.send</code> - Отправить сообщение с кнопками\n\n"
+            "<code>{prefix}send</code> - Отправить сообщение с кнопками\n\n"
             "<b>Медиа:</b>\n"
-            "<code>.buttons media [url]</code> - Установить фото/видео/гифку\n"
-            "<code>.buttons media clear</code> - Удалить медиа\n\n"
+            "<code>{prefix}buttons media [url]</code> - Установить фото/видео/гифку\n"
+            "<code>{prefix}buttons media clear</code> - Удалить медиа\n\n"
             "<b>Кнопки:</b>\n"
-            "<code>.buttons rows [1-10]</code> - Количество рядов\n"
-            "<code>.buttons count [ряд] [1-10]</code> - Кнопок в ряду\n"
-            "<code>.buttons name [ряд] [кнопка] [текст]</code> - Имя кнопки\n\n"
+            "<code>{prefix}buttons rows [1-10]</code> - Количество рядов\n"
+            "<code>{prefix}buttons count [ряд] [1-10]</code> - Кнопок в ряду\n"
+            "<code>{prefix}buttons name [ряд] [кнопка] [текст]</code> - Имя кнопки\n\n"
             "<b>Тексты:</b>\n"
-            "<code>.buttons response [ряд] [кнопка] [текст]</code> - Текст при нажатии\n"
-            "<code>.buttons msg [текст]</code> - Главное сообщение\n\n"
+            "<code>{prefix}buttons response [ряд] [кнопка] [текст]</code> - Текст при нажатии\n"
+            "<code>{prefix}buttons msg [текст]</code> - Главное сообщение\n\n"
             "<b>Инфо:</b>\n"
-            "<code>.buttons status</code> - Текущие настройки\n\n"
+            "<code>{prefix}buttons status</code> - Текущие настройки\n\n"
             "<i>Поддерживается HTML разметка в текстах</i>"
         ),
         
@@ -66,6 +131,9 @@ class Buttons(loader.Module):
             "<b>Рядов:</b> {rows}\n\n"
             "{buttons_info}"
         ),
+        
+        "status_no_media": "Не установлено",
+        "status_no_buttons": "Кнопки не настроены",
         
         "message_set": "<b>Главное сообщение установлено</b>",
         "message_invalid": "<b>Укажи текст сообщения</b>",
@@ -220,9 +288,12 @@ class Buttons(loader.Module):
             return parts[skip_words]
         return None
 
-    @loader.command()
+    @loader.command(
+        ru_doc="Отправить сообщение с инлайн кнопками",
+        en_doc="Send message with inline buttons",
+    )
     async def send(self, message):
-        """Отправить сообщение с инлайн кнопками"""
+        """Send message with inline buttons"""
         
         base_kwargs = {
             "message": message,
@@ -284,13 +355,20 @@ class Buttons(loader.Module):
             except Exception as e:
                 await utils.answer(message, self.strings["send_error"].format(str(e)[:100]))
 
-    @loader.command()
+    @loader.command(
+        ru_doc="Настройка инлайн кнопок",
+        en_doc="Inline buttons configuration",
+    )
     async def buttons(self, message):
-        """Настройка инлайн кнопок"""
+        """Inline buttons configuration"""
         args = utils.get_args_raw(message).strip()
+        prefix = self.get_prefix()
         
         if not args:
-            await utils.answer(message, self.strings["help_text"])
+            await utils.answer(
+                message,
+                self.strings["help_text"].format(prefix=prefix),
+            )
             return
         
         parts = args.split()
@@ -318,7 +396,10 @@ class Buttons(loader.Module):
             await self._handle_response(message, parts)
         
         else:
-            await utils.answer(message, self.strings["help_text"])
+            await utils.answer(
+                message,
+                self.strings["help_text"].format(prefix=prefix),
+            )
 
     async def _handle_media(self, message, parts):
         url = None
@@ -403,7 +484,10 @@ class Buttons(loader.Module):
             return
         
         if row > self._rows:
-            await utils.answer(message, self.strings["row_not_exist"].format(row))
+            await utils.answer(
+                message,
+                self.strings["row_not_exist"].format(row, prefix=self.get_prefix()),
+            )
             return
         
         row_str = str(row)
@@ -432,7 +516,10 @@ class Buttons(loader.Module):
         col_str = str(col)
         
         if row > self._rows:
-            await utils.answer(message, self.strings["row_not_exist"].format(row))
+            await utils.answer(
+                message,
+                self.strings["row_not_exist"].format(row, prefix=self.get_prefix()),
+            )
             return
         
         if row_str not in self._buttons:
@@ -472,7 +559,10 @@ class Buttons(loader.Module):
         col_str = str(col)
         
         if row > self._rows:
-            await utils.answer(message, self.strings["row_not_exist"].format(row))
+            await utils.answer(
+                message,
+                self.strings["row_not_exist"].format(row, prefix=self.get_prefix()),
+            )
             return
         
         if row_str not in self._buttons:
@@ -503,7 +593,7 @@ class Buttons(loader.Module):
             media_preview = self._media[:40] + "..." if len(self._media) > 40 else self._media
             media_status = f"<code>{media_preview}</code>"
         else:
-            media_status = "Не установлено"
+            media_status = self.strings["status_no_media"]
         
         media_type_status = self._media_type.upper() if self._media_type else "-"
         
@@ -526,7 +616,7 @@ class Buttons(loader.Module):
                 
                 buttons_info.append(f"<b>Ряд {row_num}:</b> {' '.join(btn_names)}")
         
-        buttons_text = "\n".join(buttons_info) if buttons_info else "Кнопки не настроены"
+        buttons_text = "\n".join(buttons_info) if buttons_info else self.strings["status_no_buttons"]
         
         msg_preview = self._message[:80] + "..." if len(self._message) > 80 else self._message
         
@@ -535,5 +625,5 @@ class Buttons(loader.Module):
             media_type=media_type_status,
             message=msg_preview,
             rows=self._rows,
-            buttons_info=buttons_text
+            buttons_info=buttons_text,
         ))
