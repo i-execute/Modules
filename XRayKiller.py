@@ -152,6 +152,7 @@ class XRayKiller(loader.Module):
         en_doc="Destroy everything xray related",
     )
     async def xrkill(self, message):
+        """Destroy everything xray related"""
         prefix = self.get_prefix()
         m = await utils.answer(message, self.strings("scanning"))
 

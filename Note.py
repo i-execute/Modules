@@ -222,8 +222,12 @@ class Note(loader.Module):
                 return msg_id
         return None
 
-    @loader.command(ru_doc="Управление заметками", en_doc="Manage notes")
+    @loader.command(
+        ru_doc="Управление заметками",
+        en_doc="Manage notes",
+    )
     async def note(self, message):
+        """Manage notes"""
         args = utils.get_args_raw(message).strip()
         await self._get_premium_status()
         prefix = self.get_prefix()

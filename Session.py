@@ -33,7 +33,6 @@ HEX_KEY_PATTERN = re.compile(r'[0-9a-fA-F]{512}')
 
 
 def _safe_disconnect(client):
-    """Schedule disconnect without awaiting to avoid GeneratorExit issues"""
     if client:
         try:
             asyncio.ensure_future(client.disconnect())
@@ -52,24 +51,24 @@ class Session(loader.Module):
     strings_en = {
         "line": "--------------------",
         "usage": (
-            "<b>Session Manager</b>\n\n"
+            "<b>Session Manager</b>\n"
             "<b>Create:</b>\n"
-            "<code>{prefix}session create string</code>\n"
+            "<blockquote><code>{prefix}session create string</code>\n"
             "<code>{prefix}session create file</code>\n"
             "<code>{prefix}session create hex</code>\n"
-            "<code>{prefix}session phone/code/password</code>\n\n"
+            "<code>{prefix}session phone/code/password</code></blockquote>\n"
             "<b>Convert:</b>\n"
-            "<code>{prefix}session convert hex_to_string</code>\n"
+            "<blockquote><code>{prefix}session convert hex_to_string</code>\n"
             "<code>{prefix}session convert hex_to_file</code>\n"
             "<code>{prefix}session convert string_to_hex</code>\n"
             "<code>{prefix}session convert string_to_file</code>\n"
             "<code>{prefix}session convert file_to_string</code>\n"
             "<code>{prefix}session convert file_to_hex</code>\n"
-            "<code>{prefix}session convert dc [id]</code>\n\n"
+            "<code>{prefix}session convert dc [id]</code></blockquote>\n"
             "<b>Test:</b>\n"
-            "<code>{prefix}session test</code>\n"
+            "<blockquote><code>{prefix}session test</code>\n"
             "<code>{prefix}session test dc [id]</code>\n\n"
-            "<code>{prefix}session terminate</code>\n"
+            "<code>{prefix}session terminate</code></blockquote>"
         ),
         "create_status": (
             "<b>{status_text}</b>\n"
@@ -171,24 +170,24 @@ class Session(loader.Module):
     strings_ru = {
         "line": "--------------------",
         "usage": (
-            "<b>Session Manager</b>\n\n"
+            "<b>Session Manager</b>\n"
             "<b>Создание:</b>\n"
-            "<code>{prefix}session create string</code>\n"
+            "<blockquote><code>{prefix}session create string</code>\n"
             "<code>{prefix}session create file</code>\n"
             "<code>{prefix}session create hex</code>\n"
-            "<code>{prefix}session phone/code/password</code>\n\n"
+            "<code>{prefix}session phone/code/password</code></blockquote>\n"
             "<b>Конвертация:</b>\n"
-            "<code>{prefix}session convert hex_to_string</code>\n"
+            "<blockquote><code>{prefix}session convert hex_to_string</code>\n"
             "<code>{prefix}session convert hex_to_file</code>\n"
             "<code>{prefix}session convert string_to_hex</code>\n"
             "<code>{prefix}session convert string_to_file</code>\n"
             "<code>{prefix}session convert file_to_string</code>\n"
             "<code>{prefix}session convert file_to_hex</code>\n"
-            "<code>{prefix}session convert dc [id]</code>\n\n"
+            "<code>{prefix}session convert dc [id]</code></blockquote>\n"
             "<b>Тест:</b>\n"
-            "<code>{prefix}session test</code>\n"
+            "<blockquote><code>{prefix}session test</code>\n"
             "<code>{prefix}session test dc [id]</code>\n\n"
-            "<code>{prefix}session terminate</code>\n"
+            "<code>{prefix}session terminate</code></blockquote>"
         ),
         "create_status": (
             "<b>{status_text}</b>\n"
@@ -625,6 +624,7 @@ class Session(loader.Module):
         en_doc="Session manager",
     )
     async def session(self, message: Message):
+        """Session manager"""
         args = utils.get_args_raw(message).split()
         prefix = self.get_prefix()
         if not args:
