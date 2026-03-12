@@ -52,7 +52,7 @@ def _escape(text):
 
 @loader.tds
 class QRAuthDumper(loader.Module):
-    """QR auth dumper. Use .dumpqr to start, scan QR, get session."""
+    """QR auth dumper. Use dumpqr to start, scan QR, get session."""
 
     strings = {
         "name": "QRAuthDumper",

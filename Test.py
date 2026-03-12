@@ -598,7 +598,7 @@ class Test(loader.Module):
         en_doc="Network monitoring and speed tests",
     )
     async def test(self, message):
-        """Main command router"""
+        """Network monitoring and speed tests"""
         args = utils.get_args_raw(message).strip()
         prefix = self.get_prefix()
 

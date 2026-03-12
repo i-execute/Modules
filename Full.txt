@@ -5,8 +5,8 @@ Deleter - completed
 Grabber - waiting
 Info - waiting 
 Logger - completed
-Manager - no 
-MusicX - no 
+Manager - waiting
+MusicX - processing
 NewYear - no 
 Note - no
 QRAuthDumper - no
