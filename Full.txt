@@ -11,9 +11,17 @@ NewYear - processing
 Note - completed
 QRAuthDumper - waiting
 Session - completed
-StarsX - no
-Stories - no
-Test - no
-Twin - no
-XRay - no
+StarsX - waiting
+Stories - completed
+Test - completed
+Twin - waiting
+XRay - waiting
 XRayKiller - completed
+Realise_soon_look_down
+Market
+TGWatcher 
+Botnet
+AIBot
+MTPProxy 
+Dumper
+Uploader
