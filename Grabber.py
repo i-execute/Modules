@@ -1,4 +1,4 @@
-__version__ = (1, 1, 0)
+__version__ = (2, 0, 0)
 # meta developer: FireJester.t.me 
 
 import os
@@ -167,9 +167,13 @@ class SafeSet:
 
 @loader.tds
 class Grabber(loader.Module):
+    """Universal media downloader via bot"""
+
     strings = {
         "name": "Grabber",
-        
+    }
+
+    strings_en = {
         "line": "----------------",
         
         "btn_video": "Video",
@@ -184,8 +188,8 @@ class Grabber(loader.Module):
         "btn_confirm": "Download",
         "btn_retry": "Retry",
         
-        "no_token": "<b>Token not specified!</b>\nUse: <code>.grabber token [token]</code>",
-        "token_stored": "<b>Token saved!</b>\nStart: <code>.grabber on</code>",
+        "no_token": "<b>Token not specified!</b>\nUse: <code>{prefix}grabber token [token]</code>",
+        "token_stored": "<b>Token saved!</b>\nStart: <code>{prefix}grabber on</code>",
         "need_token": "<b>Specify token or reply to message with it!</b>",
         "already_running": "<b>Already running!</b>",
         "not_running": "<b>Bot not running!</b>",
@@ -212,7 +216,7 @@ class Grabber(loader.Module):
         "topic_not_active": "<b>This topic is not active! First send /start in this topic.</b>",
         "topic_not_in_group": "<b>This command only works in groups!</b>",
         "topic_not_forum": "<b>This group doesn't have topics enabled!</b>",
-        "topic_usage": "<b>Usage:</b> <code>.grabber topic on/off</code>",
+        "topic_usage": "<b>Usage:</b> <code>{prefix}grabber topic on/off</code>",
         
         "deps_processing": "<b>Installing dependencies...</b>",
         "deps_result": "<b>Dependencies check:</b>\n\n{results}",
@@ -222,18 +226,18 @@ class Grabber(loader.Module):
         
         "usage": (
             "<b>Grabber - Universal media downloader</b>\n\n"
-            "<code>.grabber on</code> - Start\n"
-            "<code>.grabber off</code> - Stop\n"
-            "<code>.grabber token [token]</code> - Set bot token\n"
-            "<code>.grabber start</code> - Install dependencies\n"
-            "<code>.grabber reboot</code> - Clear cache and restart\n"
-            "<code>.grabber clear</code> - Factory reset\n"
-            "<code>.grabber cookies add</code> - Add cookies (reply to .txt)\n"
-            "<code>.grabber cookies remove</code> - Remove cookies\n"
-            "<code>.grabber topic on/off</code> - Enable/disable bot in topic\n"
-            "<code>.grabber status</code> - Status\n"
-            "<code>.grabber process</code> - Current process\n"
-            "<code>.grabber logs</code> - Download logs\n"
+            "<code>{prefix}grabber on</code> - Start\n"
+            "<code>{prefix}grabber off</code> - Stop\n"
+            "<code>{prefix}grabber token [token]</code> - Set bot token\n"
+            "<code>{prefix}grabber start</code> - Install dependencies\n"
+            "<code>{prefix}grabber reboot</code> - Clear cache and restart\n"
+            "<code>{prefix}grabber clear</code> - Factory reset\n"
+            "<code>{prefix}grabber cookies add</code> - Add cookies (reply to .txt)\n"
+            "<code>{prefix}grabber cookies remove</code> - Remove cookies\n"
+            "<code>{prefix}grabber topic on/off</code> - Enable/disable bot in topic\n"
+            "<code>{prefix}grabber status</code> - Status\n"
+            "<code>{prefix}grabber process</code> - Current process\n"
+            "<code>{prefix}grabber logs</code> - Download logs\n"
         ),
         
         "status_template": (
@@ -330,6 +334,169 @@ class Grabber(loader.Module):
         "react_fail": "\U0001F971",
         
         "quality_menu": "<b>Select quality:</b>",
+    }
+
+    strings_ru = {
+        "line": "----------------",
+        
+        "btn_video": "Видео",
+        "btn_audio": "Аудио (MP3)",
+        "btn_cancel": "Отмена",
+        "btn_back": "Назад",
+        
+        "btn_orig_thumb": "С превью",
+        "btn_orig_clean": "Без превью",
+        "btn_custom": "Редактор",
+        "btn_no_cover": "Без обложки",
+        "btn_confirm": "Скачать",
+        "btn_retry": "Заново",
+        
+        "no_token": "<b>Токен не указан!</b>\nИспользуй: <code>{prefix}grabber token [токен]</code>",
+        "token_stored": "<b>Токен сохранён!</b>\nЗапуск: <code>{prefix}grabber on</code>",
+        "need_token": "<b>Укажи токен или ответь на сообщение с ним!</b>",
+        "already_running": "<b>Уже запущен!</b>",
+        "not_running": "<b>Бот не запущен!</b>",
+        "started": "<b>Grabber запущен!</b>",
+        "stopped": "<b>Grabber остановлен!</b>",
+        "start_failed": "<b>Ошибка запуска:</b>\n<code>{error}</code>",
+        
+        "reboot_start": "<b>ПЕРЕЗАГРУЗКА...</b>",
+        "reboot_done": "<b>Перезагрузка завершена, бот перезапущен!</b>",
+        "reboot_no_token": "<b>Нет токена для перезапуска!</b>",
+        "clear_done": "<b>Сброс к заводским настройкам!</b>\nТокен, куки, кэш - всё удалено.",
+        
+        "cookie_saved": "<b>Куки сохранены!</b>",
+        "cookie_cleared": "<b>Куки удалены!</b>",
+        "cookie_empty": "<b>Куки не установлены.</b>",
+        "cookie_ok": "<b>Куки установлены</b>",
+        "no_reply_file": "<b>Ответь на .txt файл с куки!</b>",
+        "invalid_ext": "<b>Файл должен иметь расширение .txt!</b>",
+        "cookie_err": "<b>Ошибка сохранения куки:</b>\n<code>{}</code>",
+        "cookie_invalid_format": "<b>Неверный формат куки! Ожидается формат Netscape.</b>",
+        
+        "topic_enabled": "<b>Бот включён в этом топике!</b>",
+        "topic_disabled": "<b>Бот отключён в этом топике!</b>",
+        "topic_not_active": "<b>Этот топик не активен! Сначала отправьте /start в этом топике.</b>",
+        "topic_not_in_group": "<b>Эта команда работает только в группах!</b>",
+        "topic_not_forum": "<b>В этой группе не включены топики!</b>",
+        "topic_usage": "<b>Использование:</b> <code>{prefix}grabber topic on/off</code>",
+        
+        "deps_processing": "<b>Установка зависимостей...</b>",
+        "deps_result": "<b>Проверка зависимостей:</b>\n\n{results}",
+        
+        "logs_empty": "<b>Логов скачиваний пока нет.</b>",
+        "logs_generated": "<b>Лог последних {count} скачиваний.</b>",
+        
+        "usage": (
+            "<b>Grabber - Универсальный загрузчик медиа</b>\n\n"
+            "<code>{prefix}grabber on</code> - Запуск\n"
+            "<code>{prefix}grabber off</code> - Остановка\n"
+            "<code>{prefix}grabber token [токен]</code> - Установить токен бота\n"
+            "<code>{prefix}grabber start</code> - Установить зависимости\n"
+            "<code>{prefix}grabber reboot</code> - Очистить кэш и перезапустить\n"
+            "<code>{prefix}grabber clear</code> - Сброс к заводским\n"
+            "<code>{prefix}grabber cookies add</code> - Добавить куки (реплай на .txt)\n"
+            "<code>{prefix}grabber cookies remove</code> - Удалить куки\n"
+            "<code>{prefix}grabber topic on/off</code> - Вкл/выкл бота в топике\n"
+            "<code>{prefix}grabber status</code> - Статус\n"
+            "<code>{prefix}grabber process</code> - Текущий процесс\n"
+            "<code>{prefix}grabber logs</code> - Логи скачиваний\n"
+        ),
+        
+        "status_template": (
+            "<b>Статус Grabber</b>\n\n"
+            "Статус: {status}\n"
+            "Куки: {cookies}\n"
+            "В очереди: {pending}\n"
+            "Активно: {active}\n"
+            "Завершено: {completed}\n"
+            "Ошибки: {errors}"
+        ),
+        "status_running": "Работает",
+        "status_stopped": "Остановлен",
+        
+        "no_active_process": "<b>Нет активного процесса</b>",
+        "analyzing": "<b>Анализ...</b>",
+        "found_media": "<b>{title}</b>\n\nДлительность: {duration}\nВыберите формат:",
+        "found_media_group": "<b>{title}</b>\n\nДлительность: {duration}",
+        "grab_failed": "<b>Ошибка:</b>\n<code>{error}</code>",
+        "no_link": "<b>Ссылка не найдена!</b>",
+        "queue_pos": "<b>Очередь: #{pos}</b>",
+        "starting": "<b>Начинаю загрузку!</b>",
+        "too_large": "<b>Файл слишком большой!</b>\nМакс: {max_mb}MB, Файл: {size_mb:.1f}MB",
+        "cancelled": "<b>Отменено</b>",
+        "already_processing": "Уже обрабатывается!",
+        
+        "hello": "<b>Привет, {user_link}!</b>\n\nОтправь ссылку на видео!",
+        "hello_fallback": "<b>Привет!</b>\n\nОтправь ссылку на видео!",
+        "hello_group": "<b>Бот активирован в этой группе!</b>\n\nОтправляйте ссылки на видео - я предложу скачать.",
+        "hello_topic": "<b>Бот активирован в этом топике!</b>\n\nОтправляйте ссылки на видео - я предложу скачать.",
+        
+        "file_caption": "<b>{title}</b>\n{size_mb:.1f} MB | {width}x{height}",
+        "audio_caption": "<b>{title}</b>\n{size_mb:.1f} MB",
+        
+        "progress_header": "<b>Загрузка...</b>\n",
+        "progress_title": "<code>{title}</code>",
+        
+        "video_waiting": "Видео: ожидание...",
+        "video_done": "Видео: готово {size:.1f} MB",
+        "video_progress": "Видео: {pct:.1f}% ({size:.1f}/{total:.1f} MB) | {speed}",
+        
+        "audio_waiting": "Аудио: ожидание...",
+        "audio_done": "Аудио: готово {size:.1f} MB",
+        "audio_progress": "Аудио: {pct:.1f}% ({size:.1f}/{total:.1f} MB) | {speed}",
+        
+        "merge_waiting": "Слияние: ожидание...",
+        "merge_done": "Слияние: готово {size:.1f} MB",
+        "merge_active": "Слияние: FFmpeg работает...",
+        "merge_starting": "Слияние: запуск...",
+        
+        "convert_waiting": "Конвертация: ожидание...",
+        "convert_done": "Конвертация: готово {size:.1f} MB",
+        "convert_active": "Конвертация: FFmpeg...",
+        
+        "upload_waiting": "Telegram: ожидание...",
+        "upload_done": "Telegram: отправлено!",
+        "upload_progress": "Telegram: {elapsed:.1f}с",
+        "upload_success": "Telegram: {elapsed:.1f}с",
+        
+        "stage_init": "Инициализация...",
+        "stage_video": "Загрузка видео...",
+        "stage_audio": "Загрузка аудио...",
+        "stage_ffmpeg": "Обработка FFmpeg...",
+        "stage_probe": "Анализ файла...",
+        "stage_upload": "Загрузка в Telegram...",
+        "stage_done": "Готово!",
+        "stage_done_success": "Успешно загружено!",
+        
+        "time_stage": "Время: {elapsed:.1f}с | {stage_text}",
+        
+        "audio_menu": "<b>Выберите вариант:</b>",
+        "editor_mode": "<b>Режим редактора!</b>\n\nОтправьте НАЗВАНИЕ ТРЕКА:",
+        "edit_title_done": "Название: <b>{}</b>\n\nТеперь введите ИМЯ АРТИСТА:",
+        "edit_artist_done": "Артист: <b>{}</b>\n\nТеперь отправьте ОБЛОЖКУ (PNG/JPEG как ФАЙЛ!):",
+        "only_image": "<b>Только PNG или JPEG как ФАЙЛ!</b>",
+        "downloading_image": "<b>Загрузка изображения...</b>",
+        "text_needed_image": "<b>Нужен PNG/JPEG файл, не текст!</b>",
+        "confirm_menu": (
+            "<b>Проверьте данные:</b>\n\n"
+            "Трек: {title}\n"
+            "Артист: {artist}\n"
+            "Обложка: {thumb}\n\n"
+            "Всё верно?"
+        ),
+        "thumb_yes": "Да",
+        "thumb_no": "Нет",
+        "op_cancelled": "<b>Операция отменена.</b>",
+        "not_your_editor": "<b>Это не ваш редактор!</b>",
+        "session_expired": "Сессия истекла",
+        
+        "group_added": "<b>Группа добавлена в мониторинг.</b>",
+        
+        "react_ok": "\U0001F44C",
+        "react_fail": "\U0001F971",
+        
+        "quality_menu": "<b>Выберите качество:</b>",
     }
 
     def __init__(self):
@@ -1033,13 +1200,21 @@ class Grabber(loader.Module):
         
         return thumb_path, cover_data
 
-    @loader.command()
+    @loader.command(
+        ru_doc="Управление медиа-загрузчиком",
+        en_doc="Media downloader management",
+    )
     async def grabber(self, message):
+        """Media downloader management"""
         args = utils.get_args(message)
         cmd = args[0].lower() if args else None
+        prefix = self.get_prefix()
 
         if not cmd:
-            await utils.answer(message, self.strings["usage"])
+            await utils.answer(
+                message,
+                self.strings["usage"].format(prefix=prefix),
+            )
             return
 
         if cmd == "status":
@@ -1074,7 +1249,10 @@ class Grabber(loader.Module):
                 await utils.answer(message, self.strings["need_token"])
                 return
             self._db.set("Grabber", "tkn", token)
-            await utils.answer(message, self.strings["token_stored"])
+            await utils.answer(
+                message,
+                self.strings["token_stored"].format(prefix=prefix),
+            )
 
         elif cmd == "start":
             msg = await utils.answer(message, self.strings["deps_processing"])
@@ -1131,7 +1309,10 @@ class Grabber(loader.Module):
                 return
             tkn = self._db.get("Grabber", "tkn")
             if not tkn:
-                await utils.answer(message, self.strings["no_token"])
+                await utils.answer(
+                    message,
+                    self.strings["no_token"].format(prefix=prefix),
+                )
                 return
             try:
                 await self._launch(tkn)
@@ -1201,12 +1382,18 @@ class Grabber(loader.Module):
 
         elif cmd == "topic":
             if len(args) < 2:
-                await utils.answer(message, self.strings["topic_usage"])
+                await utils.answer(
+                    message,
+                    self.strings["topic_usage"].format(prefix=prefix),
+                )
                 return
             
             action = args[1].lower()
             if action not in ("on", "off"):
-                await utils.answer(message, self.strings["topic_usage"])
+                await utils.answer(
+                    message,
+                    self.strings["topic_usage"].format(prefix=prefix),
+                )
                 return
             
             if message.is_private:
@@ -1283,12 +1470,21 @@ class Grabber(loader.Module):
                     await utils.answer(message, self.strings["cookie_cleared"])
                 
                 else:
-                    await utils.answer(message, self.strings["usage"])
+                    await utils.answer(
+                        message,
+                        self.strings["usage"].format(prefix=prefix),
+                    )
             else:
-                await utils.answer(message, self.strings["usage"])
+                await utils.answer(
+                    message,
+                    self.strings["usage"].format(prefix=prefix),
+                )
 
         else:
-            await utils.answer(message, self.strings["usage"])
+            await utils.answer(
+                message,
+                self.strings["usage"].format(prefix=prefix),
+            )
 
     async def _launch(self, tkn):
         await self._shutdown()
