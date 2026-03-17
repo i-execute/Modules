@@ -1,4 +1,4 @@
-__version__ = (2, 0, 0)
+__version__ = (3, 0, 0)
 # meta developer: FireJester.t.me
 
 import logging
@@ -98,23 +98,28 @@ def _parse_time(s):
 
 @loader.tds
 class ChatRecovery(loader.Module):
+    """Recover deleted chat history between two accounts"""
+
     strings = {
         "name": "ChatRecovery",
+    }
+
+    strings_en = {
         "line": "--------------------",
         "help": (
-            "<b>ChatRecovery v2.0.0</b>\n\n"
-            "<code>.recovery start</code>\n"
-            "<code>.recovery from id</code>\n"
-            "<code>.recovery session donor string</code>\n"
-            "<code>.recovery session recipient string</code>\n"
-            "<code>.recovery parsing username</code>\n"
-            "<code>.recovery timezone -12..12</code>\n"
-            "<code>.recovery work 8:00 22:00</code>\n"
-            "<code>.recovery now</code>\n"
-            "<code>.recovery resume</code>\n"
-            "<code>.recovery status</code>\n"
-            "<code>.recovery terminate</code>\n"
-            "<code>.recovery forcerm</code>\n"
+            "<b>ChatRecovery</b>\n\n"
+            "<code>{prefix}recovery start</code>\n"
+            "<code>{prefix}recovery from id</code>\n"
+            "<code>{prefix}recovery session donor string</code>\n"
+            "<code>{prefix}recovery session recipient string</code>\n"
+            "<code>{prefix}recovery parsing username</code>\n"
+            "<code>{prefix}recovery timezone -12..12</code>\n"
+            "<code>{prefix}recovery work 8:00 22:00</code>\n"
+            "<code>{prefix}recovery now</code>\n"
+            "<code>{prefix}recovery resume</code>\n"
+            "<code>{prefix}recovery status</code>\n"
+            "<code>{prefix}recovery terminate</code>\n"
+            "<code>{prefix}recovery forcerm</code>\n"
         ),
         "status_template": (
             "<b>Chat Recovery</b>\n"
@@ -144,14 +149,14 @@ class ChatRecovery(loader.Module):
             "Timezone: UTC{tz}\n"
             "{line}"
         ),
-        "err_no_start": "<b>Use .recovery start first</b>",
-        "err_running": "<b>Process running. Use .recovery terminate</b>",
+        "err_no_start": "<b>Use {prefix}recovery start first</b>",
+        "err_running": "<b>Process running. Use {prefix}recovery terminate</b>",
         "err_not_ready": "<b>Fill all fields: deleted ID, donor session, recipient session, work hours</b>",
         "err_no_session": "<b>Provide StringSession in args or reply</b>",
         "err_invalid_tz": "<b>Timezone must be -12 to +12</b>",
         "err_no_progress": "<b>No saved progress to resume</b>",
-        "err_invalid_work": "<b>Format: .recovery work 8:00 22:00</b>",
-        "err_no_work": "<b>Set work hours first: .recovery work 8:00 22:00</b>",
+        "err_invalid_work": "<b>Format: {prefix}recovery work 8:00 22:00</b>",
+        "err_no_work": "<b>Set work hours first: {prefix}recovery work 8:00 22:00</b>",
         "terminated": "<b>Process terminated.</b>",
         "forcerm_done": "<b>All data wiped.</b>",
         "done": (
@@ -169,7 +174,7 @@ class ChatRecovery(loader.Module):
             "Recovering chat between "
             "<a href='tg://user?id={donor_id}'>donor</a> and "
             "<a href='tg://user?id={recipient_id}'>recipient</a>\n"
-            "Use <code>.recovery now</code>"
+            "Use <code>{prefix}recovery now</code>"
         ),
         "parsing_start": "<b>Parsing entities from gifts of @{username}...</b>",
         "parsing_done": (
@@ -183,7 +188,7 @@ class ChatRecovery(loader.Module):
         "resolve_start": "<b>Resolving entities...</b>",
         "resolve_fail": (
             "<b>Entity resolve failed:</b> <code>{err}</code>\n\n"
-            "Try <code>.recovery parsing username</code> to cache entities"
+            "Try <code>{prefix}recovery parsing username</code> to cache entities"
         ),
         "resumed": "<b>Resumed from message {idx}/{total}</b>",
         "progress_saved": "<b>Progress saved.</b>",
@@ -208,9 +213,131 @@ class ChatRecovery(loader.Module):
             "Albums: {albums}\n"
             "Work: {work_hours}\n"
             "{line}\n"
-            "Use <code>.recovery resume</code> to continue"
+            "Use <code>{prefix}recovery resume</code> to continue"
         ),
         "status_none": "<b>No active or saved recovery process</b>",
+        "provide_id": "<b>Provide deleted account ID</b>",
+        "id_must_be_number": "<b>ID must be a number</b>",
+        "connection_error": "<b>Connection error:</b> <code>{err}</code>",
+        "tz_set": "<b>Timezone: UTC{tz}</b>",
+    }
+
+    strings_ru = {
+        "line": "--------------------",
+        "help": (
+            "<b>ChatRecovery</b>\n\n"
+            "<code>{prefix}recovery start</code>\n"
+            "<code>{prefix}recovery from id</code>\n"
+            "<code>{prefix}recovery session donor string</code>\n"
+            "<code>{prefix}recovery session recipient string</code>\n"
+            "<code>{prefix}recovery parsing username</code>\n"
+            "<code>{prefix}recovery timezone -12..12</code>\n"
+            "<code>{prefix}recovery work 8:00 22:00</code>\n"
+            "<code>{prefix}recovery now</code>\n"
+            "<code>{prefix}recovery resume</code>\n"
+            "<code>{prefix}recovery status</code>\n"
+            "<code>{prefix}recovery terminate</code>\n"
+            "<code>{prefix}recovery forcerm</code>\n"
+        ),
+        "status_template": (
+            "<b>Chat Recovery</b>\n"
+            "{line}\n"
+            "ID удалённого: <code>{deleted_id}</code>\n"
+            "ID донора: <code>{donor_id}</code>\n"
+            "ID получателя: <code>{recipient_id}</code>\n"
+            "Рабочие часы: <code>{work_hours}</code>\n"
+            "{line}\n"
+            "{extra}"
+        ),
+        "debug_template": (
+            "<b>Chat Recovery - Обработка</b>\n"
+            "{line}\n"
+            "<b>Этап 1:</b> {stage1_status}\n"
+            "Статус: {stage1_detail}\n"
+            "Проанализировано: {analyzed} / Всего: {total}\n"
+            "{line}\n"
+            "<b>Этап 2:</b> {stage2_status}\n"
+            "Статус: {stage2_detail}\n"
+            "Обработано: {processed} / {total_process}\n"
+            "Пропущено: {skipped}\n"
+            "Альбомы: {albums}\n"
+            "{line}\n"
+            "ЗАВЕРШЕНИЕ: {finish_time}\n"
+            "Работа: {work_hours}\n"
+            "Часовой пояс: UTC{tz}\n"
+            "{line}"
+        ),
+        "err_no_start": "<b>Сначала используйте {prefix}recovery start</b>",
+        "err_running": "<b>Процесс запущен. Используйте {prefix}recovery terminate</b>",
+        "err_not_ready": "<b>Заполните все поля: ID удалённого, сессия донора, сессия получателя, рабочие часы</b>",
+        "err_no_session": "<b>Укажите StringSession в аргументах или реплае</b>",
+        "err_invalid_tz": "<b>Часовой пояс должен быть от -12 до +12</b>",
+        "err_no_progress": "<b>Нет сохранённого прогресса для продолжения</b>",
+        "err_invalid_work": "<b>Формат: {prefix}recovery work 8:00 22:00</b>",
+        "err_no_work": "<b>Сначала установите рабочие часы: {prefix}recovery work 8:00 22:00</b>",
+        "terminated": "<b>Процесс остановлен.</b>",
+        "forcerm_done": "<b>Все данные удалены.</b>",
+        "done": (
+            "<b>Восстановление завершено!</b>\n"
+            "Обработано: {processed}\n"
+            "Пропущено: {skipped}\n"
+            "Альбомы: {albums}\n"
+            "Время: {elapsed}"
+        ),
+        "break_msg": "Перерыв {minutes} мин...",
+        "resume_msg": "Продолжение...",
+        "flood_msg": "FloodWait {seconds}с, ожидание...",
+        "outside_work": "Вне рабочих часов. Сон до {wake_time}...",
+        "ready_to_go": (
+            "Восстановление чата между "
+            "<a href='tg://user?id={donor_id}'>донором</a> и "
+            "<a href='tg://user?id={recipient_id}'>получателем</a>\n"
+            "Используйте <code>{prefix}recovery now</code>"
+        ),
+        "parsing_start": "<b>Парсинг сущностей из подарков @{username}...</b>",
+        "parsing_done": (
+            "<b>Парсинг завершён!</b>\n"
+            "Найдено у донора: {donor_count}\n"
+            "Найдено у получателя: {recipient_count}\n"
+            "Всего уникальных: {total}"
+        ),
+        "parsing_no_user": "<b>Укажите юзернейм</b>",
+        "parsing_no_clients": "<b>Сначала подключите донора и получателя</b>",
+        "resolve_start": "<b>Разрешение сущностей...</b>",
+        "resolve_fail": (
+            "<b>Ошибка разрешения сущностей:</b> <code>{err}</code>\n\n"
+            "Попробуйте <code>{prefix}recovery parsing username</code> для кэширования"
+        ),
+        "resumed": "<b>Продолжение с сообщения {idx}/{total}</b>",
+        "progress_saved": "<b>Прогресс сохранён.</b>",
+        "work_set": "<b>Рабочие часы установлены: {start} - {end}</b>",
+        "status_active": (
+            "<b>Статус восстановления</b>\n"
+            "{line}\n"
+            "Состояние: <b>АКТИВНО</b>\n"
+            "Обработано: {processed} / {total}\n"
+            "Пропущено: {skipped}\n"
+            "Альбомы: {albums}\n"
+            "ЗАВЕРШЕНИЕ: {finish_time}\n"
+            "Работа: {work_hours}\n"
+            "{line}"
+        ),
+        "status_saved": (
+            "<b>Статус восстановления</b>\n"
+            "{line}\n"
+            "Состояние: <b>ПАУЗА (прогресс сохранён)</b>\n"
+            "Обработано: {processed} / {total}\n"
+            "Пропущено: {skipped}\n"
+            "Альбомы: {albums}\n"
+            "Работа: {work_hours}\n"
+            "{line}\n"
+            "Используйте <code>{prefix}recovery resume</code> для продолжения"
+        ),
+        "status_none": "<b>Нет активного или сохранённого процесса восстановления</b>",
+        "provide_id": "<b>Укажите ID удалённого аккаунта</b>",
+        "id_must_be_number": "<b>ID должен быть числом</b>",
+        "connection_error": "<b>Ошибка подключения:</b> <code>{err}</code>",
+        "tz_set": "<b>Часовой пояс: UTC{tz}</b>",
     }
 
     def __init__(self):
@@ -522,8 +649,10 @@ class ChatRecovery(loader.Module):
 
     def _extra_text(self):
         if self._all_ready():
+            prefix = self.get_prefix()
             return self.strings["ready_to_go"].format(
                 donor_id=self._donor_id, recipient_id=self._recipient_id,
+                prefix=prefix,
             )
         return ""
 
@@ -676,11 +805,19 @@ class ChatRecovery(loader.Module):
         if errors:
             raise Exception(f"Cannot resolve: {', '.join(errors)}")
 
-    @loader.command(ru_doc="Chat recovery manager")
+    @loader.command(
+        ru_doc="Управление восстановлением чата",
+        en_doc="Chat recovery manager",
+    )
     async def recovery(self, message):
+        """Chat recovery manager"""
         args = utils.get_args_raw(message).split()
+        prefix = self.get_prefix()
         if not args:
-            await utils.answer(message, self.strings["help"])
+            await utils.answer(
+                message,
+                self.strings["help"].format(prefix=prefix),
+            )
             return
         cmd = args[0].lower()
         if cmd == "start":
@@ -706,11 +843,18 @@ class ChatRecovery(loader.Module):
         elif cmd == "forcerm":
             await self._cmd_forcerm(message)
         else:
-            await utils.answer(message, self.strings["help"])
+            await utils.answer(
+                message,
+                self.strings["help"].format(prefix=prefix),
+            )
 
     async def _cmd_start(self, message):
         if self._recovering:
-            return await utils.answer(message, self.strings["err_running"])
+            prefix = self.get_prefix()
+            return await utils.answer(
+                message,
+                self.strings["err_running"].format(prefix=prefix),
+            )
         await self._full_cleanup()
         self._active = True
         self._chat_id = message.chat_id
@@ -718,29 +862,49 @@ class ChatRecovery(loader.Module):
         self._status_msg = await utils.answer(message, self._build_status())
 
     async def _cmd_from(self, message, args):
+        prefix = self.get_prefix()
         if not self._active:
-            return await utils.answer(message, self.strings["err_no_start"])
+            return await utils.answer(
+                message,
+                self.strings["err_no_start"].format(prefix=prefix),
+            )
         if self._recovering:
-            return await utils.answer(message, self.strings["err_running"])
+            return await utils.answer(
+                message,
+                self.strings["err_running"].format(prefix=prefix),
+            )
         if len(args) < 2:
-            return await utils.answer(message, "<b>Provide deleted account ID</b>")
+            return await utils.answer(message, self.strings["provide_id"])
         try:
             self._deleted_id = int(args[1])
         except ValueError:
-            return await utils.answer(message, "<b>ID must be a number</b>")
+            return await utils.answer(message, self.strings["id_must_be_number"])
         await message.delete()
         await self._force_update(self._build_status(self._extra_text()))
 
     async def _cmd_session(self, message, args):
+        prefix = self.get_prefix()
         if not self._active:
-            return await utils.answer(message, self.strings["err_no_start"])
+            return await utils.answer(
+                message,
+                self.strings["err_no_start"].format(prefix=prefix),
+            )
         if self._recovering:
-            return await utils.answer(message, self.strings["err_running"])
+            return await utils.answer(
+                message,
+                self.strings["err_running"].format(prefix=prefix),
+            )
         if len(args) < 2:
-            return await utils.answer(message, self.strings["help"])
+            return await utils.answer(
+                message,
+                self.strings["help"].format(prefix=prefix),
+            )
         role = args[1].lower()
         if role not in ("donor", "recipient"):
-            return await utils.answer(message, self.strings["help"])
+            return await utils.answer(
+                message,
+                self.strings["help"].format(prefix=prefix),
+            )
         session_str = None
         if len(args) > 2:
             session_str = self._find_session(" ".join(args[2:]))
@@ -753,7 +917,10 @@ class ChatRecovery(loader.Module):
         try:
             client, uid = await self._connect_client(session_str)
         except Exception as e:
-            return await utils.answer(message, f"<b>Connection error:</b> <code>{e}</code>")
+            return await utils.answer(
+                message,
+                self.strings["connection_error"].format(err=str(e)),
+            )
         if role == "donor":
             if self._donor_client:
                 try:
@@ -776,8 +943,12 @@ class ChatRecovery(loader.Module):
         await self._force_update(self._build_status(self._extra_text()))
 
     async def _cmd_parsing(self, message, args):
+        prefix = self.get_prefix()
         if not self._active:
-            return await utils.answer(message, self.strings["err_no_start"])
+            return await utils.answer(
+                message,
+                self.strings["err_no_start"].format(prefix=prefix),
+            )
         if not self._donor_client and not self._recipient_client:
             return await utils.answer(message, self.strings["parsing_no_clients"])
         if len(args) < 2:
@@ -816,17 +987,27 @@ class ChatRecovery(loader.Module):
             if not -12 <= val <= 12:
                 raise ValueError
             self.config["TIMEZONE_OFFSET"] = val
-            await utils.answer(message, f"<b>Timezone: UTC{_ts(val)}</b>")
+            await utils.answer(
+                message,
+                self.strings["tz_set"].format(tz=_ts(val)),
+            )
         except ValueError:
             await utils.answer(message, self.strings["err_invalid_tz"])
 
     async def _cmd_work(self, message, args):
+        prefix = self.get_prefix()
         if len(args) < 3:
-            return await utils.answer(message, self.strings["err_invalid_work"])
+            return await utils.answer(
+                message,
+                self.strings["err_invalid_work"].format(prefix=prefix),
+            )
         start = _parse_time(args[1])
         end = _parse_time(args[2])
         if not start or not end:
-            return await utils.answer(message, self.strings["err_invalid_work"])
+            return await utils.answer(
+                message,
+                self.strings["err_invalid_work"].format(prefix=prefix),
+            )
         self._work_start = start
         self._work_end = end
         self._save_work_hours()
@@ -848,6 +1029,7 @@ class ChatRecovery(loader.Module):
         await utils.answer(message, self.strings["forcerm_done"])
 
     async def _cmd_status(self, message):
+        prefix = self.get_prefix()
         if self._recovering:
             await utils.answer(message, self.strings["status_active"].format(
                 line=self.strings["line"],
@@ -869,15 +1051,23 @@ class ChatRecovery(loader.Module):
                 skipped=data.get("skipped", 0),
                 albums=data.get("albums", 0),
                 work_hours=self._work_hours_str(),
+                prefix=prefix,
             ))
             return
         await utils.answer(message, self.strings["status_none"])
 
     async def _cmd_now(self, message):
+        prefix = self.get_prefix()
         if not self._active:
-            return await utils.answer(message, self.strings["err_no_start"])
+            return await utils.answer(
+                message,
+                self.strings["err_no_start"].format(prefix=prefix),
+            )
         if self._recovering:
-            return await utils.answer(message, self.strings["err_running"])
+            return await utils.answer(
+                message,
+                self.strings["err_running"].format(prefix=prefix),
+            )
         if not self._all_ready():
             return await utils.answer(message, self.strings["err_not_ready"])
         await self._ensure_clients()
@@ -885,7 +1075,10 @@ class ChatRecovery(loader.Module):
         try:
             await self._resolve_all_entities()
         except Exception as e:
-            return await utils.answer(message, self.strings["resolve_fail"].format(err=str(e)))
+            return await utils.answer(
+                message,
+                self.strings["resolve_fail"].format(err=str(e), prefix=prefix),
+            )
         self._last_processed_id = 0
         self._id_map = {}
         self._processed = 0
@@ -900,8 +1093,12 @@ class ChatRecovery(loader.Module):
         self._recovery_task = asyncio.create_task(self._recovery_loop())
 
     async def _cmd_resume(self, message):
+        prefix = self.get_prefix()
         if self._recovering:
-            return await utils.answer(message, self.strings["err_running"])
+            return await utils.answer(
+                message,
+                self.strings["err_running"].format(prefix=prefix),
+            )
         if not self._load_progress():
             return await utils.answer(message, self.strings["err_no_progress"])
         self._active = True
@@ -910,7 +1107,10 @@ class ChatRecovery(loader.Module):
         try:
             await self._resolve_all_entities()
         except Exception as e:
-            return await utils.answer(message, self.strings["resolve_fail"].format(err=str(e)))
+            return await utils.answer(
+                message,
+                self.strings["resolve_fail"].format(err=str(e), prefix=prefix),
+            )
         self._recovering = True
         self._start_time = time.time()
         self._status_msg = await utils.answer(
@@ -941,10 +1141,11 @@ class ChatRecovery(loader.Module):
             logger.error(f"[RECOVERY] {e}", exc_info=True)
             self._save_progress()
             try:
+                prefix = self.get_prefix()
                 await self._force_update(
                     f"<b>Error:</b> <code>{e}</code>\n"
                     f"{self.strings['progress_saved']}\n"
-                    f"Use <code>.recovery resume</code>"
+                    f"Use <code>{prefix}recovery resume</code>"
                 )
             except Exception:
                 pass
@@ -953,6 +1154,7 @@ class ChatRecovery(loader.Module):
 
     async def _do_recovery(self):
         donor = self._donor_client
+        recipient = self._recipient_client
         dp_deleted = self._donor_peer_deleted
         dp_recipient = self._donor_peer_recipient
         rp_donor = self._recipient_peer_donor
@@ -1089,7 +1291,7 @@ class ChatRecovery(loader.Module):
                                     album_msgs=album_messages,
                                     is_donor_msg=is_donor_msg,
                                     donor=donor,
-                                    recipient=self._recipient_client,
+                                    recipient=recipient,
                                     dp_recipient=dp_recipient,
                                     rp_donor=rp_donor,
                                 )
@@ -1098,11 +1300,17 @@ class ChatRecovery(loader.Module):
                                         self._id_map[orig.id] = new.id
                                     if is_donor_msg:
                                         await self._mark_read(
-                                            self._recipient_client, rp_donor, new_msgs[-1].id
+                                            recipient, rp_donor, new_msgs[-1].id
+                                        )
+                                        await self._mark_read(
+                                            donor, dp_recipient, new_msgs[-1].id
                                         )
                                     else:
                                         await self._mark_read(
                                             donor, dp_recipient, new_msgs[-1].id
+                                        )
+                                        await self._mark_read(
+                                            recipient, rp_donor, new_msgs[-1].id
                                         )
                                     for am in album_messages:
                                         if am.pinned:
@@ -1120,7 +1328,7 @@ class ChatRecovery(loader.Module):
                         try:
                             for ae in album_entries:
                                 await self._process_single_by_id(
-                                    ae, donor, self._recipient_client,
+                                    ae, donor, recipient,
                                     dp_deleted, dp_recipient, rp_donor,
                                     is_donor_msg,
                                 )
@@ -1138,7 +1346,7 @@ class ChatRecovery(loader.Module):
                     continue
 
                 await self._process_single_by_id(
-                    entry, donor, self._recipient_client,
+                    entry, donor, recipient,
                     dp_deleted, dp_recipient, rp_donor,
                     is_donor_msg,
                 )
@@ -1191,8 +1399,10 @@ class ChatRecovery(loader.Module):
                 self._id_map[msg.id] = new_msg.id
                 if is_donor_msg:
                     await self._mark_read(recipient, rp_donor, new_msg.id)
+                    await self._mark_read(donor, dp_recipient, new_msg.id)
                 else:
                     await self._mark_read(donor, dp_recipient, new_msg.id)
+                    await self._mark_read(recipient, rp_donor, new_msg.id)
                 if msg.pinned:
                     await self._do_pin(donor, dp_recipient, new_msg.id)
                     await asyncio.sleep(PIN_DELAY)
