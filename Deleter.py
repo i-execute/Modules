@@ -1,8 +1,9 @@
-__version__ = (2, 0, 1)
+__version__ = (2, 0, 2)
 # meta developer: FireJester.t.me
 
 import asyncio
 import logging
+import random
 from datetime import timedelta
 
 from telethon.tl.types import Message, User
@@ -62,27 +63,23 @@ class Deleter(loader.Module):
         "error": "<b>Ошибка:</b> {error}",
     }
 
-    def _get_prefix(self):
-        return self.get_prefix() if hasattr(self, "get_prefix") else "."
-
-    def _render_help(self):
-        return self.strings["help"].format(prefix=self._get_prefix())
-
     async def _bulk_delete(self, client, chat_id, msg_ids: list) -> tuple:
         deleted = 0
         failed = 0
         chunk = []
+        chunk_size = random.randint(90, 110)
 
         for mid in msg_ids:
             chunk.append(mid)
-            if len(chunk) >= 99:
+            if len(chunk) >= chunk_size:
                 try:
                     await client.delete_messages(chat_id, chunk)
                     deleted += len(chunk)
                 except Exception:
                     failed += len(chunk)
                 chunk.clear()
-                await asyncio.sleep(0.5)
+                chunk_size = random.randint(90, 110)
+                await asyncio.sleep(random.uniform(0.5, 1.5))
 
         if chunk:
             try:
@@ -94,15 +91,20 @@ class Deleter(loader.Module):
         return deleted, failed
 
     @loader.command(
-        ru_doc="- быстрое удаление сообщений",
-        en_doc="- swift message deletion",
+        ru_doc="Быстрое удаление сообщений",
+        en_doc="Swift message deletion",
     )
     async def delcmd(self, message: Message):
+        """Swift message deletion"""
         args = utils.get_args_raw(message)
         args_list = args.split() if args else []
 
         if not args_list:
-            await utils.answer(message, self._render_help())
+            prefix = self.get_prefix()
+            await utils.answer(
+                message,
+                self.strings["help"].format(prefix=prefix),
+            )
             return
 
         cmd = args_list[0].lower()
@@ -129,7 +131,11 @@ class Deleter(loader.Module):
                     return
             except Exception:
                 pass
-            await utils.answer(message, self._render_help())
+            prefix = self.get_prefix()
+            await utils.answer(
+                message,
+                self.strings["help"].format(prefix=prefix),
+            )
 
     async def _delete_me(self, message: Message):
         chat_id = message.chat_id
