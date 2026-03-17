@@ -1,4 +1,4 @@
-__version__ = (1, 6, 0)
+__version__ = (2, 0, 0)
 # meta developer: FireJester.t.me
 
 import logging
@@ -41,7 +41,10 @@ from telethon.tl.functions.messages import (
     StartBotRequest,
 )
 from telethon.tl.functions.account import UpdateNotifySettingsRequest
-from telethon.tl.functions.channels import LeaveChannelRequest
+from telethon.tl.functions.channels import (
+    LeaveChannelRequest,
+    CreateChannelRequest,
+)
 from telethon.tl.functions.photos import (
     GetUserPhotosRequest,
     DeletePhotosRequest,
@@ -122,17 +125,20 @@ class Manager(loader.Module):
 
     strings = {
         "name": "Manager",
+    }
+
+    strings_en = {
         "line": "--------------------",
         "help": (
             "<b>Manager - Multi Account Manager</b>\n\n"
-            "<code>.manage add [session]</code> - add session\n"
-            "<code>.manage add long [session]</code> - add persistent session\n"
-            "<code>.manage list</code> - list connected sessions\n"
-            "<code>.manage remove [number]</code> - remove session by number\n"
-            "<code>.manage folder [1/2/3] [link]</code> - set folder link\n"
-            "<code>.manage ava [url]</code> - set avatar image url\n"
-            "<code>.manage set [offset]</code> - set timezone (from -12 to 12)\n"
-            "<code>.manage start</code> - start cleanup process\n"
+            "<code>{prefix}manage add [session]</code> - add session\n"
+            "<code>{prefix}manage add long [session]</code> - add persistent session\n"
+            "<code>{prefix}manage list</code> - list connected sessions\n"
+            "<code>{prefix}manage remove [number]</code> - remove session by number\n"
+            "<code>{prefix}manage folder [1/2/3] [link]</code> - set folder link\n"
+            "<code>{prefix}manage ava [url]</code> - set avatar image url\n"
+            "<code>{prefix}manage set [offset]</code> - set timezone (from -12 to 12)\n"
+            "<code>{prefix}manage start</code> - start cleanup process\n"
         ),
         "session_added": (
             "<b>Session added</b>\n"
@@ -170,6 +176,57 @@ class Manager(loader.Module):
         "ava_provide": "<b>Error:</b> Provide image URL",
         "timezone_set": "<b>Timezone set:</b> UTC{timezone_str}",
         "timezone_invalid": "<b>Error:</b> Invalid timezone. Use a number from -12 to 12",
+    }
+
+    strings_ru = {
+        "line": "--------------------",
+        "help": (
+            "<b>Manager - Менеджер аккаунтов</b>\n\n"
+            "<code>{prefix}manage add [сессия]</code> - добавить сессию\n"
+            "<code>{prefix}manage add long [сессия]</code> - добавить постоянную сессию\n"
+            "<code>{prefix}manage list</code> - список подключённых сессий\n"
+            "<code>{prefix}manage remove [номер]</code> - удалить сессию по номеру\n"
+            "<code>{prefix}manage folder [1/2/3] [ссылка]</code> - установить ссылку на папку\n"
+            "<code>{prefix}manage ava [url]</code> - установить URL аватарки\n"
+            "<code>{prefix}manage set [смещение]</code> - установить часовой пояс (от -12 до 12)\n"
+            "<code>{prefix}manage start</code> - запустить процесс очистки\n"
+        ),
+        "session_added": (
+            "<b>Сессия добавлена</b>\n"
+            "{line}\n"
+            "Имя: {name}\n"
+            "ID: <code>{user_id}</code>\n"
+            "Телефон: <code>{phone}</code>\n"
+            "Постоянная: {persistent}\n"
+            "Слот: {slot}/{max}\n"
+            "{line}"
+        ),
+        "session_not_authorized": "<b>Ошибка:</b> Сессия не авторизована или недействительна",
+        "session_exists": "<b>Ошибка:</b> Этот аккаунт уже добавлен",
+        "session_max": "<b>Ошибка:</b> Максимум {max} сессий достигнут",
+        "provide_session": "<b>Ошибка:</b> Укажите StringSession аргументом или ответом",
+        "no_sessions": "<b>Нет добавленных сессий</b>",
+        "session_list": (
+            "<b>Подключённые сессии ({count}/{max}):</b>\n"
+            "{line}\n{sessions}\n{line}"
+        ),
+        "session_removed": "<b>Сессия #{num} удалена</b>",
+        "session_remove_invalid": "<b>Ошибка:</b> Неверный номер сессии",
+        "processing": "<b>Обработка... Пожалуйста, подождите</b>",
+        "processing_flood": "<b>Обработка... FloodWait: продолжение в {resume_time}</b>",
+        "already_processing": "<b>Ошибка:</b> Уже обрабатывается, подождите",
+        "success": "<b>Очистка завершена успешно</b>",
+        "error_no_sessions": "<b>Ошибка:</b> Нет сессий для обработки",
+        "error_no_api": "<b>Ошибка:</b> Сначала установите api_id и api_hash в конфиге модуля",
+        "folder_set": "<b>Ссылка на папку {num} сохранена:</b>\n<code>{link}</code>",
+        "folder_cleared": "<b>Ссылка на папку {num} очищена</b>",
+        "folder_provide": "<b>Ошибка:</b> Укажите номер папки (1-3) и ссылку",
+        "folder_invalid_num": "<b>Ошибка:</b> Номер папки должен быть 1, 2 или 3",
+        "ava_set": "<b>URL аватарки сохранён:</b>\n<code>{url}</code>",
+        "ava_cleared": "<b>URL аватарки очищен</b>",
+        "ava_provide": "<b>Ошибка:</b> Укажите URL изображения",
+        "timezone_set": "<b>Часовой пояс установлен:</b> UTC{timezone_str}",
+        "timezone_invalid": "<b>Ошибка:</b> Неверный часовой пояс. Используйте число от -12 до 12",
     }
 
     def __init__(self):
@@ -585,42 +642,6 @@ class Manager(loader.Module):
             logger.error(f"[MANAGER] Admin chats: {e}")
         return chs, grs
 
-    async def _remove_saved_from_all_folders(self, client, me_id, an="unknown"):
-        removed = []
-        try:
-            _, filters = await self._get_filters(client, an)
-            for f in filters:
-                if not isinstance(f, DialogFilter) or not hasattr(f, "include_peers"):
-                    continue
-                has = False
-                ni, np_ = [], []
-                for p in f.include_peers:
-                    if self._peer_id(p) == me_id:
-                        has = True
-                    else:
-                        ni.append(p)
-                for p in (f.pinned_peers or []):
-                    if self._peer_id(p) == me_id:
-                        has = True
-                    else:
-                        np_.append(p)
-                if has:
-                    t = f.title
-                    if hasattr(t, "text"):
-                        t = t.text
-                    try:
-                        await self._sr(client, UpdateDialogFilterRequest(
-                            id=f.id, filter=self._clone_filter(f, pinned_peers=np_, include_peers=ni),
-                        ), f"RemSaved_{f.id}", an)
-                        removed.append(f"'{t}' (ID:{f.id})")
-                    except Exception as e:
-                        logger.warning(f"[MANAGER] RemSaved {f.id}: {e}")
-                    await asyncio.sleep(0.5)
-            return True, removed
-        except Exception as e:
-            logger.error(f"[MANAGER] RemSaved: {e}")
-            return False, removed
-
     async def _clear_saved(self, client, an="unknown"):
         errors = []
         try:
@@ -628,6 +649,24 @@ class Manager(loader.Module):
             await client(DeleteHistoryRequest(
                 peer=InputPeerSelf(), max_id=0, just_clear=True, revoke=False,
             ))
+            await asyncio.sleep(1)
+            still_has = False
+            try:
+                await self._ec(client)
+                msgs = await client.get_messages("me", limit=1)
+                if msgs and len(msgs) > 0:
+                    still_has = True
+            except Exception:
+                pass
+            if still_has:
+                try:
+                    await self._ec(client)
+                    await client(DeleteHistoryRequest(
+                        peer=InputPeerSelf(), max_id=0, just_clear=True, revoke=False,
+                    ))
+                    await asyncio.sleep(1)
+                except Exception:
+                    pass
         except Exception as e:
             errors.append(f"Clear: {e}")
         try:
@@ -643,9 +682,24 @@ class Manager(loader.Module):
             return False, "Bad link", []
         try:
             ch = await self._sr(client, CheckChatlistInviteRequest(slug=fh), "CheckList", an)
-            pl = list(ch.peers)
-            await self._sr(client, JoinChatlistInviteRequest(slug=fh, peers=pl), "JoinList", an)
-            return True, None, [self._peer_id(p) for p in pl if self._peer_id(p)]
+            pl = [p for p in ch.peers]
+            if not pl:
+                already_peers = getattr(ch, "already_peers", None)
+                if already_peers:
+                    pl = [p for p in already_peers]
+            if not pl:
+                missing_peers = getattr(ch, "missing_peers", None)
+                if missing_peers:
+                    pl = [p for p in missing_peers]
+            if pl:
+                await self._sr(client, JoinChatlistInviteRequest(slug=fh, peers=pl), "JoinList", an)
+                return True, None, [self._peer_id(p) for p in pl if self._peer_id(p)]
+            else:
+                try:
+                    await self._sr(client, JoinChatlistInviteRequest(slug=fh, peers=[]), "JoinEmpty", an)
+                    return True, "Joined (no new peers)", []
+                except Exception as e2:
+                    return False, str(e2), []
         except AccountFloodError:
             raise
         except Exception as e:
@@ -783,14 +837,65 @@ class Manager(loader.Module):
             errors.append(f"Arch iter: {e}")
         return archived, skipped, errors
 
+    async def _mute_only(self, client, entity, ctx="", an="unknown"):
+        try:
+            await self._ec(client)
+            await self._mute_peer(client, entity, ctx, an)
+            return True
+        except AccountFloodError:
+            raise
+        except Exception as e:
+            logger.error(f"[MANAGER] MuteOnly {ctx}: {e}")
+            return False
+
+    async def _create_testflight_chats(self, client, an="unknown"):
+        channel_entity = None
+        group_entity = None
+        errors = []
+        try:
+            result = await self._sr(client, CreateChannelRequest(
+                title="testflight",
+                about="testflight",
+                broadcast=True,
+                megagroup=False,
+            ), "CreateChannel", an)
+            for chat in getattr(result, "chats", []):
+                if isinstance(chat, Channel) and getattr(chat, "broadcast", False):
+                    channel_entity = chat
+                    break
+        except AccountFloodError:
+            raise
+        except Exception as e:
+            errors.append(f"CreateChannel: {e}")
+
+        await asyncio.sleep(2)
+
+        try:
+            result = await self._sr(client, CreateChannelRequest(
+                title="testflight",
+                about="testflight",
+                broadcast=False,
+                megagroup=True,
+            ), "CreateGroup", an)
+            for chat in getattr(result, "chats", []):
+                if isinstance(chat, Channel) and getattr(chat, "megagroup", False):
+                    group_entity = chat
+                    break
+        except AccountFloodError:
+            raise
+        except Exception as e:
+            errors.append(f"CreateGroup: {e}")
+
+        return channel_entity, group_entity, errors
+
     async def _pin_and_order(self, client, me_id, owner_id, sbid, an="unknown"):
         errors = []
         order = [TELEGRAM_ID]
         if sbid:
             order.append(sbid)
-        order.append(me_id)
         if owner_id and owner_id not in order:
             order.append(owner_id)
+        order.append(me_id)
 
         pinned = set()
         try:
@@ -1007,14 +1112,62 @@ class Manager(loader.Module):
             sbid = nsb
             excl.add(sbid)
 
-        # Step 1: Mute unmuted archived (with check, no false mutes)
+        # Step 0.7: Create testflight channel and group
+        ch_ent, gr_ent, cr_err = await self._create_testflight_chats(client, an)
+        sm.append(f"Testflight: ch={'OK' if ch_ent else 'ERR'} gr={'OK' if gr_ent else 'ERR'}")
+        dt.append("\n--- Testflight chats ---")
+        if ch_ent:
+            dt.append(f"  Channel: {ch_ent.title} ({ch_ent.id})")
+            excl.add(ch_ent.id)
+        if gr_ent:
+            dt.append(f"  Group: {gr_ent.title} ({gr_ent.id})")
+            excl.add(gr_ent.id)
+        for e in cr_err:
+            dt.append(f"  ERR: {e}")
+
+        # Step 1: Clear Saved (delete all messages first, then write confirmation)
+        cerr = await self._clear_saved(client, an)
+        sm.append(f"ClearSaved: {'OK' if not cerr else 'Partial'}")
+        dt.append("\n--- ClearSaved ---")
+        for e in cerr:
+            dt.append(f"  {e}")
+
+        # Step 1.5: Mute TG, SpamBot, Owner (but do NOT archive them)
+        mute_targets = [TELEGRAM_ID]
+        if sbid:
+            mute_targets.append(sbid)
+        mute_targets.append(oid)
+        mute_errs = []
+        for mt in mute_targets:
+            try:
+                await self._ec(client)
+                ent = await client.get_entity(mt)
+                await self._mute_only(client, ent, f"MutePin_{mt}", an)
+                await asyncio.sleep(0.3)
+            except AccountFloodError:
+                raise
+            except Exception as e:
+                mute_errs.append(f"MutePin {mt}: {e}")
+        sm.append(f"MutePinned: {len(mute_targets) - len(mute_errs)} OK")
+        dt.append(f"\n--- MutePinned ({len(mute_targets)}) ---")
+        for e in mute_errs:
+            dt.append(f"  ERR: {e}")
+
+        # Step 2: Pin & order (after all pinned chats exist)
+        perr = await self._pin_and_order(client, me.id, oid, sbid, an)
+        sm.append(f"Pin: {'OK' if not perr else 'Partial'}")
+        dt.append("\n--- Pin ---")
+        for e in perr:
+            dt.append(f"  ERR: {e}")
+
+        # Step 3: Mute unmuted archived
         mc, sk, merr = await self._mute_unmuted_archived(client, excl, an)
         sm.append(f"Mute archived: {mc} muted, {sk} skip")
         dt.append(f"\n--- Mute archived: {mc} muted, {sk} already ---")
         for e in merr:
             dt.append(f"  {e}")
 
-        # Step 2: Stories/albums
+        # Step 4: Stories/albums
         da, ds, serr = await self._del_stories_albums(client, an)
         sm.append(f"Albums:{len(da)} Stories:{ds}")
         dt.append(f"\n--- Albums({len(da)}) Stories({ds}) ---")
@@ -1023,14 +1176,14 @@ class Manager(loader.Module):
         for e in serr:
             dt.append(f"  {e}")
 
-        # Step 3: Photos
-        pc, perr = await self._del_photos(client, me, an)
+        # Step 5: Photos
+        pc, p_err = await self._del_photos(client, me, an)
         sm.append(f"Photos:{pc}")
         dt.append(f"\n--- Photos:{pc} ---")
-        for e in perr:
+        for e in p_err:
             dt.append(f"  {e}")
 
-        # Step 4: Join folders
+        # Step 6: Join folders
         flinks = self._folder_links()
         all_fp = []
         if flinks:
@@ -1042,8 +1195,13 @@ class Manager(loader.Module):
                 if i < len(flinks):
                     await asyncio.sleep(10)
 
-        # Step 5: Admin folders
+        # Step 7: Admin folders (channels/groups) with testflight chats
         chs, grs = await self._get_admin_chats(client)
+        if ch_ent and ch_ent not in chs:
+            chs.append(ch_ent)
+        if gr_ent and gr_ent not in grs:
+            grs.append(gr_ent)
+
         uids, efs = await self._get_filters(client, an)
         for label, ents in (("channels", chs), ("groups", grs)):
             ef = self._find_folder(efs, label)
@@ -1062,30 +1220,15 @@ class Manager(loader.Module):
                     sm.append(f"'{label}': {'Created' if ok else 'ERR'}")
                     dt.append(f"\n--- '{label}' (ID:{fid}) {len(ents)} chats ---")
 
-        # Step 6: Mute+archive folder chats
+        # Step 8: Mute+archive folder chats
         if all_fp:
-            m, merr = await self._mute_folder_chats(client, all_fp, an)
+            m, m_err = await self._mute_folder_chats(client, all_fp, an)
             sm.append(f"Folder mute:{len(m)}")
             dt.append(f"\n--- Folder mute ({len(m)}) ---")
             for x in m:
                 dt.append(f"  {x}")
-            for e in merr:
+            for e in m_err:
                 dt.append(f"  ERR: {e}")
-
-        # Step 7: Remove Saved from folders
-        await asyncio.sleep(0.5)
-        ok, rem = await self._remove_saved_from_all_folders(client, me.id, an)
-        sm.append(f"RemSaved: {len(rem)}")
-        dt.append(f"\n--- RemSaved: {len(rem)} ---")
-        for r in rem:
-            dt.append(f"  {r}")
-
-        # Step 8: Clear Saved
-        cerr = await self._clear_saved(client, an)
-        sm.append(f"ClearSaved: {'OK' if not cerr else 'Partial'}")
-        dt.append("\n--- ClearSaved ---")
-        for e in cerr:
-            dt.append(f"  {e}")
 
         # Step 9: Delete PMs + block
         blocked, deleted, s9e = [], [], []
@@ -1208,7 +1351,7 @@ class Manager(loader.Module):
         for x in dc:
             dt.append(f"  {x}")
 
-        # Step 12: Archive non-excluded (with mute check)
+        # Step 12: Archive non-excluded
         arch, ask, aerr = await self._archive_non_excluded(client, excl, an)
         sm.append(f"Archived:{len(arch)} skip:{ask}")
         dt.append(f"\n--- Archived({len(arch)}) skip({ask}) ---")
@@ -1217,28 +1360,15 @@ class Manager(loader.Module):
         for e in aerr:
             dt.append(f"  ERR: {e}")
 
-        # Step 13: Pin & order
-        perr = await self._pin_and_order(client, me.id, oid, sbid, an)
-        sm.append(f"Pin: {'OK' if not perr else 'Partial'}")
-        dt.append("\n--- Pin ---")
-        for e in perr:
-            dt.append(f"  ERR: {e}")
-
-        # Step 14: Avatar
+        # Step 13: Avatar
         aurl = self.config["avatar_url"]
         if aurl:
             ok, err = await self._set_avatar(client, aurl, an)
             sm.append(f"Ava: {'OK' if ok else 'ERR'}")
             dt.append(f"\n--- Ava: {'OK' if ok else err} ---")
 
-        # Step 15: Final — remove Saved from ALL folders again + clear
+        # Step 14: Final clear saved
         await asyncio.sleep(0.5)
-        ok2, rem2 = await self._remove_saved_from_all_folders(client, me.id, an)
-        sm.append(f"FinalRemSaved: {len(rem2)}")
-        dt.append(f"\n--- FinalRemSaved: {len(rem2)} ---")
-        for r in rem2:
-            dt.append(f"  {r}")
-
         cerr2 = await self._clear_saved(client, an)
         sm.append(f"FinalClear: {'OK' if not cerr2 else 'Partial'}")
         dt.append("\n--- FinalClear ---")
@@ -1247,19 +1377,30 @@ class Manager(loader.Module):
 
         return sm, dt
 
-    @loader.command(ru_doc="Управление", en_doc="Manage")
+    @loader.command(
+        ru_doc="Управление аккаунтами",
+        en_doc="Account management",
+    )
     async def manage(self, message: Message):
+        """Account management command"""
         args = utils.get_args_raw(message)
         al = args.split() if args else []
+        prefix = self.get_prefix()
         if not al:
-            return await utils.answer(message, self.strings["help"])
+            return await utils.answer(
+                message,
+                self.strings["help"].format(prefix=prefix),
+            )
         cmd = al[0].lower()
         h = {"add": self._cmd_add, "list": self._cmd_list,
              "remove": self._cmd_remove, "folder": self._cmd_folder,
              "ava": self._cmd_ava, "set": self._cmd_set, "start": self._cmd_start}
         handler = h.get(cmd)
         if not handler:
-            return await utils.answer(message, self.strings["help"])
+            return await utils.answer(
+                message,
+                self.strings["help"].format(prefix=prefix),
+            )
         if cmd in ("add", "remove", "folder", "ava", "set"):
             await handler(message, al)
         else:
