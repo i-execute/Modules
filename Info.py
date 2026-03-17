@@ -1,4 +1,4 @@
-__version__ = (2, 1, 0)
+__version__ = (2, 1, 1)
 # meta developer: FireJester.t.me 
 
 from telethon.tl.types import User, Channel, Message, InputPhotoFileLocation
@@ -12,10 +12,13 @@ import tempfile
 
 @loader.tds
 class Info(loader.Module):
-    """Gives information about user"""
+    """Get information about users and chats"""
     
     strings = {
         "name": "Info",
+    }
+
+    strings_en = {
         "prem_user_full": (
             "<blockquote><b>┌ [</b><emoji document_id=5188516803638236397>🔝</emoji><b>] Name:</b> {name}\n"
             "├ <b>[</b><emoji document_id=5188171393778359433>🤟</emoji><b>] Username:</b> {username}\n"
@@ -64,9 +67,6 @@ class Info(loader.Module):
             "├<b>[ Chat ID:</b> <code>{chat_id}</code> <b>]</b>\n"
             "<b>└[ Type:</b> {type} <b>]</b></blockquote>"
         ),
-    }
-
-    strings_en = {
         "error_reply": "<emoji document_id=5188512006159766094>😵</emoji><b> Error: </b>No reply or invalid username",
         "no_photo_msg": "<emoji document_id=5188512006159766094>😵</emoji><b> Error: </b>User hid avatar or blocked you",
         "no_chat_photo": "<emoji document_id=5188512006159766094>😵</emoji><b> Error: </b>Chat has no avatar",
@@ -81,6 +81,54 @@ class Info(loader.Module):
     }
 
     strings_ru = {
+        "prem_user_full": (
+            "<blockquote><b>┌ [</b><emoji document_id=5188516803638236397>🔝</emoji><b>] Name:</b> {name}\n"
+            "├ <b>[</b><emoji document_id=5188171393778359433>🤟</emoji><b>] Username:</b> {username}\n"
+            "├ <b>[</b><emoji document_id=5188654053613150361>📀</emoji><b>] User ID:</b> <code>{user_id}</code>\n"
+            "<b>└ [</b><emoji document_id=5188420042320020352>🪙</emoji><b>] DC:</b> {dc}</blockquote>"
+        ),
+        "prem_user_no_dc": (
+            "<blockquote><b>┌ [</b><emoji document_id=5188516803638236397>🔝</emoji><b>] Name:</b> {name}\n"
+            "├ <b>[</b><emoji document_id=5188171393778359433>🤟</emoji><b>] Username:</b> {username}\n"
+            "<b>└ [</b><emoji document_id=5188654053613150361>📀</emoji><b>] User ID:</b> <code>{user_id}</code></blockquote>"
+        ),
+        "prem_chat_full": (
+            "<blockquote><b>┌ [</b><emoji document_id=5188516803638236397>🔝</emoji><b>] Name:</b> {name}\n"
+            "├ <b>[</b><emoji document_id=5188171393778359433>🤟</emoji><b>] Username:</b> {username}\n"
+            "├ <b>[</b><emoji document_id=5188654053613150361>📀</emoji><b>] Chat ID:</b> <code>{chat_id}</code>\n"
+            "├ <b>[</b><emoji document_id=5190758450149233016>🌡</emoji><b>] Type:</b> {type}\n"
+            "<b>└ [</b><emoji document_id=5188420042320020352>🪙</emoji><b>] DC:</b> {dc}</blockquote>"
+        ),
+        "prem_chat_no_dc": (
+            "<blockquote><b>┌ [</b><emoji document_id=5188516803638236397>🔝</emoji><b>] Name:</b> {name}\n"
+            "├ <b>[</b><emoji document_id=5188171393778359433>🤟</emoji><b>] Username:</b> {username}\n"
+            "├ <b>[</b><emoji document_id=5188654053613150361>📀</emoji><b>] Chat ID:</b> <code>{chat_id}</code>\n"
+            "<b>└ [</b><emoji document_id=5190758450149233016>🌡</emoji><b>] Type:</b> {type}</blockquote>"
+        ),
+        "noprem_user_full": (
+            "<blockquote><b>┌[ Name:</b> {name} <b>]</b>\n"
+            "├<b>[ Username:</b> {username} <b>]</b>\n"
+            "├<b>[ User ID:</b> <code>{user_id}</code> <b>]</b>\n"
+            "<b>└[ DC:</b> {dc} <b>]</b></blockquote>"
+        ),
+        "noprem_user_no_dc": (
+            "<blockquote><b>┌[ Name:</b> {name} <b>]</b>\n"
+            "├<b>[ Username:</b> {username} <b>]</b>\n"
+            "<b>└[ User ID:</b> <code>{user_id}</code> <b>]</b></blockquote>"
+        ),
+        "noprem_chat_full": (
+            "<blockquote><b>┌[ Name:</b> {name} <b>]</b>\n"
+            "├<b>[ Username:</b> {username} <b>]</b>\n"
+            "├<b>[ Chat ID:</b> <code>{chat_id}</code> <b>]</b>\n"
+            "├<b>[ Type:</b> {type} <b>]</b>\n"
+            "<b>└[ DC:</b> {dc} <b>]</b></blockquote>"
+        ),
+        "noprem_chat_no_dc": (
+            "<blockquote><b>┌[ Name:</b> {name} <b>]</b>\n"
+            "├<b>[ Username:</b> {username} <b>]</b>\n"
+            "├<b>[ Chat ID:</b> <code>{chat_id}</code> <b>]</b>\n"
+            "<b>└[ Type:</b> {type} <b>]</b></blockquote>"
+        ),
         "error_reply": "<emoji document_id=5188512006159766094>😵</emoji><b> Error: </b>Нет реплая или некорректный юзернейм",
         "no_photo_msg": "<emoji document_id=5188512006159766094>😵</emoji><b> Error: </b>Пользователь скрыл аватарку или заблокировал тебя",
         "no_chat_photo": "<emoji document_id=5188512006159766094>😵</emoji><b> Error: </b>У чата нет аватарки",
@@ -376,10 +424,11 @@ class Info(loader.Module):
         )
 
     @loader.command(
-        ru_doc="Получить информацию о пользователе (добавь + для аватарки). Использование: реплай или @username",
-        en_doc="Get user information (add + for avatar). Usage: reply or @username",
+        ru_doc="Инфо о пользователе (+ для аватарки)",
+        en_doc="User info (+ for avatar)",
     )
     async def who(self, message: Message):
+        """Get user info, reply or @username, add + for avatar"""
         args = utils.get_args_raw(message) or ""
         with_photo = "+" in args
         clean_args = args.replace("+", "").strip()
@@ -424,10 +473,11 @@ class Info(loader.Module):
             )
 
     @loader.command(
-        ru_doc="Получить информацию о группе/канале (+ для аватарки)",
-        en_doc="Get group/channel information (+ for avatar)",
+        ru_doc="Инфо о группе/канале (+ для аватарки)",
+        en_doc="Group/channel info (+ for avatar)",
     )
     async def where(self, message: Message):
+        """Get group or channel info, add + for avatar"""
         args = utils.get_args_raw(message) or ""
         with_photo = "+" in args
         is_premium = await self._check_premium(message.client)
