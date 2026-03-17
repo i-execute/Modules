@@ -52,22 +52,25 @@ def _escape(text):
 
 @loader.tds
 class QRAuthDumper(loader.Module):
-    """QR auth dumper. Use dumpqr to start, scan QR, get session."""
+    """QR code authentication session dumper"""
 
     strings = {
         "name": "QRAuthDumper",
+    }
+
+    strings_en = {
         "line": "--------------------",
         "help": (
             "<b>QR Auth Dumper v{ver}</b>\n\n"
             "<b>Commands:</b>\n"
-            "<code>.dumpqr</code> — start QR auth\n"
-            "<code>.dumpqr pass [password]</code> — provide 2FA password\n\n"
+            "<code>{prefix}dumpqr</code> — start QR auth\n"
+            "<code>{prefix}dumpqr pass [password]</code> — provide 2FA password\n\n"
             "<b>Config:</b>\n"
-            "<code>.qrauth</code> — this help\n"
-            "<code>.qrauth status</code> — status\n"
-            "<code>.qrauth id [val]</code> — set API_ID\n"
-            "<code>.qrauth hash [val]</code> — set API_HASH\n"
-            "<code>.qrauth timeout [sec]</code> — QR timeout\n"
+            "<code>{prefix}qrauth</code> — this help\n"
+            "<code>{prefix}qrauth status</code> — status\n"
+            "<code>{prefix}qrauth id [val]</code> — set API_ID\n"
+            "<code>{prefix}qrauth hash [val]</code> — set API_HASH\n"
+            "<code>{prefix}qrauth timeout [sec]</code> — QR timeout\n"
         ),
         "status": (
             "<b>QRAuthDumper Status</b>\n"
@@ -84,8 +87,8 @@ class QRAuthDumper(loader.Module):
             "<b>Config not set</b>\n"
             "{line}\n"
             "API_ID and API_HASH required.\n"
-            "<code>.qrauth id YOUR_API_ID</code>\n"
-            "<code>.qrauth hash YOUR_API_HASH</code>\n"
+            "<code>{prefix}qrauth id YOUR_API_ID</code>\n"
+            "<code>{prefix}qrauth hash YOUR_API_HASH</code>\n"
             "{line}"
         ),
         "qr_prompt": (
@@ -139,7 +142,7 @@ class QRAuthDumper(loader.Module):
         "password_needed": (
             "<b>2FA Password Required</b>\n"
             "{line}\n"
-            "Use: <code>.dumpqr pass YOUR_PASSWORD</code>\n"
+            "Use: <code>{prefix}dumpqr pass YOUR_PASSWORD</code>\n"
             "Attempts left: <b>{attempts}</b>\n"
             "{line}"
         ),
@@ -147,7 +150,7 @@ class QRAuthDumper(loader.Module):
             "<b>Wrong password!</b>\n"
             "{line}\n"
             "Attempts left: <b>{attempts}</b>\n"
-            "Use: <code>.dumpqr pass YOUR_PASSWORD</code>\n"
+            "Use: <code>{prefix}dumpqr pass YOUR_PASSWORD</code>\n"
             "{line}"
         ),
         "attempts_exhausted": (
@@ -158,6 +161,111 @@ class QRAuthDumper(loader.Module):
         ),
         "provide_password": "<b>Provide password.</b>",
         "no_active_process": "<b>No active QR auth process.</b>",
+    }
+
+    strings_ru = {
+        "line": "--------------------",
+        "help": (
+            "<b>QR Auth Dumper v{ver}</b>\n\n"
+            "<b>Команды:</b>\n"
+            "<code>{prefix}dumpqr</code> — запустить QR авторизацию\n"
+            "<code>{prefix}dumpqr pass [пароль]</code> — ввести 2FA пароль\n\n"
+            "<b>Настройки:</b>\n"
+            "<code>{prefix}qrauth</code> — эта справка\n"
+            "<code>{prefix}qrauth status</code> — статус\n"
+            "<code>{prefix}qrauth id [значение]</code> — установить API_ID\n"
+            "<code>{prefix}qrauth hash [значение]</code> — установить API_HASH\n"
+            "<code>{prefix}qrauth timeout [сек]</code> — таймаут QR\n"
+        ),
+        "status": (
+            "<b>Статус QRAuthDumper</b>\n"
+            "{line}\n"
+            "API_ID: <code>{api_id}</code>\n"
+            "API_HASH: <code>{api_hash}</code>\n"
+            "Таймаут: <code>{timeout}</code> сек\n"
+            "Обновление: <code>{refresh}</code> сек\n"
+            "Попытки пароля: <code>{max_attempts}</code>\n"
+            "Статус: {status}\n"
+            "{line}"
+        ),
+        "no_config": (
+            "<b>Настройки не заданы</b>\n"
+            "{line}\n"
+            "Требуются API_ID и API_HASH.\n"
+            "<code>{prefix}qrauth id ВАШ_API_ID</code>\n"
+            "<code>{prefix}qrauth hash ВАШ_API_HASH</code>\n"
+            "{line}"
+        ),
+        "qr_prompt": (
+            "<b>Отсканируйте этот QR код</b>\n"
+            "{line}\n"
+            "1. Откройте Telegram на телефоне\n"
+            "2. Настройки - Устройства - Подключить устройство\n"
+            "3. Наведите камеру на QR\n\n"
+            "Осталось: <b>{timeout} сек</b>\n"
+            "{line}"
+        ),
+        "qr_refreshed": (
+            "<b>QR обновлён</b>\n"
+            "{line}\n"
+            "Старый истёк, сканируйте новый.\n"
+            "Осталось: <b>{time_left} сек</b>\n"
+            "{line}"
+        ),
+        "auth_success": (
+            "<b>Авторизация успешна</b>\n"
+            "{line}\n"
+            "Имя: {name}\n"
+            "ID: <code>{user_id}</code>\n"
+            "Юзернейм: {username}\n"
+            "DC: <code>{dc_id}</code>\n"
+            "{line}\n"
+            "<b>Auth Key (HEX):</b>\n"
+            "<code>{auth_key_hex}</code>\n"
+            "{line}\n"
+            "<b>Auth Key SHA256:</b>\n"
+            "<code>{auth_key_sha}</code>\n"
+            "{line}\n"
+            "<b>Сохраните это и удалите сообщение.</b>"
+        ),
+        "auth_timeout": (
+            "<b>Таймаут</b>\n{line}\n"
+            "QR истёк. Попробуйте снова.\n{line}"
+        ),
+        "auth_error": (
+            "<b>Ошибка</b>\n{line}\n"
+            "Детали: <code>{error}</code>\n"
+            "Попробуйте снова.\n{line}"
+        ),
+        "already_running": (
+            "<b>Подождите</b>\n{line}\n"
+            "Авторизация уже запущена. Ожидайте.\n{line}"
+        ),
+        "generating": "<b>Генерация QR...</b>",
+        "config_updated": "<b>{key} обновлён.</b>",
+        "provide_value": "<b>Укажите значение.</b>",
+        "password_needed": (
+            "<b>Требуется 2FA пароль</b>\n"
+            "{line}\n"
+            "Используйте: <code>{prefix}dumpqr pass ВАШ_ПАРОЛЬ</code>\n"
+            "Осталось попыток: <b>{attempts}</b>\n"
+            "{line}"
+        ),
+        "wrong_password": (
+            "<b>Неверный пароль!</b>\n"
+            "{line}\n"
+            "Осталось попыток: <b>{attempts}</b>\n"
+            "Используйте: <code>{prefix}dumpqr pass ВАШ_ПАРОЛЬ</code>\n"
+            "{line}"
+        ),
+        "attempts_exhausted": (
+            "<b>Все попытки пароля исчерпаны.</b>\n"
+            "{line}\n"
+            "Процесс завершён. Попробуйте снова.\n"
+            "{line}"
+        ),
+        "provide_password": "<b>Укажите пароль.</b>",
+        "no_active_process": "<b>Нет активного процесса QR авторизации.</b>",
     }
 
     def __init__(self):
@@ -284,6 +392,7 @@ class QRAuthDumper(loader.Module):
         refresh = QR_REFRESH
         line = self.strings["line"]
         max_attempts = int(self.config["MAX_PASSWORD_ATTEMPTS"])
+        prefix = self.get_prefix()
 
         tc = TelegramClient(
             StringSession(),
@@ -359,7 +468,7 @@ class QRAuthDumper(loader.Module):
                     "attempts_left": max_attempts,
                 }
                 return self.strings["password_needed"].format(
-                    line=line, attempts=max_attempts
+                    line=line, attempts=max_attempts, prefix=prefix
                 )
 
             if user is None:
@@ -415,6 +524,7 @@ class QRAuthDumper(loader.Module):
 
         tc = pending["client"]
         line = self.strings["line"]
+        prefix = self.get_prefix()
 
         try:
             await tc.sign_in(password=password)
@@ -433,7 +543,7 @@ class QRAuthDumper(loader.Module):
                 return self.strings["attempts_exhausted"].format(line=line), True
             return (
                 self.strings["wrong_password"].format(
-                    line=line, attempts=pending["attempts_left"]
+                    line=line, attempts=pending["attempts_left"], prefix=prefix
                 ),
                 False,
             )
@@ -455,13 +565,20 @@ class QRAuthDumper(loader.Module):
                 pass
         self._active_sessions.pop(uid, None)
 
-    @loader.command(ru_doc="QR Auth Dumper — помощь и настройки")
+    @loader.command(
+        ru_doc="QR Auth Dumper — справка и настройки",
+        en_doc="QR Auth Dumper — help and config",
+    )
     async def qrauth(self, message: Message):
-        """QR Auth Dumper — help and config"""
+        """QR Auth Dumper help and configuration"""
         args = utils.get_args_raw(message).split()
+        prefix = self.get_prefix()
         if not args:
             ver = ".".join(map(str, __version__))
-            await utils.answer(message, self.strings["help"].format(ver=ver))
+            await utils.answer(
+                message,
+                self.strings["help"].format(ver=ver, prefix=prefix),
+            )
             return
 
         cmd = args[0].lower()
@@ -476,7 +593,10 @@ class QRAuthDumper(loader.Module):
             await self._cmd_set(message, args, "QR_TIMEOUT", is_int=True)
         else:
             ver = ".".join(map(str, __version__))
-            await utils.answer(message, self.strings["help"].format(ver=ver))
+            await utils.answer(
+                message,
+                self.strings["help"].format(ver=ver, prefix=prefix),
+            )
 
     async def _cmd_status(self, message: Message):
         api_id = self.config["API_ID"]
@@ -533,11 +653,15 @@ class QRAuthDumper(loader.Module):
         except ValueError:
             await utils.answer(message, "<b>Error:</b> Invalid value")
 
-    @loader.command(ru_doc="Запуск QR авторизации / ввод 2FA пароля")
+    @loader.command(
+        ru_doc="Запуск QR авторизации / ввод 2FA пароля",
+        en_doc="Start QR auth / provide 2FA password",
+    )
     async def dumpqr(self, message: Message):
-        """Start QR auth / provide 2FA password"""
+        """Start QR authentication or provide 2FA password"""
         args = utils.get_args_raw(message).split()
         line = self.strings["line"]
+        prefix = self.get_prefix()
         uid = self._owner_id
         peer = message.peer_id
         topic_id = self._get_topic_id(message)
@@ -585,7 +709,8 @@ class QRAuthDumper(loader.Module):
 
         if not api_id or not api_hash:
             await utils.answer(
-                message, self.strings["no_config"].format(line=line)
+                message,
+                self.strings["no_config"].format(line=line, prefix=prefix),
             )
             return
 
