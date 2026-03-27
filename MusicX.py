@@ -26,7 +26,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-INLINE_QUERY_BANNER = "https://github.com/FireJester/Media/raw/main/Banner_for_inline_query_in_musicX.jpeg"
+INLINE_QUERY_BANNER = "https://github.com/FireJester/Media/raw/main/Banner_for_inline_query_in_musicX_new.jpeg"
 
 
 def _ensure_all_deps():
