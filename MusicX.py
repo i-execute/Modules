@@ -1,4 +1,4 @@
-__version__ = (2, 2, 2)
+__version__ = (2, 2, 3)
 # meta developer: FireJester.t.me
 
 import os
@@ -26,7 +26,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-INLINE_QUERY_BANNER = "https://github.com/FireJester/Media/raw/main/Banner_for_inline_query_in_MusicX.jpeg"
+INLINE_QUERY_BANNER = "https://github.com/FireJester/Media/raw/main/Banner_for_inline_query_in_musicX.jpeg"
 
 
 def _ensure_all_deps():
@@ -959,10 +959,13 @@ class YTDownloader:
 
 @loader.tds
 class MusicX(loader.Module):
-    """VK + Yandex Music + YouTube: download by link, search by name via inline."""
+    """VK + Yandex Music + YouTube audio downloader and search"""
 
     strings = {
         "name": "MusicX",
+    }
+
+    strings_en = {
         "line": "-----------------------",
         "help": (
             "<b>MusicX - Audio Downloader & Search</b>\n"
@@ -974,10 +977,10 @@ class MusicX(loader.Module):
             "<b>Supported:</b>\n"
             "VK Audio | Yandex Music | YouTube\n\n"
             "<b>Commands:</b>\n"
-            "<code>.musicx auth</code> - get auth links\n"
-            "<code>.musicx token URL</code> - submit token\n"
-            "<code>.musicx status</code> - check auth\n"
-            "<code>.musicx logout vk/ym</code> - log out\n"
+            "<code>{prefix}musicx auth</code> - get auth links\n"
+            "<code>{prefix}musicx token URL</code> - submit token\n"
+            "<code>{prefix}musicx status</code> - check auth\n"
+            "<code>{prefix}musicx logout vk/ym</code> - log out\n"
             "\n{line}"
         ),
         "auth_links": (
@@ -986,7 +989,7 @@ class MusicX(loader.Module):
             "<b>1.</b> Open the link for the service you need\n"
             "<b>2.</b> Log in and grant permissions\n"
             "<b>3.</b> Copy the <b>full URL</b> from the address bar\n"
-            "<b>4.</b> <code>.musicx token URL</code>\n\n"
+            "<b>4.</b> <code>{prefix}musicx token URL</code>\n\n"
             '<b>VK:</b> <a href="{vk_url}">Authorize via Kate Mobile</a>\n'
             '<b>YM:</b> <a href="{ym_url}">Authorize via Yandex</a>\n'
             "\n{line}"
@@ -1004,8 +1007,54 @@ class MusicX(loader.Module):
         "status_ym_no": "Not authorized",
         "logout_vk": "<b>VK logged out.</b>",
         "logout_ym": "<b>YM logged out.</b>",
-        "logout_usage": "<b>Error:</b> <code>.musicx logout vk</code> or <code>.musicx logout ym</code>",
+        "logout_usage": "<b>Error:</b> <code>{prefix}musicx logout vk</code> or <code>{prefix}musicx logout ym</code>",
         "logout_unknown": "<b>Error:</b> Unknown service. Use <code>vk</code> or <code>ym</code>",
+    }
+
+    strings_ru = {
+        "line": "-----------------------",
+        "help": (
+            "<b>MusicX - Загрузчик и поиск аудио</b>\n"
+            "{line}\n\n"
+            "<b>Скачать по ссылке:</b>\n"
+            "<code>@{bot} MusicX ССЫЛКА</code>\n\n"
+            "<b>Поиск по названию:</b>\n"
+            "<code>@{bot} MusicX название песни</code>\n\n"
+            "<b>Поддерживается:</b>\n"
+            "VK Audio | Yandex Music | YouTube\n\n"
+            "<b>Команды:</b>\n"
+            "<code>{prefix}musicx auth</code> - ссылки для авторизации\n"
+            "<code>{prefix}musicx token URL</code> - отправить токен\n"
+            "<code>{prefix}musicx status</code> - проверить авторизацию\n"
+            "<code>{prefix}musicx logout vk/ym</code> - выйти\n"
+            "\n{line}"
+        ),
+        "auth_links": (
+            "<b>Авторизация MusicX</b>\n"
+            "{line}\n\n"
+            "<b>1.</b> Откройте ссылку нужного сервиса\n"
+            "<b>2.</b> Войдите и дайте разрешения\n"
+            "<b>3.</b> Скопируйте <b>полный URL</b> из адресной строки\n"
+            "<b>4.</b> <code>{prefix}musicx token URL</code>\n\n"
+            '<b>VK:</b> <a href="{vk_url}">Авторизация через Kate Mobile</a>\n'
+            '<b>YM:</b> <a href="{ym_url}">Авторизация через Yandex</a>\n'
+            "\n{line}"
+        ),
+        "token_vk_ok": "<b>VK авторизован!</b>\n{line}\nID: <code>{user_id}</code>\n{line}",
+        "token_ym_ok": "<b>YM авторизован!</b>\n{line}\nUID: <code>{uid}</code> | Логин: <code>{login}</code>\n{line}",
+        "token_vk_fail": "<b>VK токен недействителен!</b>",
+        "token_ym_fail": "<b>YM токен недействителен!</b>",
+        "token_no_url": "<b>Ошибка:</b> Укажите URL с токеном (аргументом или реплаем)",
+        "token_unknown": "<b>Ошибка:</b> Не удалось определить сервис по URL.",
+        "status": "<b>Статус MusicX</b>\n{line}\nVK: {vk_status}\nYM: {ym_status}\n{line}",
+        "status_vk_ok": "Авторизован | ID <code>{user_id}</code>",
+        "status_vk_no": "Не авторизован",
+        "status_ym_ok": "Авторизован | UID <code>{uid}</code> | <code>{login}</code>",
+        "status_ym_no": "Не авторизован",
+        "logout_vk": "<b>VK разлогинен.</b>",
+        "logout_ym": "<b>YM разлогинен.</b>",
+        "logout_usage": "<b>Ошибка:</b> <code>{prefix}musicx logout vk</code> или <code>{prefix}musicx logout ym</code>",
+        "logout_unknown": "<b>Ошибка:</b> Неизвестный сервис. Используйте <code>vk</code> или <code>ym</code>",
     }
 
     def __init__(self):
@@ -1128,10 +1177,11 @@ class MusicX(loader.Module):
         return None
 
     @loader.command(
-        ru_doc="- show instruction for use",
-        en_doc="- show instruction for use"
+        ru_doc="Управление MusicX: auth, token, status, logout",
+        en_doc="MusicX management: auth, token, status, logout",
     )
     async def musicx(self, message: Message):
+        """MusicX management: auth, token, status, logout"""
         args = utils.get_args_raw(message)
         args_list = args.split() if args else []
         if not args_list:
@@ -1150,13 +1200,17 @@ class MusicX(loader.Module):
             await self._cmd_help(message)
 
     async def _cmd_help(self, message):
+        prefix = self.get_prefix()
         await utils.answer(message, self.strings["help"].format(
             line=self.strings["line"], bot=self.inline_bot_username or "bot",
+            prefix=prefix,
         ))
 
     async def _cmd_auth(self, message):
+        prefix = self.get_prefix()
         await utils.answer(message, self.strings["auth_links"].format(
             line=self.strings["line"], vk_url=_build_vk_auth_url(), ym_url=_build_ym_auth_url(),
+            prefix=prefix,
         ))
 
     async def _cmd_token(self, message, raw_args):
@@ -1217,7 +1271,8 @@ class MusicX(loader.Module):
 
     async def _cmd_logout(self, message, args_list):
         if len(args_list) < 2:
-            await utils.answer(message, self.strings["logout_usage"])
+            prefix = self.get_prefix()
+            await utils.answer(message, self.strings["logout_usage"].format(prefix=prefix))
             return
         service = args_list[1].lower()
         if service == "vk":
