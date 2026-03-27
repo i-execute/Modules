@@ -1,4 +1,4 @@
-__version__ = (3, 5, 4)
+__version__ = (3, 5, 5)
 # meta developer: FireJester.t.me
 
 import os
@@ -42,11 +42,13 @@ def _escape(text):
 
 @loader.tds
 class XRay(loader.Module):
-    """XRay VLESS+Reality, run VPN on your host!"""
+    """XRay VLESS+Reality VPN server manager"""
 
     strings = {
         "name": "XRay",
+    }
 
+    strings_en = {
         "help": (
             "<b>XRay VLESS+Reality</b>\n\n"
             "<b>Setup:</b>\n"
@@ -245,6 +247,205 @@ class XRay(loader.Module):
         "ping_fail": "<b>Speed test failed</b>\n\n<code>{error}</code>",
     }
 
+    strings_ru = {
+        "help": (
+            "<b>XRay VLESS+Reality</b>\n\n"
+            "<b>Установка:</b>\n"
+            "<blockquote>"
+            "<code>{prefix}xr setup</code> установка + генерация ключей + конфиг\n"
+            "<code>{prefix}xr start</code> / <code>{prefix}xr stop</code> / <code>{prefix}xr restart</code>\n"
+            "<code>{prefix}xr status</code> статус, трафик, подключения"
+            "</blockquote>\n\n"
+            "<b>Настройки:</b>\n"
+            "<blockquote>"
+            "<code>{prefix}xr port [порт]</code> порт (по умолчанию 8443)\n"
+            "<code>{prefix}xr dest [домен:порт]</code> Reality dest\n"
+            "<code>{prefix}xr sni [домен]</code> SNI\n"
+            "<code>{prefix}xr ip [адрес]</code> внешний IP\n"
+            "<code>{prefix}xr keys</code> показать все ключи (только в ЛС)\n"
+            "<code>{prefix}xr overwrite</code> новые ключи + uuid + перезапуск"
+            "</blockquote>\n\n"
+            "<b>Доступ:</b>\n"
+            "<blockquote>"
+            "<code>{prefix}xr add</code> ответ на сообщение для добавления пользователя\n"
+            "<code>{prefix}xr rm</code> ответ на сообщение для удаления пользователя\n"
+            "<code>{prefix}xr users</code> список доверенных пользователей"
+            "</blockquote>\n\n"
+            "<b>Отладка:</b>\n"
+            "<blockquote>"
+            "<code>{prefix}xr log</code> / <code>{prefix}xr log full</code>\n"
+            "<code>{prefix}xr debug</code> отладочная информация\n"
+            "<code>{prefix}xr diagnose</code> диагностика\n"
+            "<code>{prefix}xr checkout</code> IP за последние 24ч\n"
+            "<code>{prefix}xr ping</code> тест скорости хоста"
+            "</blockquote>\n\n"
+            "<b>Бот:</b>\n"
+            "<blockquote>"
+            "/xray получить vless ссылку (только доверенные пользователи)"
+            "</blockquote>"
+        ),
+
+        "not_installed": "<b>xray не установлен</b>\n<code>{prefix}xr setup</code>",
+        "setup_progress": "<b>Настройка XRay...</b>",
+        "setup_installing": "Скачивание XRay...",
+        "setup_installed": "XRay установлен: {version}",
+        "setup_keys": "Ключи сгенерированы",
+        "setup_config": "Конфиг записан",
+        "setup_done": "<b>Настройка завершена</b>\n\nТеперь: <code>{prefix}xr start</code>",
+        "setup_fail": "<b>Настройка не удалась</b>\n\n<code>{error}</code>",
+
+        "already_running": "<b>Прокси уже запущен</b>",
+        "not_running": "<b>Прокси не запущен</b>",
+        "starting": "<b>Запуск XRay...</b>",
+        "started": (
+            "<b>XRay запущен</b>\n\n"
+            "<blockquote>"
+            "Порт: <code>{port}</code>\n"
+            "IP: <code>{ip}</code>"
+            "</blockquote>"
+        ),
+        "start_fail": "<b>Ошибка запуска</b>\n\n<code>{error}</code>",
+        "stopped": "<b>Прокси остановлен</b>",
+        "restarting": "<b>Перезапуск...</b>",
+
+        "status_on": (
+            "<b>Статус XRay</b>\n\n"
+            "<blockquote>"
+            "<b>Состояние:</b> работает\n"
+            "<b>PID:</b> <code>{pid}</code>\n"
+            "<b>Аптайм:</b> <code>{uptime}</code>"
+            "</blockquote>\n\n"
+            "<b>Трафик (с запуска):</b>\n"
+            "<blockquote>"
+            "RX: <code>{rx}</code>\n"
+            "TX: <code>{tx}</code>\n"
+            "Всего: <code>{total}</code>"
+            "</blockquote>\n\n"
+            "<b>Подключения:</b>\n"
+            "<blockquote>"
+            "Активных клиентов: <code>{active}</code>\n"
+            "Уникальных IP (24ч): <code>{unique_ips}</code>"
+            "</blockquote>\n\n"
+            "Доверенных пользователей: <code>{trusted_count}</code>\n"
+            "Порт: <code>{port}</code>"
+        ),
+        "status_off": "<b>Статус XRay</b>\n\n<blockquote><b>Состояние:</b> остановлен</blockquote>",
+
+        "keys_info": (
+            "<b>Ключи Reality</b>\n\n"
+            "<b>Приватный:</b>\n"
+            "<blockquote><code>{private_key}</code></blockquote>\n\n"
+            "<b>Публичный:</b>\n"
+            "<blockquote><code>{public_key}</code></blockquote>\n\n"
+            "<b>UUID:</b>\n"
+            "<blockquote><code>{uid}</code></blockquote>\n\n"
+            "Short ID: <code>{short_id}</code>\n"
+            "SNI: <code>{sni}</code>\n"
+            "Dest: <code>{dest}</code>\n"
+            "Порт: <code>{port}</code>"
+        ),
+        "keys_pm_only": "<b>Ключи только в ЛС</b>",
+
+        "port_current": "Порт: <code>{port}</code>",
+        "port_set": "Порт: <code>{port}</code>\n<code>{prefix}xr restart</code>",
+        "port_invalid": "<b>Порт должен быть 1025-65535</b>",
+
+        "dest_set": "Dest: <code>{dest}</code>\n<code>{prefix}xr restart</code>",
+        "dest_current": "Dest: <code>{dest}</code>",
+        "sni_set": "SNI: <code>{sni}</code>\n<code>{prefix}xr restart</code>",
+        "sni_current": "SNI: <code>{sni}</code>",
+
+        "ip_set": "IP: <code>{ip}</code>",
+        "ip_detected": "IP: <code>{ip}</code>",
+        "ip_fail": "<b>IP не определён</b>\n<code>{prefix}xr ip [адрес]</code>",
+        "ip_invalid": "<b>Неверный IP адрес</b>",
+
+        "user_added": "<b>Добавлен:</b> <blockquote><code>{uid}</code></blockquote>",
+        "user_removed": "<b>Удалён:</b> <blockquote><code>{uid}</code></blockquote>",
+        "user_not_found": "<b>Не найден</b>",
+        "user_need_reply": "<b>Ответьте на сообщение для добавления/удаления пользователя</b>",
+        "users_list": "<b>Доверенные пользователи:</b>\n\n<blockquote>{users}</blockquote>",
+        "users_empty": "<b>Нет доверенных пользователей</b>",
+
+        "log_empty": "<b>Лог пуст</b>",
+        "log_title": "<b>Лог XRay:</b>\n\n<blockquote>",
+        "log_suffix": "</blockquote>",
+
+        "need_setup": "<b>Сначала настройте</b>\n<code>{prefix}xr setup</code>",
+        "no_config": (
+            "<b>Не настроено</b>\n\n"
+            "1. <code>{prefix}xr setup</code>\n"
+            "2. <code>{prefix}xr start</code>"
+        ),
+
+        "overwrite_progress": "<b>Перезапись всех учётных данных...</b>",
+        "overwrite_done": (
+            "<b>Все учётные данные перезаписаны</b>\n\n"
+            "Старые ссылки больше не работают.\n"
+            "Получите новую ссылку через /xray в боте."
+        ),
+        "overwrite_fail": "<b>Ошибка перезаписи</b>\n\n<code>{error}</code>",
+
+        "debug_info": (
+            "<b>Отладка XRay</b>\n\n"
+            "<b>Система:</b>\n"
+            "<blockquote>"
+            "ОС: <code>{os_name}</code>\n"
+            "Арх: <code>{arch}</code>\n"
+            "Python: <code>{python}</code>"
+            "</blockquote>\n\n"
+            "<b>XRay:</b>\n"
+            "<blockquote>"
+            "Установлен: {installed}\n"
+            "Путь: <code>{xray_path}</code>\n"
+            "Версия: <code>{xray_version}</code>"
+            "</blockquote>\n\n"
+            "<b>Прокси:</b>\n"
+            "<blockquote>"
+            "Статус: {status}\n"
+            "PID: <code>{pid}</code>\n"
+            "Порт: <code>{port}</code>\n"
+            "SNI: <code>{sni}</code>\n"
+            "Dest: <code>{dest}</code>\n"
+            "IP: <code>{ip}</code>"
+            "</blockquote>\n\n"
+            "<b>Проверки:</b>\n"
+            "<blockquote>"
+            "Порт слушает: {port_listening}\n"
+            "Конфиг: {config_exists}\n"
+            "Рабочая директория: <code>{work_dir}</code>"
+            "</blockquote>"
+        ),
+
+        "diagnose_title": "<b>Диагностика</b>\n\n<blockquote>",
+        "diagnose_suffix": "</blockquote>",
+
+        "bot_link_response": (
+            "<b>Ваша VLESS ссылка</b>\n\n"
+            "Скачайте клиент:\n"
+            '<a href="https://apps.apple.com/app/id6476628951">v2RayTun для iOS</a>\n'
+            '<a href="https://play.google.com/store/apps/details?id=com.v2raytun.android">v2RayTun для Android</a>\n\n'
+            "Нажмите кнопку ниже чтобы скопировать ссылку, затем откройте v2RayTun, "
+            "нажмите добавить сервер и вставьте."
+        ),
+        "bot_not_configured": "<b>Прокси ещё не настроен</b>",
+        "bot_copy_button": "VPN ССЫЛКА",
+
+        "checkout_empty": "<b>Нет подключений за последние 24ч</b>",
+
+        "ping_progress": "<b>Запуск теста скорости...</b>",
+        "ping_result": (
+            "<b>Тест скорости хоста</b>\n\n"
+            "<b>Скачивание:</b>\n"
+            "<blockquote>{download}</blockquote>\n\n"
+            "<b>Загрузка:</b>\n"
+            "<blockquote>{upload}</blockquote>\n\n"
+            "<b>Задержка:</b>\n"
+            "<blockquote>{latency}</blockquote>"
+        ),
+        "ping_fail": "<b>Тест скорости не удался</b>\n\n<code>{error}</code>",
+    }
+
     def __init__(self):
         self._proc = None
         self._start_time = 0
@@ -261,19 +462,8 @@ class XRay(loader.Module):
         self._traffic_task = None
         self._log_rotation_task = None
 
-    def _get_prefix(self):
-        try:
-            from .. import main
-            return main.hikka.get_prefix()
-        except Exception:
-            pass
-        try:
-            return self._db.get("hikka.main", "command_prefix", ".") or "."
-        except Exception:
-            return "."
-
     def _s(self, key, **kwargs):
-        prefix = self._get_prefix()
+        prefix = self.get_prefix()
         text = self.strings.get(key, "")
         try:
             return text.format(prefix=prefix, **kwargs)
@@ -1482,13 +1672,14 @@ class XRay(loader.Module):
 
     async def _run_diagnose(self):
         results = []
+        prefix = self.get_prefix()
 
         if self._xray_installed():
             ver = await self._get_xray_version()
             results.append(f"OK XRay: <code>{_escape(ver[:100])}</code>")
         else:
             results.append(
-                f"FAIL XRay NOT installed, use <code>{self._get_prefix()}xr setup</code>"
+                f"FAIL XRay NOT installed, use <code>{prefix}xr setup</code>"
             )
             return results
 
@@ -1759,13 +1950,18 @@ class XRay(loader.Module):
             logger.error("[XR] aiogram_watcher error: %s", e)
 
     @loader.command(
-        ru_doc="XRay VLESS+Reality",
-        en_doc="XRay VLESS+Reality",
+        ru_doc="Управление XRay VLESS+Reality VPN",
+        en_doc="XRay VLESS+Reality VPN management",
     )
     async def xr(self, message):
+        """XRay VLESS+Reality VPN management"""
         args = utils.get_args_raw(message).strip()
+        prefix = self.get_prefix()
         if not args:
-            await utils.answer(message, self._s("help"))
+            await utils.answer(
+                message,
+                self.strings["help"].format(prefix=prefix),
+            )
             return
 
         parts = args.split(maxsplit=1)
@@ -1797,7 +1993,10 @@ class XRay(loader.Module):
                     f"<b>Error:</b> <code>{_escape(str(e)[:300])}</code>"
                 )
         else:
-            await utils.answer(message, self._s("help"))
+            await utils.answer(
+                message,
+                self.strings["help"].format(prefix=prefix),
+            )
 
     async def _u_setup(self, msg, parts):
         m = await utils.answer(msg, self._s("setup_progress"))
