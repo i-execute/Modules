@@ -1,10 +1,10 @@
-__version__ = (2, 0, 2)
+__version__ = (2, 0, 4)
 # meta developer: FireJester.t.me
 
 import asyncio
 import logging
 import random
-from datetime import timedelta
+from datetime import timedelta, timezone, datetime
 
 from telethon.tl.types import Message, User
 
@@ -63,15 +63,35 @@ class Deleter(loader.Module):
         "error": "<b>Ошибка:</b> {error}",
     }
 
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            "TIMEZONE_OFFSET", 3, "Смещение часового пояса от UTC (от -12 до +12). Используется для команды .del today",
+        )
+
     async def _bulk_delete(self, client, chat_id, msg_ids: list) -> tuple:
         deleted = 0
         failed = 0
+
+        if not msg_ids:
+            return deleted, failed
+
+        chunk_size = random.randint(90, 110)
+        first_chunk = msg_ids[:chunk_size]
+        rest = msg_ids[chunk_size:]
+
+        try:
+            await client.delete_messages(chat_id, first_chunk)
+            deleted += len(first_chunk)
+        except Exception:
+            failed += len(first_chunk)
+
         chunk = []
         chunk_size = random.randint(90, 110)
 
-        for mid in msg_ids:
+        for mid in rest:
             chunk.append(mid)
             if len(chunk) >= chunk_size:
+                await asyncio.sleep(random.uniform(0.5, 1.5))
                 try:
                     await client.delete_messages(chat_id, chunk)
                     deleted += len(chunk)
@@ -79,9 +99,9 @@ class Deleter(loader.Module):
                     failed += len(chunk)
                 chunk.clear()
                 chunk_size = random.randint(90, 110)
-                await asyncio.sleep(random.uniform(0.5, 1.5))
 
         if chunk:
+            await asyncio.sleep(random.uniform(0.5, 1.5))
             try:
                 await client.delete_messages(chat_id, chunk)
                 deleted += len(chunk)
@@ -139,12 +159,13 @@ class Deleter(loader.Module):
 
     async def _delete_me(self, message: Message):
         chat_id = message.chat_id
-        await message.delete()
+        cmd_msg_id = message.id
 
         try:
-            ids = []
+            ids = [cmd_msg_id]
             async for msg in message.client.iter_messages(chat_id, from_user="me"):
-                ids.append(msg.id)
+                if msg.id != cmd_msg_id:
+                    ids.append(msg.id)
 
             deleted, failed = await self._bulk_delete(message.client, chat_id, ids)
 
@@ -162,18 +183,19 @@ class Deleter(loader.Module):
 
         chat_id = message.chat_id
         reply_id = message.reply_to_msg_id if message.is_reply else None
-        await message.delete()
+        cmd_msg_id = message.id
 
         try:
-            ids = []
+            ids = [cmd_msg_id]
             kwargs = {"entity": chat_id, "from_user": "me"}
             if reply_id:
                 kwargs["max_id"] = reply_id
 
             async for msg in message.client.iter_messages(**kwargs):
-                ids.append(msg.id)
-                if len(ids) >= count:
-                    break
+                if msg.id != cmd_msg_id:
+                    ids.append(msg.id)
+                    if len(ids) - 1 >= count:
+                        break
 
             deleted, failed = await self._bulk_delete(message.client, chat_id, ids)
 
@@ -191,10 +213,10 @@ class Deleter(loader.Module):
 
         reply_id = message.reply_to_msg_id
         chat_id = message.chat_id
-        await message.delete()
+        cmd_msg_id = message.id
 
         try:
-            ids = []
+            ids = [cmd_msg_id]
             async for msg in message.client.iter_messages(chat_id, max_id=reply_id):
                 ids.append(msg.id)
 
@@ -214,12 +236,13 @@ class Deleter(loader.Module):
 
         reply_id = message.reply_to_msg_id
         chat_id = message.chat_id
-        await message.delete()
+        cmd_msg_id = message.id
 
         try:
-            ids = []
+            ids = [cmd_msg_id]
             async for msg in message.client.iter_messages(chat_id, min_id=reply_id):
-                ids.append(msg.id)
+                if msg.id != cmd_msg_id:
+                    ids.append(msg.id)
 
             deleted, failed = await self._bulk_delete(message.client, chat_id, ids)
 
@@ -233,13 +256,15 @@ class Deleter(loader.Module):
 
     async def _delete_now(self, message: Message):
         chat_id = message.chat_id
+        cmd_msg_id = message.id
         cmd_time = message.date
         cutoff = cmd_time - timedelta(minutes=5)
-        await message.delete()
 
         try:
-            ids = []
+            ids = [cmd_msg_id]
             async for msg in message.client.iter_messages(chat_id, from_user="me"):
+                if msg.id == cmd_msg_id:
+                    continue
                 if msg.date < cutoff:
                     break
                 ids.append(msg.id)
@@ -256,14 +281,20 @@ class Deleter(loader.Module):
 
     async def _delete_today(self, message: Message):
         chat_id = message.chat_id
-        cmd_time = message.date
-        midnight = cmd_time.replace(hour=0, minute=0, second=0, microsecond=0)
-        await message.delete()
+        cmd_msg_id = message.id
+
+        offset = self.config.get("TIMEZONE_OFFSET", 3)
+        tz = timezone(timedelta(hours=offset))
+        now = datetime.now(tz)
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         try:
-            ids = []
+            ids = [cmd_msg_id]
             async for msg in message.client.iter_messages(chat_id, from_user="me"):
-                if msg.date < midnight:
+                if msg.id == cmd_msg_id:
+                    continue
+                msg_local = msg.date.astimezone(tz)
+                if msg_local < midnight:
                     break
                 ids.append(msg.id)
 
@@ -289,10 +320,10 @@ class Deleter(loader.Module):
 
     async def _delete_user_by_entity(self, message: Message, entity):
         chat_id = message.chat_id
-        await message.delete()
+        cmd_msg_id = message.id
 
         try:
-            ids = []
+            ids = [cmd_msg_id]
             async for msg in message.client.iter_messages(chat_id, from_user=entity.id):
                 ids.append(msg.id)
 
