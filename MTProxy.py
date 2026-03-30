@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 # meta developer: FireJester.t.me
 
 import os
@@ -56,12 +56,23 @@ def _in_docker():
     return False
 
 
+def _extract_bot_secret(full_secret):
+    if not full_secret:
+        return ""
+    s = full_secret.lower()
+    if s.startswith("ee") and len(s) >= 34:
+        return s[2:34]
+    if len(s) == 32:
+        return s
+    return s[:32] if len(s) > 32 else s
+
+
 @loader.tds
-class MTProto(loader.Module):
+class MTProxy(loader.Module):
     """MTProto proxy server manager"""
 
     strings = {
-        "name": "MTProto",
+        "name": "MTProxy",
     }
 
     strings_en = {
@@ -156,8 +167,10 @@ class MTProto(loader.Module):
 
         "secret_info": (
             "<b>MTProto Secret</b>\n\n"
-            "<b>Secret:</b>\n"
+            "<b>Full secret (for clients):</b>\n"
             "<blockquote><code>{secret}</code></blockquote>\n\n"
+            "<b>Base secret (for @MTProxybot):</b>\n"
+            "<blockquote><code>{bot_secret}</code></blockquote>\n\n"
             "Domain: <code>{domain}</code>\n"
             "Port: <code>{port}</code>\n"
             "IP: <code>{ip}</code>"
@@ -166,11 +179,11 @@ class MTProto(loader.Module):
 
         "botinfo_title": (
             "<b>Info for @MTProxybot</b>\n\n"
-            "<b>1. Host:Port</b>\n"
+            "<b>Step 1. Send host:port to bot:</b>\n"
             "<blockquote><code>{host_port}</code></blockquote>\n\n"
-            "<b>2. Secret</b>\n"
-            "<blockquote><code>{secret}</code></blockquote>\n\n"
-            "Send host:port to @MTProxybot, then send secret."
+            "<b>Step 2. Send secret to bot:</b>\n"
+            "<blockquote><code>{bot_secret}</code></blockquote>\n\n"
+            "Send these values to @MTProxybot one by one."
         ),
         "botinfo_pm_only": "<b>Bot info only in PM</b>",
 
@@ -365,8 +378,10 @@ class MTProto(loader.Module):
 
         "secret_info": (
             "<b>Секрет MTProto</b>\n\n"
-            "<b>Секрет:</b>\n"
+            "<b>Полный секрет (для клиентов):</b>\n"
             "<blockquote><code>{secret}</code></blockquote>\n\n"
+            "<b>Базовый секрет (для @MTProxybot):</b>\n"
+            "<blockquote><code>{bot_secret}</code></blockquote>\n\n"
             "Домен: <code>{domain}</code>\n"
             "Порт: <code>{port}</code>\n"
             "IP: <code>{ip}</code>"
@@ -375,11 +390,11 @@ class MTProto(loader.Module):
 
         "botinfo_title": (
             "<b>Инфо для @MTProxybot</b>\n\n"
-            "<b>1. Хост:Порт</b>\n"
+            "<b>Шаг 1. Отправьте боту host:port:</b>\n"
             "<blockquote><code>{host_port}</code></blockquote>\n\n"
-            "<b>2. Секрет</b>\n"
-            "<blockquote><code>{secret}</code></blockquote>\n\n"
-            "Отправьте хост:порт в @MTProxybot, затем отправьте секрет."
+            "<b>Шаг 2. Отправьте боту секрет:</b>\n"
+            "<blockquote><code>{bot_secret}</code></blockquote>\n\n"
+            "Отправьте эти значения в @MTProxybot по очереди."
         ),
         "botinfo_pm_only": "<b>Инфо для бота только в ЛС</b>",
 
@@ -1421,7 +1436,13 @@ class MTProto(loader.Module):
 
         secret = self._db.get("MTP", "secret", "")
         if secret:
-            results.append(f"OK Secret: {len(secret)} chars, prefix=<code>{secret[:2]}</code>")
+            bot_secret = _extract_bot_secret(secret)
+            results.append(
+                f"OK Secret: {len(secret)} chars, prefix=<code>{secret[:2]}</code>"
+            )
+            results.append(
+                f"   Bot secret: <code>{bot_secret[:8]}...</code> ({len(bot_secret)} chars)"
+            )
         else:
             results.append("FAIL Secret not generated")
 
@@ -1849,6 +1870,7 @@ class MTProto(loader.Module):
         if not secret:
             await utils.answer(msg, self._s("need_setup"))
             return
+        bot_secret = _extract_bot_secret(secret)
         domain = self._db.get("MTP", "domain", "www.google.com")
         port = self._db.get("MTP", "port", 443)
         ip = await self._get_external_ip()
@@ -1857,6 +1879,7 @@ class MTProto(loader.Module):
             self._s(
                 "secret_info",
                 secret=secret,
+                bot_secret=bot_secret,
                 domain=_escape(domain),
                 port=port,
                 ip=ip or "?",
@@ -1873,12 +1896,13 @@ class MTProto(loader.Module):
         if not secret or not ip:
             await utils.answer(msg, self._s("no_config"))
             return
+        bot_secret = _extract_bot_secret(secret)
         await utils.answer(
             msg,
             self._s(
                 "botinfo_title",
                 host_port=f"{ip}:{port}",
-                secret=secret,
+                bot_secret=bot_secret,
             ),
         )
 
