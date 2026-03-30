@@ -5,7 +5,8 @@ Deleter
 Grabber 
 Info  
 Logger 
-Manager 
+Manager
+MTProxy
 MusicX    
 NewYear 
 Note 

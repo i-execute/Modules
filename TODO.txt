@@ -1,6 +1,5 @@
 Market
 AIBot
-MTProxy
 Dumper
 Minecraft
 Token
