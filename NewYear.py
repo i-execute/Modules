@@ -1,8 +1,10 @@
-__version__ = (1, 0, 0)
+__version__ = (2, 0, 0)
 # meta developer: FireJester.t.me 
 
 from .. import loader, utils
 from datetime import datetime, timezone, timedelta
+from telethon.types import InputMediaWebPage
+from telethon.errors import WebpageMediaEmptyError
 
 @loader.tds
 class NewYear(loader.Module):
@@ -63,6 +65,10 @@ class NewYear(loader.Module):
             "<emoji document_id=5316833049005035923>😵</emoji><b> Failed to load media!</b>\n"
             "<blockquote>Check the link or try another file</blockquote>"
         ),
+        "media_preview_error": (
+            "<emoji document_id=5316833049005035923>😵</emoji><b> Failed to load media preview from this link!</b>\n"
+            "<blockquote>The link may not support previews. Try another link or reply to a media file directly</blockquote>"
+        ),
         "media_removed": "<emoji document_id=5319222343606773249>❌</emoji><b> Media file removed!</b>",
         "saved_caption": "<emoji document_id=5316890674581248786>🪟</emoji><b> Do not delete - media for the New Year module</b>",
     }
@@ -117,6 +123,10 @@ class NewYear(loader.Module):
         "media_load_error": (
             "<emoji document_id=5316833049005035923>😵</emoji><b> Не удалось загрузить медиа!</b>\n"
             "<blockquote>Проверьте ссылку или попробуйте другой файл</blockquote>"
+        ),
+        "media_preview_error": (
+            "<emoji document_id=5316833049005035923>😵</emoji><b> Не удалось загрузить превью медиа по этой ссылке!</b>\n"
+            "<blockquote>Возможно, ссылка не поддерживает превью. Попробуйте другую ссылку или ответьте на медиафайл напрямую</blockquote>"
         ),
         "media_removed": "<emoji document_id=5319222343606773249>❌</emoji><b> Медиафайл удален!</b>",
         "saved_caption": "<emoji document_id=5316890674581248786>🪟</emoji><b> Не удалять - медиа для модуля New Year</b>",
@@ -214,7 +224,13 @@ class NewYear(loader.Module):
                         self.config["SAVED_MSG_ID"] = 0
                 else:
                     try:
-                        await utils.answer(message, msg, file=media_url)
+                        media = InputMediaWebPage(url=media_url, optional=True)
+                        await utils.answer(message, msg, file=media)
+                    except WebpageMediaEmptyError:
+                        await utils.answer(
+                            message,
+                            self.strings["media_preview_error"],
+                        )
                     except:
                         await utils.answer(message, msg)
             else:
@@ -297,12 +313,15 @@ class NewYear(loader.Module):
                     pass
             self.config["SAVED_MSG_ID"] = 0
             try:
+                media_preview = InputMediaWebPage(url=media_url, optional=True)
                 await utils.answer(
                     message,
                     self.strings["media_added"].format(prefix=prefix),
-                    file=media_url,
+                    file=media_preview,
                 )
                 self.config["MEDIA_URL"] = media_url
+            except WebpageMediaEmptyError:
+                await utils.answer(message, self.strings["media_preview_error"])
             except Exception:
                 await utils.answer(message, self.strings["media_load_error"])
 
