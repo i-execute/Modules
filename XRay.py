@@ -1,4 +1,4 @@
-__version__ = (3, 5, 5)
+__version__ = (3, 5, 6)
 # meta developer: FireJester.t.me
 
 import os
@@ -38,6 +38,26 @@ def _escape(text):
     if not text:
         return ""
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _in_docker():
+    if os.path.exists("/.dockerenv"):
+        return True
+    try:
+        with open("/proc/1/cgroup", "r") as f:
+            content = f.read()
+            if "docker" in content or "containerd" in content:
+                return True
+    except Exception:
+        pass
+    try:
+        with open("/proc/self/mountinfo", "r") as f:
+            content = f.read()
+            if "docker" in content or "overlay" in content:
+                return True
+    except Exception:
+        pass
+    return False
 
 
 @loader.tds
@@ -94,6 +114,11 @@ class XRay(loader.Module):
         "setup_config": "Config written",
         "setup_done": "<b>Setup complete</b>\n\nNow: <code>{prefix}xr start</code>",
         "setup_fail": "<b>Setup failed</b>\n\n<code>{error}</code>",
+        "setup_docker": (
+            "<b>Docker detected</b>\n\n"
+            "This module cannot work inside Docker container.\n"
+            "Unload: <code>{prefix}ulm XRay</code>"
+        ),
 
         "already_running": "<b>Proxy already running</b>",
         "not_running": "<b>Proxy not running</b>",
@@ -108,6 +133,11 @@ class XRay(loader.Module):
         "start_fail": "<b>Start failed</b>\n\n<code>{error}</code>",
         "stopped": "<b>Proxy stopped</b>",
         "restarting": "<b>Restarting...</b>",
+        "port_busy": (
+            "<b>Port {port} is busy</b>\n\n"
+            "Change port: <code>{prefix}xr port [port]</code>\n"
+            "Then: <code>{prefix}xr start</code>"
+        ),
 
         "status_on": (
             "<b>XRay Status</b>\n\n"
@@ -214,6 +244,7 @@ class XRay(loader.Module):
             "<blockquote>"
             "Port listening: {port_listening}\n"
             "Config: {config_exists}\n"
+            "Docker: {docker}\n"
             "Work dir: <code>{work_dir}</code>"
             "</blockquote>"
         ),
@@ -293,6 +324,11 @@ class XRay(loader.Module):
         "setup_config": "Конфиг записан",
         "setup_done": "<b>Настройка завершена</b>\n\nТеперь: <code>{prefix}xr start</code>",
         "setup_fail": "<b>Настройка не удалась</b>\n\n<code>{error}</code>",
+        "setup_docker": (
+            "<b>Обнаружен Docker</b>\n\n"
+            "Этот модуль не может работать внутри Docker контейнера.\n"
+            "Выгрузить: <code>{prefix}ulm XRay</code>"
+        ),
 
         "already_running": "<b>Прокси уже запущен</b>",
         "not_running": "<b>Прокси не запущен</b>",
@@ -307,6 +343,11 @@ class XRay(loader.Module):
         "start_fail": "<b>Ошибка запуска</b>\n\n<code>{error}</code>",
         "stopped": "<b>Прокси остановлен</b>",
         "restarting": "<b>Перезапуск...</b>",
+        "port_busy": (
+            "<b>Порт {port} занят</b>\n\n"
+            "Сменить порт: <code>{prefix}xr port [порт]</code>\n"
+            "Затем: <code>{prefix}xr start</code>"
+        ),
 
         "status_on": (
             "<b>Статус XRay</b>\n\n"
@@ -413,6 +454,7 @@ class XRay(loader.Module):
             "<blockquote>"
             "Порт слушает: {port_listening}\n"
             "Конфиг: {config_exists}\n"
+            "Docker: {docker}\n"
             "Рабочая директория: <code>{work_dir}</code>"
             "</blockquote>"
         ),
@@ -1394,6 +1436,9 @@ class XRay(loader.Module):
             shutil.rmtree(tmp, ignore_errors=True)
 
     async def _do_setup(self, progress_cb=None):
+        if _in_docker():
+            return False, "docker"
+
         if not self._xray_installed():
             if progress_cb:
                 await progress_cb(self.strings["setup_installing"])
@@ -1443,6 +1488,11 @@ class XRay(loader.Module):
             private_key = self._db.get("XR", "private_key", "")
             if not vless_uuid or not private_key:
                 return False, "need_setup"
+
+            port = self._db.get("XR", "port", 8443)
+            listening = await self._check_port_listening(port)
+            if listening:
+                return False, "port_busy"
 
             try:
                 self._write_config()
@@ -1496,9 +1546,8 @@ class XRay(loader.Module):
                 self._start_traffic_monitor()
 
                 await asyncio.sleep(1)
-                port = self._db.get("XR", "port", 8443)
-                listening = await self._check_port_listening(port)
-                if not listening:
+                port_ok = await self._check_port_listening(port)
+                if not port_ok:
                     logger.warning("[XR] Port %d not listening yet", port)
 
                 return True, None
@@ -1673,6 +1722,11 @@ class XRay(loader.Module):
     async def _run_diagnose(self):
         results = []
         prefix = self.get_prefix()
+
+        if _in_docker():
+            results.append("FAIL Running inside Docker")
+        else:
+            results.append("OK Not in Docker")
 
         if self._xray_installed():
             ver = await self._get_xray_version()
@@ -1894,6 +1948,7 @@ class XRay(loader.Module):
             config_exists=(
                 "yes" if os.path.exists(self._config_path) else "no"
             ),
+            docker="yes" if _in_docker() else "no",
             work_dir=_escape(self._root),
         )
 
@@ -1999,6 +2054,10 @@ class XRay(loader.Module):
             )
 
     async def _u_setup(self, msg, parts):
+        if _in_docker():
+            await utils.answer(msg, self._s("setup_docker"))
+            return
+
         m = await utils.answer(msg, self._s("setup_progress"))
         log_lines = []
 
@@ -2013,6 +2072,8 @@ class XRay(loader.Module):
         ok, err = await self._do_setup(progress_cb=progress_cb)
         if ok:
             t = self._s("setup_done")
+        elif err == "docker":
+            t = self._s("setup_docker")
         else:
             t = self._s("setup_fail", error=_escape(str(err)))
         await self._safe_edit(m, t)
@@ -2024,8 +2085,15 @@ class XRay(loader.Module):
             port = self._db.get("XR", "port", 8443)
             ip = await self._get_external_ip()
             t = self._s("started", port=port, ip=ip or "?")
-        elif err in ("already_running", "not_installed", "need_setup"):
-            t = self._s(err)
+        elif err == "already_running":
+            t = self._s("already_running")
+        elif err == "not_installed":
+            t = self._s("not_installed")
+        elif err == "need_setup":
+            t = self._s("need_setup")
+        elif err == "port_busy":
+            port = self._db.get("XR", "port", 8443)
+            t = self._s("port_busy", port=port)
         else:
             t = self._s("start_fail", error=_escape(str(err)))
         await self._safe_edit(m, t)
@@ -2046,6 +2114,9 @@ class XRay(loader.Module):
             port = self._db.get("XR", "port", 8443)
             ip = await self._get_external_ip()
             t = self._s("started", port=port, ip=ip or "?")
+        elif err == "port_busy":
+            port = self._db.get("XR", "port", 8443)
+            t = self._s("port_busy", port=port)
         else:
             t = self._s("start_fail", error=_escape(str(err)))
         await self._safe_edit(m, t)
