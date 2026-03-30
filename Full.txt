@@ -18,6 +18,7 @@ Statistics
 Stories 
 Test 
 TGWatcher
+Token
 TONScanner
 Twin
 Uploader
