@@ -37,7 +37,6 @@ class Statistics(loader.Module):
             "<code>{prefix}statw</code> - weekly activity\n"
             "<code>{prefix}statm</code> - monthly activity\n"
             "<code>{prefix}staty</code> - yearly activity\n"
-            "<code>{prefix}statreset</code> - reset all counters\n"
         ),
         "account_stats": (
             "<b>Account Statistics</b>\n\n"
@@ -82,7 +81,6 @@ class Statistics(loader.Module):
         "period_week": "This week",
         "period_month": "This month",
         "period_year": "This year",
-        "reset_done": "<b>All counters have been reset</b>",
         "loading": "<b>Loading statistics...</b>",
     }
 
@@ -94,7 +92,6 @@ class Statistics(loader.Module):
             "<code>{prefix}statw</code> - активность за неделю\n"
             "<code>{prefix}statm</code> - активность за месяц\n"
             "<code>{prefix}staty</code> - активность за год\n"
-            "<code>{prefix}statreset</code> - сбросить все счетчики\n"
         ),
         "account_stats": (
             "<b>Статистика аккаунта</b>\n\n"
@@ -139,7 +136,6 @@ class Statistics(loader.Module):
         "period_week": "Эта неделя",
         "period_month": "Этот месяц",
         "period_year": "Этот год",
-        "reset_done": "<b>Все счетчики сброшены</b>",
         "loading": "<b>Загрузка статистики...</b>",
     }
 
@@ -240,6 +236,7 @@ class Statistics(loader.Module):
                 text,
                 file=media,
                 parse_mode="html",
+                invert_media=True,
             )
         except Exception:
             await utils.answer(message, text, parse_mode="html")
@@ -482,12 +479,3 @@ class Statistics(loader.Module):
                 current_time=self._now_str(),
             ),
         )
-
-    @loader.command(
-        ru_doc="Сбросить все счетчики",
-        en_doc="Reset all counters",
-    )
-    async def statreset(self, message: Message):
-        """Reset all counters"""
-        self._db.set("Statistics", "events", [])
-        await utils.answer(message, self.strings["reset_done"], parse_mode="html")
