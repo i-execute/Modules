@@ -1,4 +1,4 @@
-__version__ = (2, 1, 0)
+__version__ = (2, 1, 1)
 # meta developer: FireJester.t.me 
 
 from .. import loader, utils
@@ -42,7 +42,9 @@ class NewYear(loader.Module):
             "</blockquote>"
         ),
         "prem_new_year_template": (
-            "<emoji document_id=5318911370794671211>🎩</emoji><b> Time until New Year {year}:</b>\n"
+            "<blockquote>"
+            "<emoji document_id=5318911370794671211>🎩</emoji><b> Time until New Year {year}:</b>"
+            "</blockquote>\n"
             "<blockquote>"
             "<emoji document_id=5319037874761405673>🎆</emoji><b> Days: </b><code>{days}</code>\n"
             "<emoji document_id=5319072286039382810>🕯</emoji><b> Hours: </b><code>{hours}</code>\n"
@@ -55,7 +57,9 @@ class NewYear(loader.Module):
             "</blockquote>"
         ),
         "noprem_new_year_template": (
-            "<b>Time until New Year {year}:</b>\n"
+            "<blockquote>"
+            "<b>Time until New Year {year}:</b>"
+            "</blockquote>\n"
             "<blockquote>"
             "<b>Days: </b><code>{days}</code>\n"
             "<b>Hours: </b><code>{hours}</code>\n"
@@ -161,7 +165,9 @@ class NewYear(loader.Module):
             "</blockquote>"
         ),
         "prem_new_year_template": (
-            "<emoji document_id=5318911370794671211>🎩</emoji><b> До Нового {year} года осталось:</b>\n\n"
+            "<blockquote>"
+            "<emoji document_id=5318911370794671211>🎩</emoji><b> До Нового {year} года осталось:</b>"
+            "</blockquote>\n"
             "<blockquote>"
             "<emoji document_id=5319037874761405673>🎆</emoji><b> Дней: </b><code>{days}</code>\n"
             "<emoji document_id=5319072286039382810>🕯</emoji><b> Часов: </b><code>{hours}</code>\n"
@@ -174,7 +180,9 @@ class NewYear(loader.Module):
             "</blockquote>"
         ),
         "noprem_new_year_template": (
-            "<b>До Нового {year} года осталось:</b>\n\n"
+            "<blockquote>"
+            "<b>До Нового {year} года осталось:</b>"
+            "</blockquote>\n"
             "<blockquote>"
             "<b>Дней: </b><code>{days}</code>\n"
             "<b>Часов: </b><code>{hours}</code>\n"
