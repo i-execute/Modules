@@ -1,4 +1,4 @@
-__version__ = (2, 0, 0)
+__version__ = (2, 0, 1)
 # meta developer: FireJester.t.me
 
 import asyncio
@@ -56,7 +56,7 @@ class RaidProtection(loader.Module):
             "{username_line}"
             "<b>Message:</b>\n<code>{text}</code>"
         ),
-        "raid_message": "Raid protection btw",
+        "raid_message": "Spam ban btw",
         "reloaded": "<b>RaidProtection module reloaded, active</b>",
         "inline_create_failed": (
             "<b>Failed to create/setup log group</b>\n\n"
@@ -87,7 +87,7 @@ class RaidProtection(loader.Module):
             "{username_line}"
             "<b>Сообщение:</b>\n<code>{text}</code>"
         ),
-        "raid_message": "Raid protection btw",
+        "raid_message": "Spam ban btw",
         "reloaded": "<b>Модуль RaidProtection перезагружен, активен</b>",
         "inline_create_failed": (
             "<b>Не удалось создать/настроить группу логов</b>\n\n"
@@ -329,7 +329,6 @@ class RaidProtection(loader.Module):
             or not self.get("state", False)
             or utils.get_chat_id(message)
             in {
-                1271266957,
                 777000,
                 self._tg_id,
             }
