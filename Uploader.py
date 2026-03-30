@@ -46,14 +46,63 @@ def _detect_type(name):
         "jpeg": "image/jpeg",
         "heif": "image/heif",
         "heic": "image/heic",
+        "gif": "image/gif",
+        "webp": "image/webp",
+        "bmp": "image/bmp",
+        "svg": "image/svg+xml",
         "mp4": "video/mp4",
         "mov": "video/quicktime",
+        "avi": "video/x-msvideo",
+        "mkv": "video/x-matroska",
+        "webm": "video/webm",
         "mp3": "audio/mpeg",
+        "wav": "audio/wav",
+        "ogg": "audio/ogg",
+        "flac": "audio/flac",
+        "aac": "audio/aac",
+        "py": "text/x-python",
+        "txt": "text/plain",
+        "json": "application/json",
+        "xml": "text/xml",
+        "html": "text/html",
+        "css": "text/css",
+        "js": "text/javascript",
+        "md": "text/markdown",
+        "csv": "text/csv",
+        "log": "text/plain",
+        "cfg": "text/plain",
+        "ini": "text/plain",
+        "yaml": "text/yaml",
+        "yml": "text/yaml",
+        "toml": "application/toml",
+        "zip": "application/zip",
+        "rar": "application/x-rar",
+        "7z": "application/x-7z-compressed",
+        "tar": "application/x-tar",
+        "gz": "application/gzip",
+        "apk": "application/vnd.android.package-archive",
+        "pdf": "application/pdf",
+        "doc": "application/msword",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls": "application/vnd.ms-excel",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "tgs": "application/x-tgsticker",
+        "webm_s": "video/webm",
     }
     return types.get(ext, f"file/{ext}" if ext else "unknown")
 
 
-ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "heif", "heic", "mp4", "mov", "mp3"}
+ALLOWED_EXTENSIONS = {
+    "png", "jpg", "jpeg", "heif", "heic", "gif", "webp", "bmp", "svg",
+    "mp4", "mov", "avi", "mkv", "webm",
+    "mp3", "wav", "ogg", "flac", "aac",
+    "py", "txt", "json", "xml", "html", "css", "js", "md", "csv",
+    "log", "cfg", "ini", "yaml", "yml", "toml",
+    "zip", "rar", "7z", "tar", "gz",
+    "apk", "pdf", "doc", "docx", "xls", "xlsx", "pptx",
+    "tgs",
+}
 
 
 @loader.tds
@@ -66,25 +115,40 @@ class Uploader(loader.Module):
 
     strings_en = {
         "help": (
-            "<b>Uploader</b>\n\n"
+            "<b>Uploader</b>\n"
             "<blockquote>"
             "<code>{prefix}upl</code> - reply to photo/video/file to upload to x0.at"
+            "</blockquote>\n"
+            "<b>Supported formats:</b>\n"
+            "<blockquote>"
+            "Images: png, jpeg, jpg, heif, heic, gif, webp, bmp, svg\n"
+            "Video: mp4, mov, avi, mkv, webm\n"
+            "Audio: mp3, wav, ogg, flac, aac\n"
+            "Text: py, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
+            "Archives: zip, rar, 7z, tar, gz\n"
+            "Docs: pdf, doc, docx, xls, xlsx, pptx\n"
+            "Other: apk, tgs"
             "</blockquote>"
         ),
         "no_reply": "<b>Reply to a photo, video or file</b>",
-        "unsupported": "<b>Unsupported format</b>\n\n<blockquote>Supported: png, jpeg, jpg, heif, heic, mp4, mov, mp3</blockquote>",
-        "downloading": "<b>Downloading</b>\n\n<blockquote><code>{time}</code></blockquote>",
-        "uploading": "<b>Uploading to x0.at</b>\n\n<blockquote><code>{time}</code></blockquote>",
+        "unsupported": (
+            "<b>Unsupported format</b>\n"
+            "<blockquote>"
+            "Use <code>{prefix}upl</code> without args to see supported formats"
+            "</blockquote>"
+        ),
+        "downloading": "<b>Downloading</b>\n<blockquote><code>{time}</code></blockquote>",
+        "uploading": "<b>Uploading to x0.at</b>\n<blockquote><code>{time}</code></blockquote>",
         "done": (
-            "<b>Uploaded</b>\n\n"
+            "<b>Uploaded</b>\n"
             "<b>Link:</b>\n"
-            "<blockquote><a href=\"{url}\">{url}</a></blockquote>\n\n"
+            "<blockquote><a href=\"{url}\">{url}</a></blockquote>\n"
             "<b>File:</b>\n"
             "<blockquote>"
             "Name: <code>{name}</code>\n"
             "Type: <code>{type}</code>\n"
             "Size: <code>{size}</code>"
-            "</blockquote>\n\n"
+            "</blockquote>\n"
             "<b>Time:</b>\n"
             "<blockquote>"
             "Download: <code>{dl_time}</code>\n"
@@ -92,31 +156,46 @@ class Uploader(loader.Module):
             "Total: <code>{total_time}</code>"
             "</blockquote>"
         ),
-        "upload_fail": "<b>Upload failed</b>\n\n<blockquote><code>{error}</code></blockquote>",
-        "download_fail": "<b>Download failed</b>\n\n<blockquote><code>{error}</code></blockquote>",
+        "upload_fail": "<b>Upload failed</b>\n<blockquote><code>{error}</code></blockquote>",
+        "download_fail": "<b>Download failed</b>\n<blockquote><code>{error}</code></blockquote>",
     }
 
     strings_ru = {
         "help": (
-            "<b>Uploader</b>\n\n"
+            "<b>Uploader</b>\n"
             "<blockquote>"
             "<code>{prefix}upl</code> - реплай на фото/видео/файл для загрузки на x0.at"
+            "</blockquote>\n"
+            "<b>Поддерживаемые форматы:</b>\n"
+            "<blockquote>"
+            "Изображения: png, jpeg, jpg, heif, heic, gif, webp, bmp, svg\n"
+            "Видео: mp4, mov, avi, mkv, webm\n"
+            "Аудио: mp3, wav, ogg, flac, aac\n"
+            "Текст: py, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
+            "Архивы: zip, rar, 7z, tar, gz\n"
+            "Документы: pdf, doc, docx, xls, xlsx, pptx\n"
+            "Другое: apk, tgs"
             "</blockquote>"
         ),
         "no_reply": "<b>Ответьте на фото, видео или файл</b>",
-        "unsupported": "<b>Неподдерживаемый формат</b>\n\n<blockquote>Поддерживаются: png, jpeg, jpg, heif, heic, mp4, mov, mp3</blockquote>",
-        "downloading": "<b>Скачивание</b>\n\n<blockquote><code>{time}</code></blockquote>",
-        "uploading": "<b>Загрузка на x0.at</b>\n\n<blockquote><code>{time}</code></blockquote>",
+        "unsupported": (
+            "<b>Неподдерживаемый формат</b>\n"
+            "<blockquote>"
+            "Используйте <code>{prefix}upl</code> без аргументов для списка форматов"
+            "</blockquote>"
+        ),
+        "downloading": "<b>Скачивание</b>\n<blockquote><code>{time}</code></blockquote>",
+        "uploading": "<b>Загрузка на x0.at</b>\n<blockquote><code>{time}</code></blockquote>",
         "done": (
-            "<b>Загружено</b>\n\n"
+            "<b>Загружено</b>\n"
             "<b>Ссылка:</b>\n"
-            "<blockquote><a href=\"{url}\">{url}</a></blockquote>\n\n"
+            "<blockquote><a href=\"{url}\">{url}</a></blockquote>\n"
             "<b>Файл:</b>\n"
             "<blockquote>"
             "Имя: <code>{name}</code>\n"
             "Тип: <code>{type}</code>\n"
             "Размер: <code>{size}</code>"
-            "</blockquote>\n\n"
+            "</blockquote>\n"
             "<b>Время:</b>\n"
             "<blockquote>"
             "Скачивание: <code>{dl_time}</code>\n"
@@ -124,8 +203,8 @@ class Uploader(loader.Module):
             "Всего: <code>{total_time}</code>"
             "</blockquote>"
         ),
-        "upload_fail": "<b>Ошибка загрузки</b>\n\n<blockquote><code>{error}</code></blockquote>",
-        "download_fail": "<b>Ошибка скачивания</b>\n\n<blockquote><code>{error}</code></blockquote>",
+        "upload_fail": "<b>Ошибка загрузки</b>\n<blockquote><code>{error}</code></blockquote>",
+        "download_fail": "<b>Ошибка скачивания</b>\n<blockquote><code>{error}</code></blockquote>",
     }
 
     def _s(self, key, **kwargs):
@@ -167,9 +246,38 @@ class Uploader(loader.Module):
                 "image/jpeg": "file.jpg",
                 "image/heif": "file.heif",
                 "image/heic": "file.heic",
+                "image/gif": "file.gif",
+                "image/webp": "file.webp",
+                "image/bmp": "file.bmp",
+                "image/svg+xml": "file.svg",
                 "video/mp4": "file.mp4",
                 "video/quicktime": "file.mov",
+                "video/x-msvideo": "file.avi",
+                "video/x-matroska": "file.mkv",
+                "video/webm": "file.webm",
                 "audio/mpeg": "file.mp3",
+                "audio/wav": "file.wav",
+                "audio/x-wav": "file.wav",
+                "audio/ogg": "file.ogg",
+                "audio/flac": "file.flac",
+                "audio/aac": "file.aac",
+                "text/x-python": "file.py",
+                "text/plain": "file.txt",
+                "application/json": "file.json",
+                "text/xml": "file.xml",
+                "text/html": "file.html",
+                "text/css": "file.css",
+                "text/javascript": "file.js",
+                "text/markdown": "file.md",
+                "text/csv": "file.csv",
+                "application/zip": "file.zip",
+                "application/x-rar": "file.rar",
+                "application/x-7z-compressed": "file.7z",
+                "application/x-tar": "file.tar",
+                "application/gzip": "file.gz",
+                "application/pdf": "file.pdf",
+                "application/vnd.android.package-archive": "file.apk",
+                "application/x-tgsticker": "file.tgs",
             }
             if mime in ext_map:
                 return ext_map[mime]
@@ -213,7 +321,6 @@ class Uploader(loader.Module):
             self._timer_loop(m, "downloading", dl_start, stop_event)
         )
 
-        tmp_fd = None
         tmp_path = None
         try:
             tmp_fd = tempfile.NamedTemporaryFile(
