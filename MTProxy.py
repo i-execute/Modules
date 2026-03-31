@@ -69,7 +69,7 @@ def _extract_bot_secret(full_secret):
 
 @loader.tds
 class MTProxy(loader.Module):
-    """MTProto proxy server manager"""
+    """MTProxy server manager"""
 
     strings = {
         "name": "MTProxy",
@@ -77,7 +77,7 @@ class MTProxy(loader.Module):
 
     strings_en = {
         "help": (
-            "<b>MTProto Proxy</b>\n\n"
+            "<b>MTProxy</b>\n\n"
             "<b>Setup:</b>\n"
             "<blockquote>"
             "<code>{prefix}mtp setup</code> install mtg + generate secret + config\n"
@@ -115,7 +115,7 @@ class MTProxy(loader.Module):
         ),
 
         "not_installed": "<b>mtg not installed</b>\n<code>{prefix}mtp setup</code>",
-        "setup_progress": "<b>Setting up MTProto proxy...</b>",
+        "setup_progress": "<b>Setting up MTProxy...</b>",
         "setup_installing": "Downloading mtg...",
         "setup_installed": "mtg installed: {version}",
         "setup_secret": "Secret generated",
@@ -124,14 +124,14 @@ class MTProxy(loader.Module):
         "setup_docker": (
             "<b>Docker detected</b>\n\n"
             "This module cannot work inside Docker container.\n"
-            "Unload: <code>{prefix}ulm MTProto</code>"
+            "Unload: <code>{prefix}ulm MTProxy</code>"
         ),
 
         "already_running": "<b>Proxy already running</b>",
         "not_running": "<b>Proxy not running</b>",
-        "starting": "<b>Starting MTProto proxy...</b>",
+        "starting": "<b>Starting MTProxy...</b>",
         "started": (
-            "<b>MTProto proxy started</b>\n\n"
+            "<b>MTProxy started</b>\n\n"
             "<blockquote>"
             "Port: <code>{port}</code>\n"
             "Domain: <code>{domain}</code>\n"
@@ -148,7 +148,7 @@ class MTProxy(loader.Module):
         ),
 
         "status_on": (
-            "<b>MTProto Status</b>\n\n"
+            "<b>MTProxy Status</b>\n\n"
             "<blockquote>"
             "<b>State:</b> running\n"
             "<b>PID:</b> <code>{pid}</code>\n"
@@ -163,10 +163,10 @@ class MTProxy(loader.Module):
             "</blockquote>\n\n"
             "Trusted users: <code>{trusted_count}</code>"
         ),
-        "status_off": "<b>MTProto Status</b>\n\n<blockquote><b>State:</b> stopped</blockquote>",
+        "status_off": "<b>MTProxy Status</b>\n\n<blockquote><b>State:</b> stopped</blockquote>",
 
         "secret_info": (
-            "<b>MTProto Secret</b>\n\n"
+            "<b>MTProxy Secret</b>\n\n"
             "<b>Full secret (for clients):</b>\n"
             "<blockquote><code>{secret}</code></blockquote>\n\n"
             "<b>Base secret (for @MTProxybot):</b>\n"
@@ -213,7 +213,7 @@ class MTProxy(loader.Module):
         "users_empty": "<b>No trusted users</b>",
 
         "log_empty": "<b>Log empty</b>",
-        "log_title": "<b>MTProto log:</b>\n\n<blockquote>",
+        "log_title": "<b>MTProxy log:</b>\n\n<blockquote>",
         "log_suffix": "</blockquote>",
 
         "need_setup": "<b>Setup first</b>\n<code>{prefix}mtp setup</code>",
@@ -232,7 +232,7 @@ class MTProxy(loader.Module):
         "overwrite_fail": "<b>Overwrite failed</b>\n\n<code>{error}</code>",
 
         "debug_info": (
-            "<b>MTProto Debug</b>\n\n"
+            "<b>MTProxy Debug</b>\n\n"
             "<b>System:</b>\n"
             "<blockquote>"
             "OS: <code>{os_name}</code>\n"
@@ -267,7 +267,7 @@ class MTProxy(loader.Module):
         "diagnose_suffix": "</blockquote>",
 
         "bot_link_response": (
-            "<b>Your MTProto proxy link</b>\n\n"
+            "<b>Your MTProxy link</b>\n\n"
             "Press the button below to connect."
         ),
         "bot_not_configured": "<b>Proxy not configured yet</b>",
@@ -288,7 +288,7 @@ class MTProxy(loader.Module):
 
     strings_ru = {
         "help": (
-            "<b>MTProto Proxy</b>\n\n"
+            "<b>MTProxy</b>\n\n"
             "<b>Установка:</b>\n"
             "<blockquote>"
             "<code>{prefix}mtp setup</code> установка mtg + генерация секрета + конфиг\n"
@@ -326,7 +326,7 @@ class MTProxy(loader.Module):
         ),
 
         "not_installed": "<b>mtg не установлен</b>\n<code>{prefix}mtp setup</code>",
-        "setup_progress": "<b>Настройка MTProto прокси...</b>",
+        "setup_progress": "<b>Настройка MTProxy...</b>",
         "setup_installing": "Скачивание mtg...",
         "setup_installed": "mtg установлен: {version}",
         "setup_secret": "Секрет сгенерирован",
@@ -335,14 +335,14 @@ class MTProxy(loader.Module):
         "setup_docker": (
             "<b>Обнаружен Docker</b>\n\n"
             "Этот модуль не может работать внутри Docker контейнера.\n"
-            "Выгрузить: <code>{prefix}ulm MTProto</code>"
+            "Выгрузить: <code>{prefix}ulm MTProxy</code>"
         ),
 
         "already_running": "<b>Прокси уже запущен</b>",
         "not_running": "<b>Прокси не запущен</b>",
-        "starting": "<b>Запуск MTProto прокси...</b>",
+        "starting": "<b>Запуск MTProxy...</b>",
         "started": (
-            "<b>MTProto прокси запущен</b>\n\n"
+            "<b>MTProxy запущен</b>\n\n"
             "<blockquote>"
             "Порт: <code>{port}</code>\n"
             "Домен: <code>{domain}</code>\n"
@@ -359,7 +359,7 @@ class MTProxy(loader.Module):
         ),
 
         "status_on": (
-            "<b>Статус MTProto</b>\n\n"
+            "<b>Статус MTProxy</b>\n\n"
             "<blockquote>"
             "<b>Состояние:</b> работает\n"
             "<b>PID:</b> <code>{pid}</code>\n"
@@ -374,10 +374,10 @@ class MTProxy(loader.Module):
             "</blockquote>\n\n"
             "Доверенных пользователей: <code>{trusted_count}</code>"
         ),
-        "status_off": "<b>Статус MTProto</b>\n\n<blockquote><b>Состояние:</b> остановлен</blockquote>",
+        "status_off": "<b>Статус MTProxy</b>\n\n<blockquote><b>Состояние:</b> остановлен</blockquote>",
 
         "secret_info": (
-            "<b>Секрет MTProto</b>\n\n"
+            "<b>Секрет MTProxy</b>\n\n"
             "<b>Полный секрет (для клиентов):</b>\n"
             "<blockquote><code>{secret}</code></blockquote>\n\n"
             "<b>Базовый секрет (для @MTProxybot):</b>\n"
@@ -424,7 +424,7 @@ class MTProxy(loader.Module):
         "users_empty": "<b>Нет доверенных пользователей</b>",
 
         "log_empty": "<b>Лог пуст</b>",
-        "log_title": "<b>Лог MTProto:</b>\n\n<blockquote>",
+        "log_title": "<b>Лог MTProxy:</b>\n\n<blockquote>",
         "log_suffix": "</blockquote>",
 
         "need_setup": "<b>Сначала настройте</b>\n<code>{prefix}mtp setup</code>",
@@ -443,7 +443,7 @@ class MTProxy(loader.Module):
         "overwrite_fail": "<b>Ошибка перезаписи</b>\n\n<code>{error}</code>",
 
         "debug_info": (
-            "<b>Отладка MTProto</b>\n\n"
+            "<b>Отладка MTProxy</b>\n\n"
             "<b>Система:</b>\n"
             "<blockquote>"
             "ОС: <code>{os_name}</code>\n"
@@ -478,7 +478,7 @@ class MTProxy(loader.Module):
         "diagnose_suffix": "</blockquote>",
 
         "bot_link_response": (
-            "<b>Ваша ссылка MTProto прокси</b>\n\n"
+            "<b>Ваша ссылка MTProxy</b>\n\n"
             "Нажмите кнопку ниже для подключения."
         ),
         "bot_not_configured": "<b>Прокси ещё не настроен</b>",
@@ -524,7 +524,7 @@ class MTProxy(loader.Module):
 
         tg_user_id = self._me.id
         self._root = os.path.join(
-            tempfile.gettempdir(), f"MTProto_{tg_user_id}"
+            tempfile.gettempdir(), f"MTProxy_{tg_user_id}"
         )
         self._mtg_path = os.path.join(self._root, "mtg")
 
@@ -1654,11 +1654,11 @@ class MTProxy(loader.Module):
             logger.error("[MTP] aiogram_watcher error: %s", e)
 
     @loader.command(
-        ru_doc="Управление MTProto прокси",
-        en_doc="MTProto proxy management",
+        ru_doc="Управление MTProxy",
+        en_doc="MTProxy management",
     )
     async def mtp(self, message):
-        """MTProto proxy management"""
+        """MTProxy management"""
         args = utils.get_args_raw(message).strip()
         prefix = self.get_prefix()
         if not args:
