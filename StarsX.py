@@ -1,4 +1,4 @@
-__version__ = (1, 3, 4)
+__version__ = (1, 3, 5)
 # meta developer: FireJester.t.me
 
 import os
@@ -26,6 +26,7 @@ from telethon.tl.types import (
     LabeledPrice as TLLabeledPrice,
     UpdateBotPrecheckoutQuery,
     InputStickerSetID,
+    InputStickerSetEmpty,
     DocumentAttributeFilename,
     DocumentAttributeCustomEmoji,
     DocumentAttributeImageSize,
@@ -1341,15 +1342,9 @@ class StarsX(loader.Module):
             pass
 
     async def _send_sticker_doc(self, chat_id, doc, reply_id=None):
-        """Send a single sticker document properly.
-
-        Custom emoji docs cannot be sent as stickers in regular chats,
-        so we re-upload them with sticker attributes instead.
-        """
         is_ce = _is_custom_emoji_doc(doc)
 
         if not is_ce:
-            # Normal sticker - just download and send
             try:
                 data = await self._client.download_media(doc, bytes)
                 if not data:
@@ -1361,48 +1356,37 @@ class StarsX(loader.Module):
             except Exception:
                 return False
 
-        # Custom emoji - need to re-upload with proper sticker attributes
         try:
             data = await self._client.download_media(doc, bytes)
             if not data:
                 return False
+
             f = io.BytesIO(data)
             f.name = "sticker.tgs"
 
-            # Build sticker attributes: keep ImageSize, replace CustomEmoji with Sticker
-            new_attrs = []
-            has_size = False
             alt_emoji = ""
-            stickerset_ref = None
-
             for attr in getattr(doc, 'attributes', []):
-                if isinstance(attr, DocumentAttributeImageSize):
-                    new_attrs.append(attr)
-                    has_size = True
-                elif isinstance(attr, DocumentAttributeCustomEmoji):
+                if isinstance(attr, DocumentAttributeCustomEmoji):
                     alt_emoji = getattr(attr, 'alt', '') or ''
-                    stickerset_ref = getattr(attr, 'stickerset', None)
-                # Skip Filename - not needed for stickers
 
-            if not has_size:
-                new_attrs.append(DocumentAttributeImageSize(w=512, h=512))
-
-            # Add proper sticker attribute
-            new_attrs.append(DocumentAttributeSticker(
-                alt=alt_emoji or '',
-                stickerset=stickerset_ref or InputStickerSetID(id=0, access_hash=0),
-                mask=None,
-                mask_coords=None,
-            ))
+            attrs = [
+                DocumentAttributeImageSize(w=512, h=512),
+                DocumentAttributeSticker(
+                    alt=alt_emoji or '⭐',
+                    stickerset=InputStickerSetEmpty(),
+                    mask=None,
+                    mask_coords=None,
+                ),
+            ]
 
             await self._client.send_file(
                 chat_id, f,
                 reply_to=reply_id,
-                attributes=new_attrs,
+                attributes=attrs,
+                force_document=False,
             )
             return True
         except Exception:
-            # Fallback: send as document
             try:
                 data = await self._client.download_media(doc, bytes)
                 if data:
@@ -1419,7 +1403,6 @@ class StarsX(loader.Module):
             return False
 
     async def _send_sticker_docs(self, message, docs, reply_id):
-        """Send multiple sticker documents."""
         sent = 0
         for doc in docs:
             if self._show_stop:
@@ -2590,7 +2573,7 @@ class StarsX(loader.Module):
         en_doc="[amount] - create invoice",
     )
     async def stars_inline_handler(self, query: InlineQuery):
-        """Create a star invoice via inline"""
+        """[amount] - create invoice"""
         m = re.match(r'^stars\s*(\d+)$', query.query.strip().lower())
         if not m:
             return
