@@ -19,6 +19,9 @@ from telethon.tl.types import (
     UpdateBotPrecheckoutQuery,
     UpdateNewMessage,
     MessageActionPaymentSentMe,
+    PeerUser,
+    PeerChannel,
+    PeerChat,
 )
 from telethon.errors import FloodWaitError, ChatAdminRequiredError
 from telethon.utils import get_display_name
@@ -65,7 +68,7 @@ def get_entity_username(entity) -> str:
 
 
 @loader.tds
-class MarketModule(loader.Module):
+class Market(loader.Module):
     """Universal bot for selling products via Telegram Stars"""
 
     strings = {
@@ -95,12 +98,12 @@ class MarketModule(loader.Module):
             "<b>General texts:</b>\n"
             "<code>{prefix}mrkt tm [text]</code> - Main message\n"
             "<code>{prefix}mrkt ts [text]</code> - After payment\n"
-            "<code>{prefix}mrkt tl [text]</code> - Purchase log (vars: {name}, {user_id}, {username}, {product}, {amount})\n"
+            "<code>{prefix}mrkt tl [text]</code> - Purchase log (vars: {{name}}, {{user_id}}, {{username}}, {{product}}, {{amount}})\n"
             "<code>{prefix}mrkt pm [url]</code> - Main message photo\n\n"
             "<b>Log limits:</b>\n"
             "<code>{prefix}mrkt lg [number]</code> - Action log limit\n"
             "<code>{prefix}mrkt ls [number]</code> - Stars log limit\n\n"
-            "<b>Bot commands (in bot chat):</b>\n"
+            "<b>Bot commands (owner only, in bot DM or log group):</b>\n"
             "<code>/premium 3/6/12 [user_id]</code> - Gift Premium\n"
             "<code>/stat</code> - Action log\n"
             "<code>/stars</code> - Stars log\n"
@@ -131,7 +134,6 @@ class MarketModule(loader.Module):
         "bot_started": "<b>Bot started!</b>",
         "bot_stopped": "<b>Bot stopped!</b>",
         "bot_already_on": "<b>Bot is already running.</b>",
-        "bot_not_running": "<b>Bot is not running.</b>",
         "bot_start_error": "<b>Start error:</b>\n<code>{}</code>",
         "reboot_start": "<b>REBOOT...</b>",
         "reboot_cleaning": "<b>Cleaning session...</b>",
@@ -179,12 +181,11 @@ class MarketModule(loader.Module):
         "bot_stars_header": "<b>Stars log ({count}):</b>",
         "bot_balance": "<b>Star balance:</b> {balance} ☆",
         "bot_balance_error": "<b>Failed to get balance</b>",
-        "inline_create_failed": (
+        "log_group_failed": (
             "<b>Failed to create/setup log group</b>\n\n"
             "The module will still work but without logging."
         ),
-        "reloaded": "<b>Market module reloaded, active</b>",
-        "log_group_ready": "<b>Log group ready:</b> <code>{group_id}</code>",
+        "log_group_ready": "<b>Market log group ready</b>",
         "log_user_message": (
             "<b>User message</b>\n\n"
             "<b>User:</b> {user_link}\n"
@@ -201,8 +202,19 @@ class MarketModule(loader.Module):
             "<b>Amount:</b> {amount} ☆\n"
             "<b>Owner:</b> {owner_tag}"
         ),
-        "log_bot_started": "<b>Bot started by user</b>\n\n<b>User:</b> {user_link}\n<b>ID:</b> <code>{user_id}</code>\n{username_line}",
-        "log_product_selected": "<b>Product selected</b>\n\n<b>User:</b> {user_link}\n<b>ID:</b> <code>{user_id}</code>\n{username_line}<b>Product:</b> {product}",
+        "log_bot_started": (
+            "<b>Bot started by user</b>\n\n"
+            "<b>User:</b> {user_link}\n"
+            "<b>ID:</b> <code>{user_id}</code>\n"
+            "{username_line}"
+        ),
+        "log_product_selected": (
+            "<b>Product selected</b>\n\n"
+            "<b>User:</b> {user_link}\n"
+            "<b>ID:</b> <code>{user_id}</code>\n"
+            "{username_line}"
+            "<b>Product:</b> {product}"
+        ),
         "default_none": "NONE",
         "btn_back": "Back",
         "btn_continue": "Continue",
@@ -231,12 +243,12 @@ class MarketModule(loader.Module):
             "<b>Общие тексты:</b>\n"
             "<code>{prefix}mrkt tm [текст]</code> - Главное сообщение\n"
             "<code>{prefix}mrkt ts [текст]</code> - После оплаты\n"
-            "<code>{prefix}mrkt tl [текст]</code> - Лог покупки (переменные: {name}, {user_id}, {username}, {product}, {amount})\n"
+            "<code>{prefix}mrkt tl [текст]</code> - Лог покупки (переменные: {{name}}, {{user_id}}, {{username}}, {{product}}, {{amount}})\n"
             "<code>{prefix}mrkt pm [url]</code> - Фото главного сообщения\n\n"
             "<b>Логи:</b>\n"
             "<code>{prefix}mrkt lg [число]</code> - Лимит лога взаимодействий\n"
             "<code>{prefix}mrkt ls [число]</code> - Лимит лога звезд\n\n"
-            "<b>Команды бота (в чате бота):</b>\n"
+            "<b>Команды бота (только владелец, в ЛС бота или группе логов):</b>\n"
             "<code>/premium 3/6/12 [user_id]</code> - Выдать Premium\n"
             "<code>/stat</code> - Лог взаимодействий\n"
             "<code>/stars</code> - Лог операций со звездами\n"
@@ -267,7 +279,6 @@ class MarketModule(loader.Module):
         "bot_started": "<b>Бот запущен!</b>",
         "bot_stopped": "<b>Бот остановлен!</b>",
         "bot_already_on": "<b>Бот уже работает.</b>",
-        "bot_not_running": "<b>Бот не запущен.</b>",
         "bot_start_error": "<b>Ошибка запуска:</b>\n<code>{}</code>",
         "reboot_start": "<b>REBOOT...</b>",
         "reboot_cleaning": "<b>Очистка сессии...</b>",
@@ -315,12 +326,11 @@ class MarketModule(loader.Module):
         "bot_stars_header": "<b>Лог операций со звездами ({count}):</b>",
         "bot_balance": "<b>Баланс звезд:</b> {balance} ☆",
         "bot_balance_error": "<b>Ошибка получения баланса</b>",
-        "inline_create_failed": (
+        "log_group_failed": (
             "<b>Не удалось создать/настроить группу логов</b>\n\n"
             "Модуль продолжит работать, но без логирования."
         ),
-        "reloaded": "<b>Модуль Market перезагружен, активен</b>",
-        "log_group_ready": "<b>Группа логов готова:</b> <code>{group_id}</code>",
+        "log_group_ready": "<b>Группа логов Market готова</b>",
         "log_user_message": (
             "<b>Сообщение пользователя</b>\n\n"
             "<b>Пользователь:</b> {user_link}\n"
@@ -337,8 +347,19 @@ class MarketModule(loader.Module):
             "<b>Сумма:</b> {amount} ☆\n"
             "<b>Владелец:</b> {owner_tag}"
         ),
-        "log_bot_started": "<b>Пользователь запустил бота</b>\n\n<b>Пользователь:</b> {user_link}\n<b>ID:</b> <code>{user_id}</code>\n{username_line}",
-        "log_product_selected": "<b>Выбран товар</b>\n\n<b>Пользователь:</b> {user_link}\n<b>ID:</b> <code>{user_id}</code>\n{username_line}<b>Товар:</b> {product}",
+        "log_bot_started": (
+            "<b>Пользователь запустил бота</b>\n\n"
+            "<b>Пользователь:</b> {user_link}\n"
+            "<b>ID:</b> <code>{user_id}</code>\n"
+            "{username_line}"
+        ),
+        "log_product_selected": (
+            "<b>Выбран товар</b>\n\n"
+            "<b>Пользователь:</b> {user_link}\n"
+            "<b>ID:</b> <code>{user_id}</code>\n"
+            "{username_line}"
+            "<b>Товар:</b> {product}"
+        ),
         "default_none": "NONE",
         "btn_back": "Назад",
         "btn_continue": "Продолжить",
@@ -349,7 +370,7 @@ class MarketModule(loader.Module):
             loader.ConfigValue(
                 "LOG_CHAT_ID",
                 0,
-                lambda: "ID of the log group",
+                lambda: "ID of the log group (auto-created)",
                 validator=loader.validators.Integer(),
             ),
         )
@@ -369,6 +390,33 @@ class MarketModule(loader.Module):
 
     def _get_owner_tag(self) -> str:
         return get_user_link(self._my_id, self._my_name)
+
+    def _is_owner(self, user_id: int) -> bool:
+        return user_id == self._my_id
+
+    def _is_log_group(self, chat_id: int) -> bool:
+        return self.chat_logs is not None and chat_id == self.chat_logs
+
+    def _is_dm(self, event) -> bool:
+        return isinstance(getattr(event, "peer_id", None), PeerUser)
+
+    def _can_respond(self, event) -> bool:
+        user_id = event.sender_id
+        chat_id = getattr(event, "chat_id", None)
+        if self._is_dm(event):
+            return True
+        if chat_id and self._is_log_group(chat_id):
+            return True
+        return False
+
+    def _can_use_command(self, event) -> bool:
+        user_id = event.sender_id
+        chat_id = getattr(event, "chat_id", None)
+        if self._is_dm(event) and self._is_owner(user_id):
+            return True
+        if chat_id and self._is_log_group(chat_id):
+            return True
+        return False
 
     async def _send_with_flood_wait(self, coro_func, *args, **kwargs):
         max_retries = 5
@@ -412,10 +460,10 @@ class MarketModule(loader.Module):
             logger.error(f"[Market] Failed to set bot admin: {e}")
             return False
 
-    async def _try_setup_group(self, chat_entity):
+    async def _invite_bot_to_group(self, chat_entity):
+        if not self._bot_username:
+            return False, "Bot not started"
         try:
-            if not self._bot_username:
-                return False, "Bot not started"
             bot_user = await self._client.get_entity(self._bot_username)
             try:
                 await self._send_with_flood_wait(
@@ -444,10 +492,11 @@ class MarketModule(loader.Module):
                 )
                 self.config["LOG_CHAT_ID"] = chat_entity.id
                 self.chat_logs = int(f"-100{chat_entity.id}")
+                self._db.set("Market", "log_chat_id", self.chat_logs)
                 if self._bot and self._bot_username:
-                    success, setup_error = await self._try_setup_group(chat_entity)
+                    success, err = await self._invite_bot_to_group(chat_entity)
                     if not success:
-                        raise Exception(setup_error)
+                        raise Exception(err)
                 self._setup_failed = False
             except Exception as e:
                 logger.error(f"[Market] Failed to create/setup log group: {e}")
@@ -455,7 +504,7 @@ class MarketModule(loader.Module):
                 try:
                     await self._client.send_message(
                         self._my_id,
-                        self.strings["inline_create_failed"],
+                        self.strings["log_group_failed"],
                         parse_mode="HTML",
                     )
                 except Exception:
@@ -466,22 +515,12 @@ class MarketModule(loader.Module):
             return
         try:
             chat_entity = await self._client.get_entity(self.chat_logs)
-            bot_user = await self._client.get_entity(self._bot_username)
-            try:
-                await self._send_with_flood_wait(
-                    self._client,
-                    InviteToChannelRequest(chat_entity, [bot_user]),
-                )
-            except Exception:
-                pass
-            await self._set_bot_admin_in_group(chat_entity, bot_user)
+            await self._invite_bot_to_group(chat_entity)
         except Exception as e:
             logger.error(f"[Market] Failed to reinvite bot: {e}")
 
     async def _send_log(self, text):
         if not self.chat_logs or not self._bot:
-            if not self._setup_failed:
-                await self._ensure_log_chat()
             return
         try:
             await self._send_with_flood_wait(
@@ -503,8 +542,7 @@ class MarketModule(loader.Module):
                     parse_mode="html",
                 )
             except Exception:
-                if not self._setup_failed:
-                    await self._ensure_log_chat()
+                pass
 
     async def client_ready(self, client, db):
         self._client = client
@@ -532,31 +570,42 @@ class MarketModule(loader.Module):
 
         self._trim_logs()
 
-        saved_id = self.config["LOG_CHAT_ID"]
-        if saved_id != 0:
-            self.chat_logs = int(f"-100{saved_id}")
+        saved_chat_logs = self._db.get("Market", "log_chat_id", None)
+        saved_config_id = self.config["LOG_CHAT_ID"]
+
+        if saved_chat_logs:
+            self.chat_logs = saved_chat_logs
+            if saved_config_id == 0:
+                raw = str(saved_chat_logs)
+                if raw.startswith("-100"):
+                    self.config["LOG_CHAT_ID"] = int(raw[4:])
+        elif saved_config_id != 0:
+            self.chat_logs = int(f"-100{saved_config_id}")
+            self._db.set("Market", "log_chat_id", self.chat_logs)
+
+        if not self.chat_logs:
+            await self._ensure_log_chat()
         else:
-            self.chat_logs = None
+            try:
+                await self._client.get_entity(self.chat_logs)
+            except Exception:
+                await self._ensure_log_chat()
 
         token = self._db.get("Market", "bot_token")
         if token and self._db.get("Market", "auto_start", False):
             try:
                 await self._start_bot(token)
-                if saved_id != 0:
+                if self.chat_logs:
+                    await self._reinvite_bot_to_group()
                     try:
-                        chat_entity = await client.get_entity(self.chat_logs)
-                        await self._try_setup_group(chat_entity)
                         await self._send_with_flood_wait(
                             self._bot.send_message,
                             self.chat_logs,
-                            self.strings["reloaded"],
+                            self.strings["log_group_ready"],
                             parse_mode="html",
                         )
-                        self._setup_failed = False
                     except Exception:
-                        await self._ensure_log_chat()
-                else:
-                    await self._ensure_log_chat()
+                        pass
             except Exception as e:
                 logger.error(f"[Market] Auto-start failed: {e}")
 
@@ -603,7 +652,10 @@ class MarketModule(loader.Module):
 
     def _get_resolution(self, num: int) -> tuple:
         try:
-            return int(self._texts.get(f"res_{num}_w", 512)), int(self._texts.get(f"res_{num}_h", 512))
+            return (
+                int(self._texts.get(f"res_{num}_w", 512)),
+                int(self._texts.get(f"res_{num}_h", 512)),
+            )
         except (ValueError, TypeError):
             return 512, 512
 
@@ -642,7 +694,12 @@ class MarketModule(loader.Module):
 
     def _log_action(self, action_type: str, user_id: int, details: str = ""):
         timestamp = time.strftime("%d.%m.%Y %H:%M:%S")
-        entry = {"time": timestamp, "type": action_type, "user_id": user_id, "details": details}
+        entry = {
+            "time": timestamp,
+            "type": action_type,
+            "user_id": user_id,
+            "details": details,
+        }
         self._action_log.append(entry)
         if len(self._action_log) > self._max_action_log:
             self._action_log = self._action_log[-self._max_action_log:]
@@ -650,11 +707,19 @@ class MarketModule(loader.Module):
 
     def _format_action_entry(self, entry: dict) -> str:
         details = f" - {entry['details']}" if entry.get("details") else ""
-        return f"[{entry['time']}] User <code>{entry['user_id']}</code>: <b>{entry['type']}</b>{details}"
+        return (
+            f"[{entry['time']}] User <code>{entry['user_id']}</code>: "
+            f"<b>{entry['type']}</b>{details}"
+        )
 
     def _log_stars(self, action_type: str, user_id: int, details: str = ""):
         timestamp = time.strftime("%d.%m.%Y %H:%M:%S")
-        entry = {"time": timestamp, "type": action_type, "user_id": user_id, "details": details}
+        entry = {
+            "time": timestamp,
+            "type": action_type,
+            "user_id": user_id,
+            "details": details,
+        }
         self._stars_log.append(entry)
         if len(self._stars_log) > self._max_stars_log:
             self._stars_log = self._stars_log[-self._max_stars_log:]
@@ -662,7 +727,10 @@ class MarketModule(loader.Module):
 
     def _format_stars_entry(self, entry: dict) -> str:
         details = f" - {entry['details']}" if entry.get("details") else ""
-        return f"[{entry['time']}] User <code>{entry['user_id']}</code>: <b>{entry['type']}</b>{details}"
+        return (
+            f"[{entry['time']}] User <code>{entry['user_id']}</code>: "
+            f"<b>{entry['type']}</b>{details}"
+        )
 
     async def _get_bot_star_balance(self) -> int:
         if not self._bot_token:
@@ -859,14 +927,7 @@ class MarketModule(loader.Module):
         prefix = self.get_prefix()
 
         if not args:
-            await utils.answer(message, self.strings["help"].format(
-                prefix=prefix,
-                name="{name}",
-                user_id="{user_id}",
-                username="{username}",
-                product="{product}",
-                amount="{amount}",
-            ))
+            await utils.answer(message, self.strings["help"].format(prefix=prefix))
             return
 
         parts = args.split(maxsplit=5)
@@ -875,16 +936,26 @@ class MarketModule(loader.Module):
         if cmd == "status":
             token = self._db.get("Market", "bot_token", "")
             token_display = f"...{token[-6:]}" if token and len(token) > 10 else "NO"
-            state_str = self.strings["state_on"] if self._bot_active else self.strings["state_off"]
-            photo_main = self.strings["photo_status_set"] if self._get_photo_main() else self.strings["photo_status_none"]
-            log_group = f"<code>{self.chat_logs}</code>" if self.chat_logs else "No"
+            state_str = (
+                self.strings["state_on"] if self._bot_active
+                else self.strings["state_off"]
+            )
+            photo_main = (
+                self.strings["photo_status_set"] if self._get_photo_main()
+                else self.strings["photo_status_none"]
+            )
+            log_group = (
+                f"<code>{self.chat_logs}</code>" if self.chat_logs else "No"
+            )
             products_lines = []
             for i in range(1, 6):
                 btn_text = self._get_button_text(i)
                 price = self._get_price(i)
                 price_display = f"{price}" if price else "NONE"
                 products_lines.append(
-                    self.strings["product_info_line"].format(num=i, button=btn_text, price=price_display)
+                    self.strings["product_info_line"].format(
+                        num=i, button=btn_text, price=price_display,
+                    )
                 )
             products_info = "\n".join(products_lines)
             await utils.answer(message, self.strings["status_text"].format(
@@ -928,13 +999,16 @@ class MarketModule(loader.Module):
             try:
                 await self._start_bot(token)
                 self._db.set("Market", "auto_start", True)
-                if not self.chat_logs:
-                    await self._ensure_log_chat()
-                else:
+                if self.chat_logs:
                     await self._reinvite_bot_to_group()
+                else:
+                    await self._ensure_log_chat()
                 await utils.answer(message, self.strings["bot_started"])
             except Exception as e:
-                await utils.answer(message, self.strings["bot_start_error"].format(str(e)[:200]))
+                await utils.answer(
+                    message,
+                    self.strings["bot_start_error"].format(str(e)[:200]),
+                )
 
         elif cmd == "set":
             if len(parts) < 2:
@@ -949,7 +1023,9 @@ class MarketModule(loader.Module):
                 return
             self._button_count = count
             self._save_button_count()
-            await utils.answer(message, self.strings["set_saved"].format(count=count))
+            await utils.answer(
+                message, self.strings["set_saved"].format(count=count),
+            )
 
         elif cmd == "btn":
             if len(parts) < 3:
@@ -968,7 +1044,9 @@ class MarketModule(loader.Module):
                 return
             self._texts[f"button_{num}"] = text
             self._save_texts()
-            await utils.answer(message, self.strings["btn_saved"].format(num=num, text=text))
+            await utils.answer(
+                message, self.strings["btn_saved"].format(num=num, text=text),
+            )
 
         elif cmd == "reboot":
             msg = await utils.answer(message, self.strings["reboot_start"])
@@ -991,7 +1069,9 @@ class MarketModule(loader.Module):
                         await self._ensure_log_chat()
                     await msg.edit(self.strings["reboot_done"])
                 except Exception as e:
-                    await msg.edit(self.strings["bot_start_error"].format(str(e)[:200]))
+                    await msg.edit(
+                        self.strings["bot_start_error"].format(str(e)[:200]),
+                    )
             else:
                 await msg.edit(self.strings["reboot_done"])
 
@@ -1005,7 +1085,9 @@ class MarketModule(loader.Module):
                 return
             self._texts["main"] = text
             self._save_texts()
-            await utils.answer(message, self.strings["text_saved"].format(key="main"))
+            await utils.answer(
+                message, self.strings["text_saved"].format(key="main"),
+            )
 
         elif cmd == "ts":
             text = await self._get_html_text(message, 2)
@@ -1014,7 +1096,9 @@ class MarketModule(loader.Module):
                 return
             self._texts["success"] = text
             self._save_texts()
-            await utils.answer(message, self.strings["text_saved"].format(key="success"))
+            await utils.answer(
+                message, self.strings["text_saved"].format(key="success"),
+            )
 
         elif cmd == "tl":
             text = await self._get_html_text(message, 2)
@@ -1023,7 +1107,9 @@ class MarketModule(loader.Module):
                 return
             self._texts["log"] = text
             self._save_texts()
-            await utils.answer(message, self.strings["text_saved"].format(key="log"))
+            await utils.answer(
+                message, self.strings["text_saved"].format(key="log"),
+            )
 
         elif cmd == "ti":
             if len(parts) < 3:
@@ -1043,7 +1129,9 @@ class MarketModule(loader.Module):
             key = f"instruction_{num}"
             self._texts[key] = text
             self._save_texts()
-            await utils.answer(message, self.strings["text_saved"].format(key=key))
+            await utils.answer(
+                message, self.strings["text_saved"].format(key=key),
+            )
 
         elif cmd == "tv":
             if len(parts) < 4:
@@ -1064,7 +1152,9 @@ class MarketModule(loader.Module):
             key = f"invoice_{num}_{invoice_part}"
             self._texts[key] = text
             self._save_texts()
-            await utils.answer(message, self.strings["text_saved"].format(key=key))
+            await utils.answer(
+                message, self.strings["text_saved"].format(key=key),
+            )
 
         elif cmd == "pm":
             url = await self._get_url_from_message(message, 2)
@@ -1092,7 +1182,10 @@ class MarketModule(loader.Module):
                 return
             self._texts[f"photo_{num}"] = url
             self._save_texts()
-            await utils.answer(message, self.strings["photo_instruction_saved"].format(num=num))
+            await utils.answer(
+                message,
+                self.strings["photo_instruction_saved"].format(num=num),
+            )
 
         elif cmd == "pv":
             if len(parts) < 2:
@@ -1111,28 +1204,45 @@ class MarketModule(loader.Module):
                 return
             self._texts[f"photo_invoice_{num}"] = url
             self._save_texts()
-            await utils.answer(message, self.strings["photo_invoice_saved"].format(num=num))
+            await utils.answer(
+                message,
+                self.strings["photo_invoice_saved"].format(num=num),
+            )
 
         elif cmd == "res":
             if len(parts) < 3:
-                await utils.answer(message, self.strings["res_invalid"].format(prefix=prefix))
+                await utils.answer(
+                    message,
+                    self.strings["res_invalid"].format(prefix=prefix),
+                )
                 return
             try:
                 num = int(parts[1])
                 if num < 1 or num > 5:
                     raise ValueError
             except ValueError:
-                await utils.answer(message, self.strings["res_invalid"].format(prefix=prefix))
+                await utils.answer(
+                    message,
+                    self.strings["res_invalid"].format(prefix=prefix),
+                )
                 return
             res_text = " ".join(parts[2:])
             width, height = self._extract_resolution(res_text)
             if not width or not height:
-                await utils.answer(message, self.strings["res_invalid"].format(prefix=prefix))
+                await utils.answer(
+                    message,
+                    self.strings["res_invalid"].format(prefix=prefix),
+                )
                 return
             self._texts[f"res_{num}_w"] = width
             self._texts[f"res_{num}_h"] = height
             self._save_texts()
-            await utils.answer(message, self.strings["res_saved"].format(num=num, width=width, height=height))
+            await utils.answer(
+                message,
+                self.strings["res_saved"].format(
+                    num=num, width=width, height=height,
+                ),
+            )
 
         elif cmd == "price":
             if len(parts) < 3:
@@ -1154,7 +1264,10 @@ class MarketModule(loader.Module):
                 return
             self._texts[f"price_{num}"] = price
             self._save_texts()
-            await utils.answer(message, self.strings["price_saved"].format(num=num, price=price))
+            await utils.answer(
+                message,
+                self.strings["price_saved"].format(num=num, price=price),
+            )
 
         elif cmd == "lg":
             if len(parts) < 2:
@@ -1170,7 +1283,12 @@ class MarketModule(loader.Module):
             self._max_action_log = limit
             self._save_log_limits()
             self._trim_logs()
-            await utils.answer(message, self.strings["log_limit_saved"].format(log_type="global", limit=limit))
+            await utils.answer(
+                message,
+                self.strings["log_limit_saved"].format(
+                    log_type="global", limit=limit,
+                ),
+            )
 
         elif cmd == "ls":
             if len(parts) < 2:
@@ -1186,19 +1304,21 @@ class MarketModule(loader.Module):
             self._max_stars_log = limit
             self._save_log_limits()
             self._trim_logs()
-            await utils.answer(message, self.strings["log_limit_saved"].format(log_type="stars", limit=limit))
+            await utils.answer(
+                message,
+                self.strings["log_limit_saved"].format(
+                    log_type="stars", limit=limit,
+                ),
+            )
 
         else:
-            await utils.answer(message, self.strings["help"].format(
-                prefix=prefix,
-                name="{name}",
-                user_id="{user_id}",
-                username="{username}",
-                product="{product}",
-                amount="{amount}",
-            ))
+            await utils.answer(
+                message, self.strings["help"].format(prefix=prefix),
+            )
 
     async def _handle_start(self, event):
+        if not self._is_dm(event):
+            return
         user_id = event.sender_id
         self._add_user(user_id)
         self._log_action("start", user_id)
@@ -1210,7 +1330,9 @@ class MarketModule(loader.Module):
             buttons.append([Button.inline(btn_text, data=f"device_{i}")])
         try:
             name, username = await self._get_bot_user_info(user_id)
-            username_line = f"<b>Username:</b> @{username}\n" if username else ""
+            username_line = (
+                f"<b>Username:</b> @{username}\n" if username else ""
+            )
             user_link = get_user_link(user_id, name)
             await self._send_log(self.strings["log_bot_started"].format(
                 user_link=user_link,
@@ -1228,18 +1350,26 @@ class MarketModule(loader.Module):
                 parse_mode="html",
             )
         else:
-            await event.reply(main_text, buttons=buttons, parse_mode="html")
+            await event.reply(
+                main_text, buttons=buttons, parse_mode="html",
+            )
 
     async def _handle_user_message(self, event):
-        if event.raw_text and event.raw_text.startswith("/"):
+        if not event.raw_text or event.raw_text.startswith("/"):
             return
         user_id = event.sender_id
         if user_id == self._bot_id:
             return
+        chat_id = getattr(event, "chat_id", None)
+        if not self._is_dm(event):
+            if not (chat_id and self._is_log_group(chat_id)):
+                return
         self._add_user(user_id)
         try:
             name, username = await self._get_bot_user_info(user_id)
-            username_line = f"<b>Username:</b> @{username}\n" if username else ""
+            username_line = (
+                f"<b>Username:</b> @{username}\n" if username else ""
+            )
             user_link = get_user_link(user_id, name)
             raw = getattr(event, "raw_text", None) or ""
             msg_text = escape_html(raw[:3000]) if raw else "<media>"
@@ -1253,23 +1383,29 @@ class MarketModule(loader.Module):
             logger.error(f"[Market] Failed to log user message: {e}")
 
     async def _handle_premium(self, event):
-        user_id = event.sender_id
-        if user_id != self._my_id:
+        if not self._can_use_command(event):
             return
+        user_id = event.sender_id
         self._log_action("command", user_id, "/premium")
         text = event.raw_text.strip()
         parts = text.split()
         if len(parts) != 3:
-            await event.reply(self.strings["bot_premium_usage"], parse_mode="html")
+            await event.reply(
+                self.strings["bot_premium_usage"], parse_mode="html",
+            )
             return
         try:
             months = int(parts[1])
             target_user_id = int(parts[2])
         except ValueError:
-            await event.reply(self.strings["bot_premium_usage"], parse_mode="html")
+            await event.reply(
+                self.strings["bot_premium_usage"], parse_mode="html",
+            )
             return
         if months not in (3, 6, 12):
-            await event.reply(self.strings["bot_premium_invalid_months"], parse_mode="html")
+            await event.reply(
+                self.strings["bot_premium_invalid_months"], parse_mode="html",
+            )
             return
         star_costs = {3: 1000, 6: 1500, 12: 2500}
         try:
@@ -1283,77 +1419,100 @@ class MarketModule(loader.Module):
                 )
             else:
                 raise Exception("Aiogram bot not initialized")
-            self._log_stars("premium_sent", user_id, f"to {target_user_id}, {months} months, {star_costs[months]} stars")
+            self._log_stars(
+                "premium_sent",
+                user_id,
+                f"to {target_user_id}, {months} months, {star_costs[months]} stars",
+            )
             await event.reply(
-                self.strings["bot_premium_success"].format(user_id=target_user_id, months=months),
+                self.strings["bot_premium_success"].format(
+                    user_id=target_user_id, months=months,
+                ),
                 parse_mode="html",
             )
         except Exception as e:
             error_str = str(e)
             if "BALANCE_TOO_LOW" in error_str:
-                await event.reply(self.strings["bot_premium_low_balance"], parse_mode="html")
+                await event.reply(
+                    self.strings["bot_premium_low_balance"], parse_mode="html",
+                )
             else:
                 await event.reply(
-                    self.strings["bot_premium_error"].format(error=error_str[:200]),
+                    self.strings["bot_premium_error"].format(
+                        error=error_str[:200],
+                    ),
                     parse_mode="html",
                 )
 
     async def _handle_stat(self, event):
-        user_id = event.sender_id
-        if user_id != self._my_id:
+        if not self._can_use_command(event):
             return
         if not self._action_log:
-            await event.reply(self.strings["bot_stat_empty"], parse_mode="html")
+            await event.reply(
+                self.strings["bot_stat_empty"], parse_mode="html",
+            )
             return
         log_entries = []
         for entry in reversed(self._action_log):
             log_entries.append(self._format_action_entry(entry))
         log_text = "\n".join(log_entries)
-        header = self.strings["bot_stat_header"].format(count=len(self._action_log))
+        header = self.strings["bot_stat_header"].format(
+            count=len(self._action_log),
+        )
         message_text = f"{header}\n<blockquote expandable>{log_text}</blockquote>"
         await event.reply(message_text, parse_mode="html")
 
     async def _handle_stars(self, event):
-        user_id = event.sender_id
-        if user_id != self._my_id:
+        if not self._can_use_command(event):
             return
         if not self._stars_log:
-            await event.reply(self.strings["bot_stars_empty"], parse_mode="html")
+            await event.reply(
+                self.strings["bot_stars_empty"], parse_mode="html",
+            )
             return
         log_entries = []
         for entry in reversed(self._stars_log):
             log_entries.append(self._format_stars_entry(entry))
         log_text = "\n".join(log_entries)
-        header = self.strings["bot_stars_header"].format(count=len(self._stars_log))
+        header = self.strings["bot_stars_header"].format(
+            count=len(self._stars_log),
+        )
         message_text = f"{header}\n<blockquote expandable>{log_text}</blockquote>"
         await event.reply(message_text, parse_mode="html")
 
     async def _handle_balance(self, event):
-        user_id = event.sender_id
-        if user_id != self._my_id:
+        if not self._can_use_command(event):
             return
-        self._log_action("command", user_id, "/balance")
+        self._log_action("command", event.sender_id, "/balance")
         balance = await self._get_bot_star_balance()
         if balance is not None:
-            await event.reply(self.strings["bot_balance"].format(balance=balance), parse_mode="html")
+            await event.reply(
+                self.strings["bot_balance"].format(balance=balance),
+                parse_mode="html",
+            )
         else:
-            await event.reply(self.strings["bot_balance_error"], parse_mode="html")
+            await event.reply(
+                self.strings["bot_balance_error"], parse_mode="html",
+            )
 
     async def _handle_refund(self, event):
-        user_id = event.sender_id
-        if user_id != self._my_id:
+        if not self._can_use_command(event):
             return
-        self._log_action("command", user_id, "/refund")
+        self._log_action("command", event.sender_id, "/refund")
         text = event.raw_text.strip()
         parts = text.split()
         if len(parts) != 3:
-            await event.reply(self.strings["bot_refund_usage"], parse_mode="html")
+            await event.reply(
+                self.strings["bot_refund_usage"], parse_mode="html",
+            )
             return
         try:
             target_user_id = int(parts[1])
             charge_id = parts[2]
         except ValueError:
-            await event.reply(self.strings["bot_refund_usage"], parse_mode="html")
+            await event.reply(
+                self.strings["bot_refund_usage"], parse_mode="html",
+            )
             return
         try:
             if self._aiogram_bot:
@@ -1363,14 +1522,22 @@ class MarketModule(loader.Module):
                 )
             else:
                 raise Exception("Aiogram bot not initialized")
-            self._log_stars("refund", user_id, f"user {target_user_id}, charge {charge_id}")
+            self._log_stars(
+                "refund",
+                event.sender_id,
+                f"user {target_user_id}, charge {charge_id}",
+            )
             await event.reply(
-                self.strings["bot_refund_success"].format(user_id=target_user_id, charge_id=charge_id),
+                self.strings["bot_refund_success"].format(
+                    user_id=target_user_id, charge_id=charge_id,
+                ),
                 parse_mode="html",
             )
         except Exception as e:
             await event.reply(
-                self.strings["bot_refund_error"].format(error=str(e)[:200]),
+                self.strings["bot_refund_error"].format(
+                    error=str(e)[:200],
+                ),
                 parse_mode="html",
             )
 
@@ -1388,20 +1555,28 @@ class MarketModule(loader.Module):
             instruction = self._get_text(f"instruction_{num}")
             instruction_photo = self._get_photo_instruction(num)
             buttons = [
-                [Button.inline(self.strings["btn_continue"], data=f"pay_{num}")],
-                [Button.inline(self.strings["btn_back"], data="back_main")],
+                [Button.inline(
+                    self.strings["btn_continue"], data=f"pay_{num}",
+                )],
+                [Button.inline(
+                    self.strings["btn_back"], data="back_main",
+                )],
             ]
             try:
                 name, username = await self._get_bot_user_info(user_id)
-                username_line = f"<b>Username:</b> @{username}\n" if username else ""
+                username_line = (
+                    f"<b>Username:</b> @{username}\n" if username else ""
+                )
                 user_link = get_user_link(user_id, name)
                 product_name = self._get_button_text(num)
-                await self._send_log(self.strings["log_product_selected"].format(
-                    user_link=user_link,
-                    user_id=user_id,
-                    username_line=username_line,
-                    product=product_name,
-                ))
+                await self._send_log(
+                    self.strings["log_product_selected"].format(
+                        user_link=user_link,
+                        user_id=user_id,
+                        username_line=username_line,
+                        product=product_name,
+                    )
+                )
             except Exception:
                 pass
             if instruction_photo:
@@ -1414,7 +1589,9 @@ class MarketModule(loader.Module):
                     parse_mode="html",
                 )
             else:
-                await event.edit(instruction, buttons=buttons, parse_mode="html")
+                await event.edit(
+                    instruction, buttons=buttons, parse_mode="html",
+                )
 
         elif data == "back_main":
             self._log_action("back_main", user_id)
@@ -1423,7 +1600,9 @@ class MarketModule(loader.Module):
             buttons = []
             for i in range(1, self._button_count + 1):
                 btn_text = self._get_button_text(i)
-                buttons.append([Button.inline(btn_text, data=f"device_{i}")])
+                buttons.append(
+                    [Button.inline(btn_text, data=f"device_{i}")]
+                )
             if main_photo:
                 await event.delete()
                 await self._bot.send_file(
@@ -1434,7 +1613,9 @@ class MarketModule(loader.Module):
                     parse_mode="html",
                 )
             else:
-                await event.edit(main_text, buttons=buttons, parse_mode="html")
+                await event.edit(
+                    main_text, buttons=buttons, parse_mode="html",
+                )
 
         elif data.startswith("pay_"):
             try:
@@ -1457,7 +1638,9 @@ class MarketModule(loader.Module):
                     "payload": f"product_{num}_{user_id}",
                     "provider_token": "",
                     "currency": "XTR",
-                    "prices": [LabeledPrice(label=f"{price} stars", amount=price)],
+                    "prices": [
+                        LabeledPrice(label=f"{price} stars", amount=price),
+                    ],
                     "start_parameter": f"pay_{num}",
                     "is_flexible": False,
                     "need_name": False,
@@ -1471,16 +1654,24 @@ class MarketModule(loader.Module):
                     invoice_params["photo_width"] = photo_width
                     invoice_params["photo_height"] = photo_height
                 await self._aiogram_bot.send_invoice(**invoice_params)
-                self._log_stars("invoice_created", user_id, f"product_{num}, {price} stars")
+                self._log_stars(
+                    "invoice_created",
+                    user_id,
+                    f"product_{num}, {price} stars",
+                )
                 await event.answer()
             except Exception as e:
                 logger.error(f"Invoice error: {e}")
-                await event.answer(f"Error: {str(e)[:100]}", alert=True)
+                await event.answer(
+                    f"Error: {str(e)[:100]}", alert=True,
+                )
 
     async def _handle_raw(self, event):
         if isinstance(event, UpdateBotPrecheckoutQuery):
             try:
-                from telethon.tl.functions.messages import SetBotPrecheckoutResultsRequest
+                from telethon.tl.functions.messages import (
+                    SetBotPrecheckoutResultsRequest,
+                )
                 await self._bot(SetBotPrecheckoutResultsRequest(
                     query_id=event.query_id,
                     success=True,
@@ -1490,52 +1681,76 @@ class MarketModule(loader.Module):
 
         elif isinstance(event, UpdateNewMessage):
             msg = event.message
-            if hasattr(msg, "action") and isinstance(msg.action, MessageActionPaymentSentMe):
-                try:
-                    if hasattr(msg, "peer_id") and hasattr(msg.peer_id, "user_id"):
-                        uid = msg.peer_id.user_id
-                    elif hasattr(msg, "from_id") and hasattr(msg.from_id, "user_id"):
-                        uid = msg.from_id.user_id
-                    else:
-                        return
-                    amount = getattr(msg.action, "total_amount", 0)
-                    payload = getattr(msg.action, "payload", b"").decode("utf-8", errors="ignore")
-                    product_num = 1
-                    if payload:
-                        payload_parts = payload.split("_")
-                        if len(payload_parts) >= 2:
-                            try:
-                                product_num = int(payload_parts[1])
-                            except ValueError:
-                                pass
-                    self._log_stars("payment_success", uid, f"product_{product_num}, {amount} stars")
-                    await self._bot.send_message(uid, self._get_text("success"), parse_mode="html")
-                    name, username = await self._get_bot_user_info(uid)
-                    username_line = f"<b>Username:</b> @{username}\n" if username else ""
-                    user_link = get_user_link(uid, name)
-                    product_name = self._get_button_text(product_num)
-                    owner_tag = self._get_owner_tag()
-                    await self._send_log(self.strings["log_payment_success"].format(
+            if not (
+                hasattr(msg, "action")
+                and isinstance(msg.action, MessageActionPaymentSentMe)
+            ):
+                return
+            try:
+                if hasattr(msg, "peer_id") and hasattr(msg.peer_id, "user_id"):
+                    uid = msg.peer_id.user_id
+                elif (
+                    hasattr(msg, "from_id")
+                    and hasattr(msg.from_id, "user_id")
+                ):
+                    uid = msg.from_id.user_id
+                else:
+                    return
+                amount = getattr(msg.action, "total_amount", 0)
+                payload = getattr(
+                    msg.action, "payload", b"",
+                ).decode("utf-8", errors="ignore")
+                product_num = 1
+                if payload:
+                    payload_parts = payload.split("_")
+                    if len(payload_parts) >= 2:
+                        try:
+                            product_num = int(payload_parts[1])
+                        except ValueError:
+                            pass
+                self._log_stars(
+                    "payment_success",
+                    uid,
+                    f"product_{product_num}, {amount} stars",
+                )
+                await self._bot.send_message(
+                    uid, self._get_text("success"), parse_mode="html",
+                )
+                name, username = await self._get_bot_user_info(uid)
+                username_line = (
+                    f"<b>Username:</b> @{username}\n" if username else ""
+                )
+                user_link = get_user_link(uid, name)
+                product_name = self._get_button_text(product_num)
+                owner_tag = self._get_owner_tag()
+                await self._send_log(
+                    self.strings["log_payment_success"].format(
                         user_link=user_link,
                         user_id=uid,
                         username_line=username_line,
                         product=product_name,
                         amount=amount,
                         owner_tag=owner_tag,
-                    ))
-                    log_template = self._get_text("log")
-                    if log_template and log_template != self.strings["default_none"]:
-                        username_display = f"@{username}" if username else "no"
-                        custom_log = log_template.format(
-                            name=escape_html(name),
-                            user_id=uid,
-                            username=username_display,
-                            product=product_name,
-                            amount=amount,
-                        )
-                        await self._send_log(custom_log)
-                except Exception as e:
-                    logger.error(f"Payment success handler error: {e}")
+                    )
+                )
+                log_template = self._get_text("log")
+                if (
+                    log_template
+                    and log_template != self.strings["default_none"]
+                ):
+                    username_display = (
+                        f"@{username}" if username else "no"
+                    )
+                    custom_log = log_template.format(
+                        name=escape_html(name),
+                        user_id=uid,
+                        username=username_display,
+                        product=product_name,
+                        amount=amount,
+                    )
+                    await self._send_log(custom_log)
+            except Exception as e:
+                logger.error(f"Payment success handler error: {e}")
 
     async def on_unload(self):
         await self._stop_bot()
