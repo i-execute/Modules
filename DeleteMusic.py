@@ -47,9 +47,6 @@ class DeleteMusic(loader.Module):
 
     strings = {
         "name": "DeleteMusic",
-    }
-
-    strings_en = {
         "processing": "Processing...",
         "no_tracks": "Error: no tracks in your profile",
         "deleted": "Deleted: {} tracks",

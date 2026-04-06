@@ -26,9 +26,6 @@ class Test(loader.Module):
 
     strings = {
         "name": "Test",
-    }
-
-    strings_en = {
         "help": (
             "<b>Test - Network Monitor</b>\n\n"
             "<b>Commands:</b>\n"

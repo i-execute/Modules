@@ -46,9 +46,6 @@ class Session(loader.Module):
 
     strings = {
         "name": "Session",
-    }
-
-    strings_en = {
         "line": "--------------------",
         "usage": (
             "<b>Session Manager</b>\n"

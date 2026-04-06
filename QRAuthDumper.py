@@ -56,9 +56,6 @@ class QRAuthDumper(loader.Module):
 
     strings = {
         "name": "QRAuthDumper",
-    }
-
-    strings_en = {
         "line": "--------------------",
         "help": (
             "<b>QR Auth Dumper v{ver}</b>\n\n"

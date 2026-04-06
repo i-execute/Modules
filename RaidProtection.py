@@ -33,9 +33,6 @@ class RaidProtection(loader.Module):
 
     strings = {
         "name": "RaidProtection",
-    }
-
-    strings_en = {
         "help": (
             "<b>RaidProtection - PM raid shield</b>\n\n"
             "<code>{prefix}rp</code> - toggle raid protection on/off\n"

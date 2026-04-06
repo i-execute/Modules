@@ -98,9 +98,8 @@ def make_cache_key(platform, url):
 class InlineDL(loader.Module):
     """Instagram & TikTok video/photo downloader via inline query"""
 
-    strings = {"name": "InlineDL"}
-
-    strings_en = {
+    strings = {
+        "name": "InlineDL",
         "hint_title": "InlineDL",
         "hint_desc": "Paste Instagram or TikTok link",
         "hint_msg": "<b>InlineDL:</b> Paste an Instagram or TikTok link",

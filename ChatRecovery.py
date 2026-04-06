@@ -102,9 +102,6 @@ class ChatRecovery(loader.Module):
 
     strings = {
         "name": "ChatRecovery",
-    }
-
-    strings_en = {
         "line": "--------------------",
         "help": (
             "<b>ChatRecovery</b>\n\n"

@@ -16,9 +16,6 @@ class Info(loader.Module):
     
     strings = {
         "name": "Info",
-    }
-
-    strings_en = {
         "prem_user_full": (
             "<blockquote><b>┌ [</b><emoji document_id=5188516803638236397>🔝</emoji><b>] Name:</b> {name}\n"
             "├ <b>[</b><emoji document_id=5188171393778359433>🤟</emoji><b>] Username:</b> {username}\n"

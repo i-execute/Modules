@@ -19,9 +19,6 @@ class Deleter(loader.Module):
 
     strings = {
         "name": "Deleter",
-    }
-
-    strings_en = {
         "help": (
             "<b>Deleter - swift message deletion</b>\n\n"
             "<b>Own messages:</b>\n"

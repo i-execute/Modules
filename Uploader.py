@@ -111,9 +111,6 @@ class Uploader(loader.Module):
 
     strings = {
         "name": "Uploader",
-    }
-
-    strings_en = {
         "help": (
             "<b>Uploader</b>\n"
             "<blockquote>"

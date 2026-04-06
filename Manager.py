@@ -125,9 +125,6 @@ class Manager(loader.Module):
 
     strings = {
         "name": "Manager",
-    }
-
-    strings_en = {
         "line": "--------------------",
         "help": (
             "<b>Manager - Multi Account Manager</b>\n\n"

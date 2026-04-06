@@ -16,9 +16,6 @@ class Stories(loader.Module):
 
     strings = {
         "name": "Stories",
-    }
-
-    strings_en = {
         "no_reply": "<b>Reply to photo!</b>",
         "uploading": "<b>Uploading...</b>",
         "deleting": "<b>Deleting...</b>",

@@ -963,9 +963,6 @@ class MusicX(loader.Module):
 
     strings = {
         "name": "MusicX",
-    }
-
-    strings_en = {
         "line": "-----------------------",
         "help": (
             "<b>MusicX - Audio Downloader & Search</b>\n"

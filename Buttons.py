@@ -16,9 +16,6 @@ class Buttons(loader.Module):
 
     strings = {
         "name": "Buttons",
-    }
-
-    strings_en = {
         "main_message": "Choose an action:",
         
         "media_set": "<b>Media set</b>\nType: <code>{}</code>\nURL: <code>{}</code>",

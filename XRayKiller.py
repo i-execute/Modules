@@ -87,9 +87,6 @@ class XRayKiller(loader.Module):
 
     strings = {
         "name": "XRayKiller",
-    }
-
-    strings_en = {
         "scanning": (
             "<b>started looking for all xray bullshit...</b>\n"
             "<i>processes, files, configs, ports, services, crontab</i>"

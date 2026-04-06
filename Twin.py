@@ -25,9 +25,6 @@ class Twin(loader.Module):
 
     strings = {
         "name": "Twin",
-    }
-
-    strings_en = {
         "line": "--------------------",
         "help": (
             "<b>Twin Account Manager</b>\n\n"

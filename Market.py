@@ -73,9 +73,6 @@ class Market(loader.Module):
 
     strings = {
         "name": "Market",
-    }
-
-    strings_en = {
         "help": (
             "<b>Market Module - Universal sales bot</b>\n\n"
             "<b>Main:</b>\n"

@@ -66,9 +66,6 @@ class XRay(loader.Module):
 
     strings = {
         "name": "XRay",
-    }
-
-    strings_en = {
         "help": (
             "<b>XRay VLESS+Reality</b>\n\n"
             "<b>Setup:</b>\n"

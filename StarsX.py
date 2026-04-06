@@ -136,9 +136,6 @@ class StarsX(loader.Module):
 
     strings = {
         "name": "StarsX",
-    }
-
-    strings_en = {
         "no_inline_bot": "Inline-bot not found. Enable it in config.",
         "invalid_args": "Invalid arguments.",
         "error": "Error: {error}",

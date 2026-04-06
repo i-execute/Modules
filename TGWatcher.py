@@ -134,9 +134,6 @@ class TGWatcher(loader.Module):
 
     strings = {
         "name": "TGWatcher",
-    }
-
-    strings_en = {
         "line": "--------------------",
         "help": (
             "<b>TGWatcher</b>\n\n"

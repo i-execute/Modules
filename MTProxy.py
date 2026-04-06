@@ -73,9 +73,6 @@ class MTProxy(loader.Module):
 
     strings = {
         "name": "MTProxy",
-    }
-
-    strings_en = {
         "help": (
             "<b>MTProxy</b>\n\n"
             "<b>Setup:</b>\n"

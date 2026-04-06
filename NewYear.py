@@ -12,9 +12,6 @@ class NewYear(loader.Module):
 
     strings = {
         "name": "NewYear",
-    }
-
-    strings_en = {
         "prem_help_text": (
             "<emoji document_id=5319189482811985933>☃️</emoji><b> New Year module commands:</b>\n"
             "<blockquote expandable>"

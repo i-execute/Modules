@@ -27,9 +27,6 @@ class Statistics(loader.Module):
 
     strings = {
         "name": "Statistics",
-    }
-
-    strings_en = {
         "help": (
             "<b>Statistics - Account Statistics</b>\n\n"
             "<code>{prefix}stat</code> - account statistics\n"

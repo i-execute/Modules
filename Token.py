@@ -63,9 +63,6 @@ class Token(loader.Module):
 
     strings = {
         "name": "Token",
-    }
-
-    strings_en = {
         "help": (
             "<b>Token - Bot token manager</b>\n\n"
             "<code>{prefix}tkadd [token]</code> - add bot token (args or reply)\n"

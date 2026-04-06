@@ -18,9 +18,6 @@ class Note(loader.Module):
 
     strings = {
         "name": "Note",
-    }
-
-    strings_en = {
         "help": (
             "<b>Note module commands</b>\n\n"
             "<code>{prefix}note create [name]</code> - save replied media\n"

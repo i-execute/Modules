@@ -318,9 +318,8 @@ def build_message(d):
 class TONScanner(loader.Module):
     """TON wallet scanner via inline query"""
 
-    strings = {"name": "TONScanner"}
-
-    strings_en = {
+    strings = {
+        "name": "TONScanner",
         "hint_title": "TONScanner",
         "hint_desc": "Paste TON address",
         "hint_msg": "<b>TONScanner:</b> Paste a TON wallet address",

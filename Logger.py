@@ -21,9 +21,6 @@ class Logger(loader.Module):
 
     strings = {
         "name": "Logger",
-    }
-
-    strings_en = {
         "greeting_first": (
             "<b>Yo!</b>\n\n"
             "Successfully joined this group and can write, watchers are active. "
