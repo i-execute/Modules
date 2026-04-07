@@ -1,4 +1,4 @@
-__version__ = (1, 1, 0)
+__version__ = (1, 2, 0)
 # meta developer: FireJester.t.me
 
 import re
@@ -22,6 +22,7 @@ from telethon.tl.types import (
     WebPagePending,
     DocumentAttributeVideo,
 )
+from telethon import functions
 
 from .. import loader, utils
 
@@ -73,7 +74,7 @@ def make_kk_url(platform, url):
     if platform == "instagram":
         return re.sub(
             r"(https?://(?:www\.)?)instagram\.com",
-            r"\1kkinstagram.com",
+            r"\1kksave.com",
             url,
         )
     if platform == "tiktok":
@@ -179,7 +180,18 @@ class InlineDL(loader.Module):
                 cache.pop(k, None)
             self._save_cache(cache)
 
+    async def _prefetch_webpage(self, kk_url: str):
+        try:
+            await self._client(
+                functions.messages.GetWebPageRequest(url=kk_url, hash=0)
+            )
+        except Exception:
+            pass
+
+        await asyncio.sleep(0.5)
+
     async def _fetch_wp(self, kk_url):
+        await self._prefetch_webpage(kk_url)
         sent = await self._client.send_message("me", kk_url)
         msg = None
         wp = None
