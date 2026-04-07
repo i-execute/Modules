@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 # meta developer: FireJester.t.me
 
 import logging
@@ -36,30 +36,30 @@ class Statistics(loader.Module):
             "<code>{prefix}staty</code> - yearly activity\n"
         ),
         "account_stats": (
-            "<b>Account Statistics</b>\n\n"
+            "<b>Account Statistics</b>\n"
             "<blockquote>"
             "<b>Folders:</b> <code>{folders}</code>\n"
             "<b>Total chats:</b> <code>{chats}</code>\n"
             "<b>Archived:</b> <code>{archived}</code>"
-            "</blockquote>\n\n"
+            "</blockquote>"
             "<blockquote>"
             "<b>Users:</b> <code>{users}</code>\n"
             "<b>Bots:</b> <code>{bots}</code>\n"
             "<b>Groups:</b> <code>{groups}</code>\n"
             "<b>Channels:</b> <code>{channels}</code>\n"
             "<b>Deleted accounts:</b> <code>{deleted}</code>"
-            "</blockquote>\n\n"
+            "</blockquote>"
             "<blockquote>"
             "<b>Contacts:</b> <code>{contacts}</code>\n"
             "<b>Blocked:</b> <code>{blocked}</code>"
-            "</blockquote>\n\n"
+            "</blockquote>"
             "<blockquote>"
             "<b>Timezone:</b> UTC{timezone_str}\n"
             "<b>Current time:</b> {current_time}"
             "</blockquote>"
         ),
         "activity_stats": (
-            "<b>Activity - {period_name}</b>\n\n"
+            "<b>Activity - {period_name}</b>\n"
             "<blockquote>"
             "<b>Commands:</b> <code>{commands}</code>\n"
             "<b>Messages:</b> <code>{messages}</code>\n"
@@ -67,7 +67,7 @@ class Statistics(loader.Module):
             "<b>Photos:</b> <code>{photos}</code>\n"
             "<b>Videos:</b> <code>{videos}</code>\n"
             "<b>Inline queries:</b> <code>{inline}</code>"
-            "</blockquote>\n\n"
+            "</blockquote>"
             "<blockquote>"
             "<b>Period:</b> {period_range}\n"
             "<b>Timezone:</b> UTC{timezone_str}\n"
@@ -91,30 +91,30 @@ class Statistics(loader.Module):
             "<code>{prefix}staty</code> - активность за год\n"
         ),
         "account_stats": (
-            "<b>Статистика аккаунта</b>\n\n"
+            "<b>Статистика аккаунта</b>\n"
             "<blockquote>"
             "<b>Папки:</b> <code>{folders}</code>\n"
             "<b>Всего чатов:</b> <code>{chats}</code>\n"
             "<b>В архиве:</b> <code>{archived}</code>"
-            "</blockquote>\n\n"
+            "</blockquote>"
             "<blockquote>"
             "<b>Пользователи:</b> <code>{users}</code>\n"
             "<b>Боты:</b> <code>{bots}</code>\n"
             "<b>Группы:</b> <code>{groups}</code>\n"
             "<b>Каналы:</b> <code>{channels}</code>\n"
             "<b>Удаленные аккаунты:</b> <code>{deleted}</code>"
-            "</blockquote>\n\n"
+            "</blockquote>"
             "<blockquote>"
             "<b>Контакты:</b> <code>{contacts}</code>\n"
             "<b>Заблокировано:</b> <code>{blocked}</code>"
-            "</blockquote>\n\n"
+            "</blockquote>"
             "<blockquote>"
             "<b>Часовой пояс:</b> UTC{timezone_str}\n"
             "<b>Текущее время:</b> {current_time}"
             "</blockquote>"
         ),
         "activity_stats": (
-            "<b>Активность - {period_name}</b>\n\n"
+            "<b>Активность - {period_name}</b>\n"
             "<blockquote>"
             "<b>Команды:</b> <code>{commands}</code>\n"
             "<b>Сообщения:</b> <code>{messages}</code>\n"
@@ -122,7 +122,7 @@ class Statistics(loader.Module):
             "<b>Фото:</b> <code>{photos}</code>\n"
             "<b>Видео:</b> <code>{videos}</code>\n"
             "<b>Инлайн запросы:</b> <code>{inline}</code>"
-            "</blockquote>\n\n"
+            "</blockquote>"
             "<blockquote>"
             "<b>Период:</b> {period_range}\n"
             "<b>Часовой пояс:</b> UTC{timezone_str}\n"
@@ -152,8 +152,20 @@ class Statistics(loader.Module):
         self._client = client
         self._db = db
         self._me = await client.get_me()
-        if not self._db.get("Statistics", "events"):
-            self._db.set("Statistics", "events", [])
+        self._ensure_counters()
+
+    def _ensure_counters(self):
+        periods = ["day", "week", "month", "year"]
+        types = ["commands", "messages", "stickers", "photos", "videos", "inline"]
+        for period in periods:
+            for t in types:
+                key = f"cnt_{period}_{t}"
+                if self._db.get("Statistics", key) is None:
+                    self._db.set("Statistics", key, 0)
+            reset_key = f"cnt_{period}_reset_ts"
+            if self._db.get("Statistics", reset_key) is None:
+                start_ts = int(self._period_start(period).timestamp())
+                self._db.set("Statistics", reset_key, start_ts)
 
     def _tz(self):
         return timezone(timedelta(hours=self.config["timezone_offset"]))
@@ -186,38 +198,31 @@ class Statistics(loader.Module):
         now = self._now()
         return f"{start.strftime('%d.%m.%Y %H:%M')} - {now.strftime('%d.%m.%Y %H:%M')}"
 
-    def _record_event(self, event_type):
-        events = self._db.get("Statistics", "events") or []
-        events.append({
-            "type": event_type,
-            "ts": time.time(),
-        })
-        self._db.set("Statistics", "events", events)
+    def _maybe_reset_period(self, period):
+        reset_key = f"cnt_{period}_reset_ts"
+        stored_ts = self._db.get("Statistics", reset_key) or 0
+        current_start_ts = int(self._period_start(period).timestamp())
+        if current_start_ts > stored_ts:
+            types = ["commands", "messages", "stickers", "photos", "videos", "inline"]
+            for t in types:
+                self._db.set("Statistics", f"cnt_{period}_{t}", 0)
+            self._db.set("Statistics", reset_key, current_start_ts)
 
-    def _count_events(self, period):
-        events = self._db.get("Statistics", "events") or []
-        start_ts = self._period_start(period).timestamp()
-        counts = {
-            "commands": 0,
-            "messages": 0,
-            "stickers": 0,
-            "photos": 0,
-            "videos": 0,
-            "inline": 0,
-        }
-        for ev in events:
-            if ev["ts"] >= start_ts:
-                t = ev["type"]
-                if t in counts:
-                    counts[t] += 1
+    def _increment(self, event_type):
+        periods = ["day", "week", "month", "year"]
+        for period in periods:
+            self._maybe_reset_period(period)
+            key = f"cnt_{period}_{event_type}"
+            val = self._db.get("Statistics", key) or 0
+            self._db.set("Statistics", key, val + 1)
+
+    def _get_counts(self, period):
+        self._maybe_reset_period(period)
+        types = ["commands", "messages", "stickers", "photos", "videos", "inline"]
+        counts = {}
+        for t in types:
+            counts[t] = self._db.get("Statistics", f"cnt_{period}_{t}") or 0
         return counts
-
-    def _cleanup_events(self):
-        events = self._db.get("Statistics", "events") or []
-        cutoff = self._period_start("year").timestamp()
-        cleaned = [ev for ev in events if ev["ts"] >= cutoff]
-        if len(cleaned) != len(events):
-            self._db.set("Statistics", "events", cleaned)
 
     async def _get_media(self):
         url = self.config["banner_url"]
@@ -289,7 +294,6 @@ class Statistics(loader.Module):
 
     @loader.watcher("out", "only_messages")
     async def watcher(self, message: Message):
-        """Activity tracker"""
         if not getattr(message, "out", False):
             return
 
@@ -303,19 +307,19 @@ class Statistics(loader.Module):
                 break
 
         if is_command:
-            self._record_event("commands")
+            self._increment("commands")
 
-        self._record_event("messages")
+        self._increment("messages")
 
         if getattr(message, "sticker", None):
-            self._record_event("stickers")
+            self._increment("stickers")
         elif getattr(message, "photo", None):
-            self._record_event("photos")
+            self._increment("photos")
         elif getattr(message, "video", None):
-            self._record_event("videos")
+            self._increment("videos")
 
         if getattr(message, "via_bot_id", None):
-            self._record_event("inline")
+            self._increment("inline")
 
     @loader.command(
         ru_doc="Статистика аккаунта",
@@ -351,7 +355,7 @@ class Statistics(loader.Module):
             from telethon.tl.functions.contacts import GetContactsRequest
             result = await self._client(GetContactsRequest(hash=0))
             if hasattr(result, "users"):
-                contacts = len(result.users)
+                contacts = max(0, len(result.users) - 1)
         except Exception:
             pass
 
@@ -387,8 +391,7 @@ class Statistics(loader.Module):
     )
     async def statd(self, message: Message):
         """Today activity"""
-        self._cleanup_events()
-        counts = self._count_events("day")
+        counts = self._get_counts("day")
         await self._answer_with_media(
             message,
             self.strings["activity_stats"].format(
@@ -411,8 +414,7 @@ class Statistics(loader.Module):
     )
     async def statw(self, message: Message):
         """Weekly activity"""
-        self._cleanup_events()
-        counts = self._count_events("week")
+        counts = self._get_counts("week")
         await self._answer_with_media(
             message,
             self.strings["activity_stats"].format(
@@ -435,8 +437,7 @@ class Statistics(loader.Module):
     )
     async def statm(self, message: Message):
         """Monthly activity"""
-        self._cleanup_events()
-        counts = self._count_events("month")
+        counts = self._get_counts("month")
         await self._answer_with_media(
             message,
             self.strings["activity_stats"].format(
@@ -459,8 +460,7 @@ class Statistics(loader.Module):
     )
     async def staty(self, message: Message):
         """Yearly activity"""
-        self._cleanup_events()
-        counts = self._count_events("year")
+        counts = self._get_counts("year")
         await self._answer_with_media(
             message,
             self.strings["activity_stats"].format(
