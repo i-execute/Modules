@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (2, 0, 0)
 # meta developer: FireJester.t.me
 
 import asyncio
@@ -161,40 +161,36 @@ class GBan(loader.Module):
         "no_access": "<b>Error:</b> No access hash for this user ID. Try using @username instead",
         "self_action": "<b>Error:</b> You seriously?",
         "processing": "<b>Processing...</b>",
-        "gbanned": "<b>{user} has been globally banned in {count} chat(s)</b>",
-        "gunbanned": "<b>{user} has been globally unbanned in {count} chat(s)</b>",
-        "gmuted": "<b>{user} has been globally muted in {count} chat(s)</b>",
-        "gunmuted": "<b>{user} has been globally unmuted in {count} chat(s)</b>",
-        "gdeleted": "<b>{user} has been globally banned and all messages deleted in {count} chat(s)</b>",
+        "gbanned": "<b>{user} globally banned in {count} chat(s)</b>",
+        "gunbanned": "<b>{user} globally unbanned in {count} chat(s)</b>",
+        "gmuted": "<b>{user} globally muted in {count} chat(s)</b>",
+        "gunmuted": "<b>{user} globally unmuted in {count} chat(s)</b>",
+        "gdeleted": "<b>{user} globally banned and messages deleted in {count} chat(s)</b>",
         "gtest": (
-            "<b>Statistics</b>\n"
+            "<b>Stats</b>\n"
             "<blockquote>"
-            "Ban rights:\n"
-            "{ban_groups} group(s), {ban_channels} channel(s)\n"
-            "Mute rights:\n"
-            "{mute_groups} group(s)"
+            "Ban rights: {ban_groups} group(s), {ban_channels} channel(s)\n"
+            "Mute rights: {mute_groups} group(s)"
             "</blockquote>"
         ),
     }
 
     strings_ru = {
-        "no_args": "<b>Ошибка:</b> Укажите пользователя (реплай, @username или ID)",
+        "no_args": "<b>Ошибка:</b> Укажи пользователя (реплай, @username или ID)",
         "no_user": "<b>Ошибка:</b> Пользователь не найден",
-        "no_access": "<b>Ошибка:</b> Нет access hash для этого ID. Попробуйте использовать @username",
+        "no_access": "<b>Ошибка:</b> Нет access hash. Попробуй @username",
         "self_action": "<b>Ошибка:</b> Ты серьёзно?",
         "processing": "<b>Обработка...</b>",
-        "gbanned": "<b>{user} был глобально забанен в {count} чат(ах)</b>",
-        "gunbanned": "<b>{user} был глобально разбанен в {count} чат(ах)</b>",
-        "gmuted": "<b>{user} был глобально замучен в {count} чат(ах)</b>",
-        "gunmuted": "<b>{user} был глобально размучен в {count} чат(ах)</b>",
-        "gdeleted": "<b>{user} был глобально забанен и все сообщения удалены в {count} чат(ах)</b>",
+        "gbanned": "<b>{user} глобально забанен в {count} чат(ах)</b>",
+        "gunbanned": "<b>{user} глобально разбанен в {count} чат(ах)</b>",
+        "gmuted": "<b>{user} глобально замучен в {count} чат(ах)</b>",
+        "gunmuted": "<b>{user} глобально размучен в {count} чат(ах)</b>",
+        "gdeleted": "<b>{user} забанен и сообщения удалены в {count} чат(ах)</b>",
         "gtest": (
             "<b>Статистика</b>\n"
             "<blockquote>"
-            "Права на бан:\n"
-            "{ban_groups} групп, {ban_channels} каналов\n"
-            "Права на мут:\n"
-            "{mute_groups} групп"
+            "Бан: {ban_groups} групп, {ban_channels} каналов\n"
+            "Мут: {mute_groups} групп"
             "</blockquote>"
         ),
     }
@@ -218,17 +214,17 @@ class GBan(loader.Module):
             entity = dialog.entity
             if isinstance(entity, (ChannelForbidden, ChatForbidden)):
                 continue
-            if not entity.admin_rights and not getattr(entity, "creator", False):
-                continue
             if isinstance(entity, Chat):
                 ar = entity.admin_rights
-                if ar and getattr(ar, "ban_users", False):
+                if getattr(entity, "creator", False) or (ar and getattr(ar, "ban_users", False)):
                     result.append(("group", entity.id))
             elif isinstance(entity, Channel):
                 if entity.id in skip:
                     continue
+                if not entity.admin_rights and not getattr(entity, "creator", False):
+                    continue
                 ar = entity.admin_rights
-                if ar and getattr(ar, "ban_users", False):
+                if getattr(entity, "creator", False) or (ar and getattr(ar, "ban_users", False)):
                     if getattr(entity, "megagroup", False):
                         result.append(("group", entity.id))
                     elif getattr(entity, "broadcast", False):
@@ -242,19 +238,19 @@ class GBan(loader.Module):
             entity = dialog.entity
             if isinstance(entity, (ChannelForbidden, ChatForbidden)):
                 continue
-            if not entity.admin_rights and not getattr(entity, "creator", False):
-                continue
             if isinstance(entity, Chat):
                 ar = entity.admin_rights
-                if ar and getattr(ar, "ban_users", False):
+                if getattr(entity, "creator", False) or (ar and getattr(ar, "ban_users", False)):
                     result.append(entity.id)
             elif isinstance(entity, Channel):
                 if entity.id in skip:
                     continue
                 if not getattr(entity, "megagroup", False):
                     continue
+                if not entity.admin_rights and not getattr(entity, "creator", False):
+                    continue
                 ar = entity.admin_rights
-                if ar and getattr(ar, "ban_users", False):
+                if getattr(entity, "creator", False) or (ar and getattr(ar, "ban_users", False)):
                     result.append(entity.id)
         return result
 
@@ -273,11 +269,11 @@ class GBan(loader.Module):
         return self._mute_cache["chats"]
 
     @loader.command(
-        ru_doc="- реплай / @username / ID - Глобально забанить пользователя во всех чатах и каналах где ты админ",
-        en_doc="- reply / @username / ID - Globally ban the user in all chats and channels where you are admin",
+        ru_doc="реплай / @username / ID — глобальный бан",
+        en_doc="reply / @username / ID — global ban",
     )
     async def gban(self, message: Message):
-        """- reply / @username / ID - Globally ban the user in all chats and channels where you are admin"""
+        """reply / @username / ID — global ban"""
         me = await self._client.get_me()
         target, err = await _resolve_target(self._client, message)
 
@@ -314,11 +310,11 @@ class GBan(loader.Module):
         )
 
     @loader.command(
-        ru_doc="- реплай / @username / ID - Глобально разбанить пользователя во всех чатах и каналах где ты админ",
-        en_doc="- reply / @username / ID - Globally unban the user in all chats and channels where you are admin",
+        ru_doc="реплай / @username / ID — глобальный разбан",
+        en_doc="reply / @username / ID — global unban",
     )
     async def gunban(self, message: Message):
-        """- reply / @username / ID - Globally unban the user in all chats and channels where you are admin"""
+        """reply / @username / ID — global unban"""
         me = await self._client.get_me()
         target, err = await _resolve_target(self._client, message)
 
@@ -355,11 +351,11 @@ class GBan(loader.Module):
         )
 
     @loader.command(
-        ru_doc="- реплай / @username / ID - Глобально замутить пользователя во всех группах где ты админ",
-        en_doc="- reply / @username / ID - Globally mute the user in all groups where you are admin",
+        ru_doc="реплай / @username / ID — глобальный мут",
+        en_doc="reply / @username / ID — global mute",
     )
     async def gmute(self, message: Message):
-        """- reply / @username / ID - Globally mute the user in all groups where you are admin"""
+        """reply / @username / ID — global mute"""
         me = await self._client.get_me()
         target, err = await _resolve_target(self._client, message)
 
@@ -396,11 +392,11 @@ class GBan(loader.Module):
         )
 
     @loader.command(
-        ru_doc="- реплай / @username / ID - Глобально размутить пользователя во всех группах где ты админ",
-        en_doc="- reply / @username / ID - Globally unmute the user in all groups where you are admin",
+        ru_doc="реплай / @username / ID — глобальный размут",
+        en_doc="reply / @username / ID — global unmute",
     )
     async def gunmute(self, message: Message):
-        """- reply / @username / ID - Globally unmute the user in all groups where you are admin"""
+        """reply / @username / ID — global unmute"""
         me = await self._client.get_me()
         target, err = await _resolve_target(self._client, message)
 
@@ -438,11 +434,11 @@ class GBan(loader.Module):
         )
 
     @loader.command(
-        ru_doc="- реплай / @username / ID - Удалить все сообщения пользователя и забанить его во всех чатах где ты админ",
-        en_doc="- reply / @username / ID - Delete all messages from user and ban them in all chats where you are admin",
+        ru_doc="реплай / @username / ID — удалить сообщения и забанить",
+        en_doc="reply / @username / ID — delete messages and ban",
     )
     async def gdelete(self, message: Message):
-        """- reply / @username / ID - Delete all messages from user and ban them in all chats where you are admin"""
+        """reply / @username / ID — delete messages and ban"""
         me = await self._client.get_me()
         target, err = await _resolve_target(self._client, message)
 
@@ -462,14 +458,12 @@ class GBan(loader.Module):
         count = 0
 
         for chat_type, chat_id in chats:
-            deleted_any = False
             try:
                 msg_ids = []
                 async for msg in self._client.iter_messages(chat_id, from_user=target.id):
                     msg_ids.append(msg.id)
                 if msg_ids:
                     await _bulk_delete(self._client, chat_id, msg_ids)
-                    deleted_any = True
             except Exception:
                 pass
 
@@ -490,11 +484,11 @@ class GBan(loader.Module):
         )
 
     @loader.command(
-        ru_doc="Показать статистику чатов где ты админ",
-        en_doc="Show statistics of chats where you are admin",
+        ru_doc="статистика чатов где ты админ",
+        en_doc="stats of chats where you are admin",
     )
     async def gtest(self, message: Message):
-        """Show statistics of chats where you are admin"""
+        """stats of chats where you are admin"""
         ban_chats = await self._collect_ban_chats()
         mute_chats = await self._collect_mute_chats()
 
