@@ -263,7 +263,7 @@ def _build_result_message(detail: dict, display_name: str, url: str) -> str:
 
     if detail["example"]:
         lines.append("<b>Example:</b>")
-        lines.append('<pre><code class="language-python">' + e(detail["example"]) + "</code></pre>")
+        lines.append('<pre><code class="language-DevTool">' + e(detail["example"]) + "</code></pre>")
 
     return "\n".join(lines)
 
