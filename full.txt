@@ -19,6 +19,7 @@ Session
 StarsX
 Statistics
 Stories
+Telega
 Test
 TGWatcher
 Token
