@@ -245,7 +245,7 @@ def _build_result_message(detail: dict, display_name: str, url: str) -> str:
     e = html.escape
     lines = []
 
-    lines.append('<b><a href="' + url + '">DevTool - ' + e(display_name) + "</a></b>")
+    lines.append('<b><a href="' + url + '">DevTool</a> - ' + e(display_name) + "</b>")
 
     if detail["description"]:
         lines.append("<blockquote>" + e(detail["description"]) + "</blockquote>")
@@ -258,7 +258,7 @@ def _build_result_message(detail: dict, display_name: str, url: str) -> str:
             param_type = row[1] if len(row) > 1 else ""
             optional = " <i>(opt.)</i>" if len(row) > 2 and "optional" in row[2].lower() else ""
             if param_name:
-                param_lines.append("  - <code>" + e(param_name) + "</code> - " + e(param_type) + optional)
+                param_lines.append("  -> <code>" + e(param_name) + "</code> - " + e(param_type) + optional)
         lines.append("<blockquote>" + "\n".join(param_lines) + "</blockquote>")
 
     if detail["example"]:
@@ -269,7 +269,7 @@ def _build_result_message(detail: dict, display_name: str, url: str) -> str:
 
 
 @loader.tds
-class DevToolMod(loader.Module):
+class DevTool(loader.Module):
     """Telethon methods reference"""
 
     strings = {
@@ -438,7 +438,7 @@ class DevToolMod(loader.Module):
                 msg = _build_result_message(detail, display_name, url)
             else:
                 msg = (
-                    '<b><a href="' + url + '">DevTool - ' + html.escape(display_name) + "</a></b>"
+                    '<b><a href="' + url + '">DevTool</a> - ' + html.escape(display_name) + "</b>"
                 )
 
             articles.append(self._make_article(
