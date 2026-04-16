@@ -2,6 +2,7 @@ Buttons
 ChatRecovery
 DeleteMusic
 Deleter
+DevTool
 GBan
 Grabber
 Info
