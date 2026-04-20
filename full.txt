@@ -6,6 +6,7 @@ DevTool
 GBan
 Grabber
 Info
+InlineDL
 Logger
 Manager
 Market
