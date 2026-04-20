@@ -1,5 +1,6 @@
 __version__ = (2, 1, 2)
-# meta developer: FireJester.t.me 
+# meta developer: FireJester.t.me
+# requires: aiohttp, Pillow
 
 from telethon.tl.types import User, Channel, Message, InputPhotoFileLocation
 from telethon.tl.functions.photos import GetUserPhotosRequest
@@ -11,27 +12,11 @@ import os
 import io
 import asyncio
 import tempfile
-import subprocess
-import sys
-
-def _ensure_deps():
-    for mod, pip in {"aiohttp": "aiohttp", "PIL": "Pillow"}.items():
-        try:
-            __import__(mod)
-        except ImportError:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", pip, "-q"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-
-_ensure_deps()
 
 import aiohttp
 from PIL import Image
 
-
-async def _upload_to_x0(data: bytes, filename: str, content_type: str = "image/jpeg") -> str:
+async def _upload_to_x0(data: bytes, filename: str, content_type: str) -> str:
     try:
         form = aiohttp.FormData()
         form.add_field("file", data, filename=filename, content_type=content_type)
@@ -66,7 +51,7 @@ def _normalize_to_jpeg(raw: bytes, max_size: int = 1200) -> bytes:
 @loader.tds
 class Info(loader.Module):
     """Get information about users and chats"""
-    
+
     strings = {
         "name": "Info",
         "prem_user_full": (
@@ -275,9 +260,7 @@ class Info(loader.Module):
     async def _get_user_profile_video(self, client, user):
         try:
             result = await client(
-                GetUserPhotosRequest(
-                    user_id=user, offset=0, max_id=0, limit=1
-                )
+                GetUserPhotosRequest(user_id=user, offset=0, max_id=0, limit=1)
             )
             if not result.photos:
                 return None
@@ -310,9 +293,7 @@ class Info(loader.Module):
                     return path, True
                 return None, False
             else:
-                result = await client.download_profile_photo(
-                    entity, download_big=True
-                )
+                result = await client.download_profile_photo(entity, download_big=True)
                 if result:
                     return result, False
                 return None, False
@@ -343,9 +324,7 @@ class Info(loader.Module):
         if username and username.strip():
             username_text = f"<u>@{utils.escape_html(username)}</u>"
         else:
-            username_text = (
-                f'<a href="tg://user?id={user.id}">{display_name}</a>'
-            )
+            username_text = f'<a href="tg://user?id={user.id}">{display_name}</a>'
         dc = self._get_dc(user)
         prefix = "prem" if is_premium else "noprem"
         suffix = "_full" if dc else "_no_dc"
@@ -390,38 +369,6 @@ class Info(loader.Module):
             except Exception:
                 pass
 
-    async def _send_result(
-        self, message: Message, text, file=None, reply_to_msg_id=None, is_video=False
-    ):
-        topic_id = self._get_topic_id(message)
-        reply_to = reply_to_msg_id or topic_id
-        await message.delete()
-        if file and is_video:
-            await message.client.send_file(
-                message.chat_id,
-                file,
-                caption=text,
-                reply_to=reply_to,
-                parse_mode="HTML",
-                supports_streaming=True,
-                attributes=[],
-            )
-        elif file:
-            await message.client.send_message(
-                message.chat_id,
-                text,
-                file=file,
-                reply_to=reply_to,
-                parse_mode="HTML",
-            )
-        else:
-            await message.client.send_message(
-                message.chat_id,
-                text,
-                reply_to=reply_to,
-                parse_mode="HTML",
-            )
-
     async def _send_error(self, message: Message, text):
         topic_id = self._get_topic_id(message)
         await message.delete()
@@ -432,10 +379,20 @@ class Info(loader.Module):
             parse_mode="HTML",
         )
 
-    async def _send_preview(self, message: Message, text, avatar_path, reply_to_msg_id=None):
+    async def _send_result(self, message: Message, text, reply_to_msg_id=None):
         topic_id = self._get_topic_id(message)
         reply_to = reply_to_msg_id or topic_id
+        await message.delete()
+        await message.client.send_message(
+            message.chat_id,
+            text,
+            reply_to=reply_to,
+            parse_mode="HTML",
+        )
 
+    async def _send_photo_preview(self, message: Message, text, avatar_path, reply_to_msg_id=None):
+        topic_id = self._get_topic_id(message)
+        reply_to = reply_to_msg_id or topic_id
         img_url = ""
         try:
             with open(avatar_path, "rb") as f:
@@ -444,9 +401,7 @@ class Info(loader.Module):
             img_url = await _upload_to_x0(jpeg_data, "avatar.jpg", "image/jpeg")
         except Exception:
             pass
-
         await message.delete()
-
         if img_url:
             try:
                 await message.client(
@@ -455,7 +410,6 @@ class Info(loader.Module):
             except Exception:
                 pass
             await asyncio.sleep(1)
-
             sent = await message.client.send_message(
                 message.chat_id,
                 text,
@@ -480,6 +434,53 @@ class Info(loader.Module):
             file=avatar_path,
             reply_to=reply_to,
             parse_mode="HTML",
+        )
+
+    async def _send_video_preview(self, message: Message, text, avatar_path, reply_to_msg_id=None):
+        topic_id = self._get_topic_id(message)
+        reply_to = reply_to_msg_id or topic_id
+        video_url = ""
+        try:
+            with open(avatar_path, "rb") as f:
+                raw = f.read()
+            video_url = await _upload_to_x0(raw, "avatar.mp4", "video/mp4")
+        except Exception:
+            pass
+        await message.delete()
+        if video_url:
+            try:
+                await message.client(
+                    functions.messages.GetWebPageRequest(url=video_url, hash=0)
+                )
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+            sent = await message.client.send_message(
+                message.chat_id,
+                text,
+                reply_to=reply_to,
+                parse_mode="HTML",
+            )
+            try:
+                from telethon.tl.types import InputMediaWebPage
+                await sent.edit(
+                    text,
+                    file=InputMediaWebPage(video_url, optional=True),
+                    parse_mode="HTML",
+                    link_preview=True,
+                    invert_media=True,
+                )
+                return
+            except Exception:
+                pass
+        await message.client.send_file(
+            message.chat_id,
+            avatar_path,
+            caption=text,
+            reply_to=reply_to,
+            parse_mode="HTML",
+            supports_streaming=True,
+            attributes=[],
         )
 
     @loader.command(
@@ -515,18 +516,18 @@ class Info(loader.Module):
                 )
                 return
             try:
-                await self._send_preview(
-                    message,
-                    text,
-                    avatar_path=avatar,
-                    reply_to_msg_id=reply_to_msg_id,
-                )
+                if is_video:
+                    await self._send_video_preview(
+                        message, text, avatar, reply_to_msg_id=reply_to_msg_id
+                    )
+                else:
+                    await self._send_photo_preview(
+                        message, text, avatar, reply_to_msg_id=reply_to_msg_id
+                    )
             finally:
                 await self._cleanup_file(avatar)
         else:
-            await self._send_result(
-                message, text, reply_to_msg_id=reply_to_msg_id
-            )
+            await self._send_result(message, text, reply_to_msg_id=reply_to_msg_id)
 
     @loader.command(
         ru_doc="Инфо о группе/канале (+ для аватарки)",
@@ -552,11 +553,10 @@ class Info(loader.Module):
                 )
                 return
             try:
-                await self._send_preview(
-                    message,
-                    text,
-                    avatar_path=avatar,
-                )
+                if is_video:
+                    await self._send_video_preview(message, text, avatar)
+                else:
+                    await self._send_photo_preview(message, text, avatar)
             finally:
                 await self._cleanup_file(avatar)
         else:
