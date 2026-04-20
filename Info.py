@@ -237,7 +237,6 @@ class Info(loader.Module):
         return None
 
     def _pick_best_video_size(self, video_sizes):
-        """Pick the best VideoSize, preferring type 'u' (full quality)."""
         best = None
         for vs in video_sizes:
             if hasattr(vs, "type") and vs.type == "u":
@@ -247,7 +246,6 @@ class Info(loader.Module):
         return best if best else video_sizes[-1]
 
     async def _download_video_from_photo(self, client, photo_obj):
-        """Download video from a Photo object using InputPhotoFileLocation."""
         video_sizes = getattr(photo_obj, "video_sizes", None)
         if not video_sizes:
             return None
@@ -275,7 +273,6 @@ class Info(loader.Module):
             return None
 
     async def _get_user_profile_video(self, client, user):
-        """Download user's video avatar."""
         try:
             result = await client(
                 GetUserPhotosRequest(
@@ -289,7 +286,6 @@ class Info(loader.Module):
             return None
 
     async def _get_chat_profile_video(self, client, chat):
-        """Download chat's video avatar."""
         try:
             if isinstance(chat, Channel):
                 full = await client(GetFullChannelRequest(channel=chat))
@@ -322,43 +318,6 @@ class Info(loader.Module):
                 return None, False
         except Exception:
             return None, False
-
-    async def _add_silent_audio_async(self, video_path):
-        output = tempfile.mktemp(suffix=".mp4")
-        try:
-            process = await asyncio.create_subprocess_exec(
-                "ffmpeg",
-                "-y",
-                "-i",
-                video_path,
-                "-f",
-                "lavfi",
-                "-i",
-                "anullsrc=r=44100:cl=mono",
-                "-c:v",
-                "copy",
-                "-c:a",
-                "aac",
-                "-shortest",
-                output,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await process.wait()
-            if process.returncode == 0:
-                await asyncio.to_thread(os.remove, video_path)
-                return output
-            else:
-                if os.path.exists(output):
-                    await asyncio.to_thread(os.remove, output)
-                return video_path
-        except Exception:
-            if os.path.exists(output):
-                try:
-                    await asyncio.to_thread(os.remove, output)
-                except Exception:
-                    pass
-            return video_path
 
     async def _get_target_user(self, message, username=None):
         if username:
@@ -474,28 +433,21 @@ class Info(loader.Module):
         )
 
     async def _send_preview(self, message: Message, text, avatar_path, reply_to_msg_id=None):
-        """
-        Загружает аватар на x0.at и отправляет сообщение
-        с превью-изображением сверху через InputMediaWebPage + invert_media.
-        Fallback — обычное сообщение с файлом.
-        """
         topic_id = self._get_topic_id(message)
         reply_to = reply_to_msg_id or topic_id
 
-        # Читаем файл и конвертируем в JPEG для x0.at
+        img_url = ""
         try:
             with open(avatar_path, "rb") as f:
                 raw = f.read()
             jpeg_data = _normalize_to_jpeg(raw)
-            filename = "avatar.jpg"
-            img_url = await _upload_to_x0(jpeg_data, filename, "image/jpeg")
+            img_url = await _upload_to_x0(jpeg_data, "avatar.jpg", "image/jpeg")
         except Exception:
-            img_url = ""
+            pass
 
         await message.delete()
 
         if img_url:
-            # Прогрев Telegram WebPage кэша
             try:
                 await message.client(
                     functions.messages.GetWebPageRequest(url=img_url, hash=0)
@@ -510,7 +462,6 @@ class Info(loader.Module):
                 reply_to=reply_to,
                 parse_mode="HTML",
             )
-            # Редактируем с превью сверху
             try:
                 from telethon.tl.types import InputMediaWebPage
                 await sent.edit(
@@ -523,8 +474,6 @@ class Info(loader.Module):
                 return
             except Exception:
                 pass
-
-        # Fallback: отправляем с файлом напрямую
         await message.client.send_message(
             message.chat_id,
             text,
@@ -566,22 +515,12 @@ class Info(loader.Module):
                 )
                 return
             try:
-                if is_video:
-                    avatar = await self._add_silent_audio_async(avatar)
-                    await self._send_result(
-                        message,
-                        text,
-                        file=avatar,
-                        reply_to_msg_id=reply_to_msg_id,
-                        is_video=True,
-                    )
-                else:
-                    await self._send_preview(
-                        message,
-                        text,
-                        avatar_path=avatar,
-                        reply_to_msg_id=reply_to_msg_id,
-                    )
+                await self._send_preview(
+                    message,
+                    text,
+                    avatar_path=avatar,
+                    reply_to_msg_id=reply_to_msg_id,
+                )
             finally:
                 await self._cleanup_file(avatar)
         else:
@@ -613,17 +552,11 @@ class Info(loader.Module):
                 )
                 return
             try:
-                if is_video:
-                    avatar = await self._add_silent_audio_async(avatar)
-                    await self._send_result(
-                        message, text, file=avatar, is_video=True
-                    )
-                else:
-                    await self._send_preview(
-                        message,
-                        text,
-                        avatar_path=avatar,
-                    )
+                await self._send_preview(
+                    message,
+                    text,
+                    avatar_path=avatar,
+                )
             finally:
                 await self._cleanup_file(avatar)
         else:
