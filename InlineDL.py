@@ -1,4 +1,4 @@
-__version__ = (1, 3, 0)
+__version__ = (1, 6, 0)
 # meta developer: FireJester.t.me
 
 import re
@@ -17,6 +17,8 @@ from .. import loader
 logger = logging.getLogger(__name__)
 
 BANNER = "https://github.com/FireJester/Modules/raw/main/Assets/InlineDL/Inline_query.png"
+THUMB_IG = "https://github.com/FireJester/Modules/raw/main/Assets/InlineDL/Instagram.png"
+THUMB_TT = "https://github.com/FireJester/Modules/raw/main/Assets/InlineDL/TikTok.png"
 
 INSTAGRAM_RE = re.compile(
     r"https?://(?:www\.)?instagram\.com/"
@@ -33,8 +35,10 @@ TIKTOK_SHORT_RE = re.compile(
     r"https?://(?:(?:vm|vt|www)\.)?tiktok\.com/(?:t/)?([A-Za-z0-9_-]+)"
 )
 
+
 def escape_html(t):
     return (t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 
 def detect_platform(text):
     if not text:
@@ -49,6 +53,7 @@ def detect_platform(text):
         if m:
             return "tiktok", m.group(0)
     return None, None
+
 
 def make_kk_url(platform, url):
     if platform == "instagram":
@@ -65,6 +70,7 @@ def make_kk_url(platform, url):
         )
     return url
 
+
 @loader.tds
 class InlineDL(loader.Module):
     """Instagram & TikTok video/photo downloader via inline query"""
@@ -79,7 +85,7 @@ class InlineDL(loader.Module):
         "invalid_msg": "<b>InlineDL:</b> Invalid link. Supported: Instagram, TikTok",
         "ready_ig": "Instagram",
         "ready_tt": "TikTok",
-        "ready_desc": "Tap on inline query to send",
+        "ready_desc": "Tap to download",
         "err_title": "Error",
     }
 
@@ -92,7 +98,7 @@ class InlineDL(loader.Module):
         "invalid_msg": "<b>InlineDL:</b> Неверная ссылка. Поддерживаются: Instagram, TikTok",
         "ready_ig": "Instagram",
         "ready_tt": "TikTok",
-        "ready_desc": "Нажмите на инлайн запрос чтобы отправить",
+        "ready_desc": "Нажмите чтобы скачать",
         "err_title": "Ошибка",
     }
 
@@ -125,11 +131,8 @@ class InlineDL(loader.Module):
             return
 
         kk_url = make_kk_url(platform, matched)
-        title = (
-            self.strings["ready_ig"]
-            if platform == "instagram"
-            else self.strings["ready_tt"]
-        )
+        title = self.strings["ready_ig"] if platform == "instagram" else self.strings["ready_tt"]
+        thumb = THUMB_IG if platform == "instagram" else THUMB_TT
 
         try:
             await self.inline_bot.answer_inline_query(
@@ -139,7 +142,7 @@ class InlineDL(loader.Module):
                         id=f"v_{int(time.time())}",
                         video_url=kk_url,
                         mime_type="video/mp4",
-                        thumbnail_url=BANNER,
+                        thumbnail_url=thumb,
                         title=title,
                         description=self.strings["ready_desc"],
                     )
