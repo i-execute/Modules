@@ -1,14 +1,67 @@
-__version__ = (2, 1, 1)
+__version__ = (2, 1, 2)
 # meta developer: FireJester.t.me 
 
 from telethon.tl.types import User, Channel, Message, InputPhotoFileLocation
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.messages import GetFullChatRequest
+from telethon import functions
 from .. import loader, utils
 import os
+import io
 import asyncio
 import tempfile
+import subprocess
+import sys
+
+def _ensure_deps():
+    for mod, pip in {"aiohttp": "aiohttp", "PIL": "Pillow"}.items():
+        try:
+            __import__(mod)
+        except ImportError:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", pip, "-q"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+_ensure_deps()
+
+import aiohttp
+from PIL import Image
+
+
+async def _upload_to_x0(data: bytes, filename: str, content_type: str = "image/jpeg") -> str:
+    try:
+        form = aiohttp.FormData()
+        form.add_field("file", data, filename=filename, content_type=content_type)
+        async with aiohttp.ClientSession() as s:
+            async with s.post(
+                "https://x0.at",
+                data=form,
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as r:
+                text = (await r.text()).strip()
+                if text.startswith("http"):
+                    return text
+    except Exception:
+        pass
+    return ""
+
+
+def _normalize_to_jpeg(raw: bytes, max_size: int = 1200) -> bytes:
+    try:
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+        w, h = img.size
+        if w > max_size or h > max_size:
+            ratio = min(max_size / w, max_size / h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=95)
+        return buf.getvalue()
+    except Exception:
+        return raw
+
 
 @loader.tds
 class Info(loader.Module):
@@ -420,6 +473,66 @@ class Info(loader.Module):
             parse_mode="HTML",
         )
 
+    async def _send_preview(self, message: Message, text, avatar_path, reply_to_msg_id=None):
+        """
+        Загружает аватар на x0.at и отправляет сообщение
+        с превью-изображением сверху через InputMediaWebPage + invert_media.
+        Fallback — обычное сообщение с файлом.
+        """
+        topic_id = self._get_topic_id(message)
+        reply_to = reply_to_msg_id or topic_id
+
+        # Читаем файл и конвертируем в JPEG для x0.at
+        try:
+            with open(avatar_path, "rb") as f:
+                raw = f.read()
+            jpeg_data = _normalize_to_jpeg(raw)
+            filename = "avatar.jpg"
+            img_url = await _upload_to_x0(jpeg_data, filename, "image/jpeg")
+        except Exception:
+            img_url = ""
+
+        await message.delete()
+
+        if img_url:
+            # Прогрев Telegram WebPage кэша
+            try:
+                await message.client(
+                    functions.messages.GetWebPageRequest(url=img_url, hash=0)
+                )
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+
+            sent = await message.client.send_message(
+                message.chat_id,
+                text,
+                reply_to=reply_to,
+                parse_mode="HTML",
+            )
+            # Редактируем с превью сверху
+            try:
+                from telethon.tl.types import InputMediaWebPage
+                await sent.edit(
+                    text,
+                    file=InputMediaWebPage(img_url, optional=True),
+                    parse_mode="HTML",
+                    link_preview=True,
+                    invert_media=True,
+                )
+                return
+            except Exception:
+                pass
+
+        # Fallback: отправляем с файлом напрямую
+        await message.client.send_message(
+            message.chat_id,
+            text,
+            file=avatar_path,
+            reply_to=reply_to,
+            parse_mode="HTML",
+        )
+
     @loader.command(
         ru_doc="Инфо о пользователе (+ для аватарки)",
         en_doc="User info (+ for avatar)",
@@ -455,13 +568,20 @@ class Info(loader.Module):
             try:
                 if is_video:
                     avatar = await self._add_silent_audio_async(avatar)
-                await self._send_result(
-                    message,
-                    text,
-                    file=avatar,
-                    reply_to_msg_id=reply_to_msg_id,
-                    is_video=is_video,
-                )
+                    await self._send_result(
+                        message,
+                        text,
+                        file=avatar,
+                        reply_to_msg_id=reply_to_msg_id,
+                        is_video=True,
+                    )
+                else:
+                    await self._send_preview(
+                        message,
+                        text,
+                        avatar_path=avatar,
+                        reply_to_msg_id=reply_to_msg_id,
+                    )
             finally:
                 await self._cleanup_file(avatar)
         else:
@@ -495,9 +615,15 @@ class Info(loader.Module):
             try:
                 if is_video:
                     avatar = await self._add_silent_audio_async(avatar)
-                await self._send_result(
-                    message, text, file=avatar, is_video=is_video
-                )
+                    await self._send_result(
+                        message, text, file=avatar, is_video=True
+                    )
+                else:
+                    await self._send_preview(
+                        message,
+                        text,
+                        avatar_path=avatar,
+                    )
             finally:
                 await self._cleanup_file(avatar)
         else:
