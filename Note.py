@@ -1,16 +1,14 @@
-__version__ = (2, 2, 8)
+__version__ = (2, 2, 9)
 # meta developer: FireJester.t.me
 
 import logging
 import asyncio
-from telethon.tl.functions.channels import CreateChannelRequest
 from telethon import errors
 from telethon.tl.types import MessageMediaWebPage, DocumentAttributeVideo, DocumentAttributeAudio
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-STORAGE_AVATAR = "https://github.com/FireJester/Media/raw/main/Group_avatar_in_note.jpeg"
 
 @loader.tds
 class Note(loader.Module):
@@ -85,10 +83,10 @@ class Note(loader.Module):
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            loader.ConfigValue("STORAGE_CHAT_ID", 0, "storage group ID"),
             loader.ConfigValue("NOTES", {}, "List of ur notes"),
         )
-        self._storage_chat_entity = None
+        self._storage_topic = None
+        self._asset_channel = None
         self._premium = None
 
     async def _get_premium_status(self):
@@ -99,44 +97,33 @@ class Note(loader.Module):
 
     def _get_str(self, key):
         if self._premium:
-            prem_res = self.strings(f"{key}_prem")
-            if not prem_res.startswith("Unknown string"):
-                return prem_res
-        return self.strings(key)
+            prem_key = f"{key}_prem"
+            val = self.strings.get(prem_key)
+            if val:
+                return val
+        return self.strings[key]
 
-    async def _ensure_storage(self):
-        chat_id = self.config["STORAGE_CHAT_ID"]
-        if chat_id:
-            try:
-                entity = await self._client.get_entity(int(f"-100{chat_id}"))
-                test_msg = await self._client.send_message(entity, "note_ping", silent=True)
-                await self._client.delete_messages(entity, test_msg.id)
-                self._storage_chat_entity = entity
-                return entity
-            except Exception:
-                self.config["NOTES"] = {}
+    async def client_ready(self):
+        await self._get_premium_status()
+
+        self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
+
+        if not self._asset_channel:
+            logger.warning("[Note] heroku.forums channel_id not found in DB.")
+            return
 
         try:
-            chat_entity, _ = await utils.asset_channel(
-                self._client, "Note Storage", "Notes storage. @FireJester with ♡",
-                silent=True, avatar=STORAGE_AVATAR,
+            self._storage_topic = await utils.asset_forum_topic(
+                self._client,
+                self._db,
+                self._asset_channel,
+                "Note Storage",
+                description="Media storage for Note module.",
+                icon_emoji_id=5188466187448650036,
             )
-        except Exception:
-            try:
-                r = await self._client(CreateChannelRequest(title="Note Storage", about="Notes", megagroup=True))
-                chat_entity = r.chats[0]
-            except Exception as e:
-                logger.error(f"[Note] Create storage error: {e}")
-                return None
+        except Exception as e:
+            logger.error(f"[Note] Failed to create/get storage topic: {e}")
 
-        self.config["STORAGE_CHAT_ID"] = chat_entity.id
-        self._storage_chat_entity = chat_entity
-        return chat_entity
-
-    async def client_ready(self, client, _):
-        self._client = client
-        await self._get_premium_status()
-        await self._ensure_storage()
         self._migrate_notes()
 
     def _migrate_notes(self):
@@ -180,7 +167,10 @@ class Note(loader.Module):
                         return False
         return True
 
-    async def _store_media_to_storage(self, storage, reply):
+    async def _store_media_to_storage(self, reply):
+        storage_chat_id = int(f"-100{self._asset_channel}")
+        topic_id = self._storage_topic.id
+
         media_list = []
         if reply.grouped_id:
             album = await self._get_album_messages(reply.chat_id, reply.id, reply.grouped_id)
@@ -191,10 +181,20 @@ class Note(loader.Module):
         stored_ids = []
         if any(not self._is_albumable(m) for m in media_list) or len(media_list) == 1:
             for m in media_list:
-                s = await self._send_with_flood_wait(self._client.send_file, storage.id, m)
+                s = await self._send_with_flood_wait(
+                    self._client.send_file,
+                    storage_chat_id,
+                    m,
+                    reply_to=topic_id,
+                )
                 stored_ids.append(s.id)
         else:
-            stored = await self._send_with_flood_wait(self._client.send_file, storage.id, media_list)
+            stored = await self._send_with_flood_wait(
+                self._client.send_file,
+                storage_chat_id,
+                media_list,
+                reply_to=topic_id,
+            )
             stored_ids = [s.id for s in stored] if isinstance(stored, list) else [stored.id]
 
         return stored_ids
@@ -219,6 +219,22 @@ class Note(loader.Module):
                 return msg_id
         return None
 
+    async def _get_messages_from_storage(self, msg_ids):
+        storage_chat_id = int(f"-100{self._asset_channel}")
+        return await self._send_with_flood_wait(
+            self._client.get_messages,
+            storage_chat_id,
+            ids=msg_ids,
+        )
+
+    async def _delete_messages_from_storage(self, msg_ids):
+        storage_chat_id = int(f"-100{self._asset_channel}")
+        await self._send_with_flood_wait(
+            self._client.delete_messages,
+            storage_chat_id,
+            msg_ids,
+        )
+
     @loader.command(
         ru_doc="Управление заметками",
         en_doc="Manage notes",
@@ -229,8 +245,7 @@ class Note(loader.Module):
         await self._get_premium_status()
         prefix = self.get_prefix()
 
-        storage = await self._ensure_storage()
-        if not storage:
+        if not self._storage_topic or not self._asset_channel:
             await utils.answer(message, self._get_str("storage_error"))
             return
 
@@ -243,6 +258,8 @@ class Note(loader.Module):
             return
 
         cmd = parts[0].lower()
+        is_forum = False
+        topic_id = None
 
         try:
             if cmd == "create":
@@ -264,7 +281,7 @@ class Note(loader.Module):
                     await utils.answer(message, self._get_str("no_media"))
                     return
 
-                stored_ids = await self._store_media_to_storage(storage, reply)
+                stored_ids = await self._store_media_to_storage(reply)
 
                 notes[name] = [stored_ids]
                 self.config["NOTES"] = notes
@@ -289,7 +306,7 @@ class Note(loader.Module):
                     await utils.answer(message, self._get_str("no_media"))
                     return
 
-                stored_ids = await self._store_media_to_storage(storage, reply)
+                stored_ids = await self._store_media_to_storage(reply)
 
                 notes[name].append(stored_ids)
                 self.config["NOTES"] = notes
@@ -314,7 +331,7 @@ class Note(loader.Module):
                         all_ids.append(group)
 
                 try:
-                    await self._send_with_flood_wait(self._client.delete_messages, storage.id, all_ids)
+                    await self._delete_messages_from_storage(all_ids)
                 except Exception:
                     pass
 
@@ -350,9 +367,7 @@ class Note(loader.Module):
                 for group in groups:
                     msg_ids = group if isinstance(group, list) else [group]
 
-                    fetched = await self._send_with_flood_wait(
-                        self._client.get_messages, storage.id, ids=msg_ids
-                    )
+                    fetched = await self._get_messages_from_storage(msg_ids)
                     if not fetched:
                         continue
 
