@@ -98,10 +98,13 @@ class Note(loader.Module):
     def _get_str(self, key):
         if self._premium:
             prem_key = f"{key}_prem"
-            val = self.strings.get(prem_key)
-            if val:
-                return val
-        return self.strings[key]
+            try:
+                val = self.strings(prem_key)
+                if val and not val.startswith("Unknown string"):
+                    return val
+            except Exception:
+                pass
+        return self.strings(key)
 
     async def client_ready(self):
         await self._get_premium_status()
