@@ -1,17 +1,15 @@
-__version__ = (1, 0, 0)
+__version__ = (3, 0, 0)
 # meta developer: FireJester.t.me
 
 import logging
 import asyncio
+import re
 from telethon.tl.types import PeerUser, Channel, User
-from telethon.tl.functions.channels import InviteToChannelRequest, EditAdminRequest
-from telethon.tl.types import ChatAdminRights
-from telethon.errors import FloodWaitError, ChatAdminRequiredError
+from telethon.errors import FloodWaitError
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-LOG_GROUP_AVATAR_URL = "https://github.com/FireJester/Media/raw/main/Group_avatar_in_Logger.jpeg"
 GREETING_MEDIA_URL = "https://github.com/FireJester/Media/raw/main/Greeting_in_Logger.jpeg"
 
 
@@ -23,8 +21,8 @@ class Logger(loader.Module):
         "name": "Logger",
         "greeting_first": (
             "<b>Yo!</b>\n\n"
-            "Successfully joined this group and can write, watchers are active. "
-            "Now every command will be logged here, if some asshole uses your userbot I'll tag you\n\n"
+            "Watchers are active. "
+            "Now every command will be logged here, if some asshole uses your userbot I'll tag you"
         ),
         "greeting_recovery": (
             "<b>Hey!</b>\n\n"
@@ -74,45 +72,27 @@ class Logger(loader.Module):
             "<b>Logger Commands</b>\n\n"
             "<code>.logger</code> - show this help\n"
             "<code>.logger status</code> - current logger status\n"
-            "<code>.logger group</code> - set current group as log group\n"
         ),
         "status": (
             "<b>Logger Status</b>\n\n"
-            "<b>Log group:</b> {group_name}\n"
-            "<b>ID:</b> <code>{group_id}</code>\n"
-            "<b>Username:</b> {group_username}\n"
+            "<b>Log topic:</b> {topic_name}\n"
+            "<b>Channel ID:</b> <code>{channel_id}</code>\n"
+            "<b>Topic ID:</b> <code>{topic_id}</code>\n"
             "<b>Status:</b> {status}\n"
         ),
-        "status_no_group": (
+        "status_no_topic": (
             "<b>Logger Status</b>\n\n"
-            "<b>Log group:</b> Not configured\n"
+            "<b>Log topic:</b> Not configured\n"
             "<b>Status:</b> Inactive\n\n"
-            "Use <code>.logger group</code> in the desired group"
-        ),
-        "group_set": (
-            "<b>Log group set!</b>\n\n"
-            "<b>Group:</b> {group_name}\n"
-            "<b>ID:</b> <code>{group_id}</code>\n"
-        ),
-        "group_not_group": "<b>Error:</b> This command only works in groups!",
-        "group_no_rights": "<b>Error:</b> No rights to assign administrators in this group!",
-        "group_error": "<b>Error:</b> {error}",
-        "inline_create_failed": (
-            "<b>Failed to create/setup log group</b>\n\n"
-            "Use command <code>.logger group</code> in a group where you're admin to set it as log group."
-        ),
-        "inline_setup_failed": (
-            "<b>Failed to setup log group</b>\n\n"
-            "Error: <code>{error}</code>\n\n"
-            "Use command <code>.logger group</code> in a group where you have proper admin rights."
+            "Make sure heroku.forums channel_id is set in DB"
         ),
     }
 
     strings_ru = {
         "greeting_first": (
             "<b>Ку!</b>\n\n"
-            "Я успешно инвайтнулся в эту группу и могу писать, вотчеры активны. "
-            "Теперь каждая команда будет залетать сюда, если какой-то хуй будет использовать твой юзербот то я тэгну тебя\n\n"
+            "Вотчеры активны. "
+            "Теперь каждая команда будет залетать сюда, если какой-то хуй будет использовать твой юзербот то я тэгну тебя"
         ),
         "greeting_recovery": (
             "<b>Прием!</b>\n\n"
@@ -162,58 +142,27 @@ class Logger(loader.Module):
             "<b>Команды Logger</b>\n\n"
             "<code>.logger</code> - показать эту справку\n"
             "<code>.logger status</code> - текущий статус логгера\n"
-            "<code>.logger group</code> - установить текущую группу как лог-группу\n"
         ),
         "status": (
             "<b>Статус Logger</b>\n\n"
-            "<b>Лог-группа:</b> {group_name}\n"
-            "<b>ID:</b> <code>{group_id}</code>\n"
-            "<b>Username:</b> {group_username}\n"
+            "<b>Топик:</b> {topic_name}\n"
+            "<b>ID канала:</b> <code>{channel_id}</code>\n"
+            "<b>ID топика:</b> <code>{topic_id}</code>\n"
             "<b>Статус:</b> {status}\n"
         ),
-        "status_no_group": (
+        "status_no_topic": (
             "<b>Статус Logger</b>\n\n"
-            "<b>Лог-группа:</b> Не настроена\n"
+            "<b>Топик:</b> Не настроен\n"
             "<b>Статус:</b> Неактивен\n\n"
-            "Используй <code>.logger group</code> в нужной группе"
-        ),
-        "group_set": (
-            "<b>Лог-группа установлена!</b>\n\n"
-            "<b>Группа:</b> {group_name}\n"
-            "<b>ID:</b> <code>{group_id}</code>\n"
-        ),
-        "group_not_group": "<b>Ошибка:</b> Эта команда работает только в группах!",
-        "group_no_rights": "<b>Ошибка:</b> Нет прав на назначение администраторов в этой группе!",
-        "group_error": "<b>Ошибка:</b> {error}",
-        "inline_create_failed": (
-            "<b>Не удалось создать/настроить лог-группу</b>\n\n"
-            "Юзай команду <code>.logger group</code> в группе, где ты админ, чтобы установить её как группу для логов."
-        ),
-        "inline_setup_failed": (
-            "<b>Не удалось настроить лог-группу</b>\n\n"
-            "Ошибка: <code>{error}</code>\n\n"
-            "Юзай команду <code>.logger group</code> в группе, где у тебя есть нормальная админка."
+            "Убедись что heroku.forums channel_id установлен в БД"
         ),
     }
 
     def __init__(self):
-        self.config = loader.ModuleConfig(
-            loader.ConfigValue(
-                "LOG_CHAT_ID",
-                0,
-                lambda: "ID группы для логов команд",
-                validator=loader.validators.Integer(),
-            ),
-            loader.ConfigValue(
-                "LOG_CHAT_NAME",
-                "",
-                lambda: "Название группы логов",
-            ),
-        )
         self._owner = None
-        self.chat_logs = None
+        self._logger_topic = None
+        self._asset_channel = None
         self._flood_lock = asyncio.Lock()
-        self._setup_failed = False
 
     def _escape(self, text):
         if not text:
@@ -242,8 +191,8 @@ class Logger(loader.Module):
     def _get_full_name(self, entity) -> str:
         if not entity:
             return "Unknown"
-        first = getattr(entity, 'first_name', '') or ''
-        last = getattr(entity, 'last_name', '') or ''
+        first = getattr(entity, "first_name", "") or ""
+        last = getattr(entity, "last_name", "") or ""
         return f"{first} {last}".strip() or "Unknown"
 
     def _format_username_row(self, entity):
@@ -251,10 +200,12 @@ class Logger(loader.Module):
         return self.strings["username_row"].format(uname=username) if username else ""
 
     def _get_topic_id(self, message):
-        reply_to = getattr(message, 'reply_to', None)
+        reply_to = getattr(message, "reply_to", None)
         if reply_to:
-            if getattr(reply_to, 'forum_topic', False):
-                return getattr(reply_to, 'reply_to_top_id', None) or getattr(reply_to, 'reply_to_msg_id', None)
+            if getattr(reply_to, "forum_topic", False):
+                return getattr(reply_to, "reply_to_top_id", None) or getattr(
+                    reply_to, "reply_to_msg_id", None
+                )
         return None
 
     def _build_message_link(self, chat, message):
@@ -262,7 +213,7 @@ class Logger(loader.Module):
         chat_id = chat.id
         msg_id = message.id
         topic_id = self._get_topic_id(message)
-        
+
         if username:
             if topic_id:
                 return f"https://t.me/{username}/{topic_id}/{msg_id}"
@@ -272,35 +223,12 @@ class Logger(loader.Module):
                 return f"https://t.me/c/{chat_id}/{topic_id}/{msg_id}"
             return f"https://t.me/c/{chat_id}/{msg_id}"
 
-    async def _set_bot_admin(self, chat_entity):
-        try:
-            bot_user = await self._client.get_entity(self.inline.bot_username)
-            
-            admin_rights = ChatAdminRights(
-                post_messages=True,
-                edit_messages=True,
-                delete_messages=True,
-                ban_users=False,
-                invite_users=False,
-                pin_messages=True,
-                add_admins=False,
-                anonymous=False,
-                manage_call=False,
-                other=False,
-            )
-            
-            await self._client(EditAdminRequest(
-                channel=chat_entity,
-                user_id=bot_user,
-                admin_rights=admin_rights,
-                rank="Logger"
-            ))
+    def _is_channel_post(self, message, sender):
+        if message.post:
             return True
-        except ChatAdminRequiredError:
-            return False
-        except Exception as e:
-            logger.error(f"[Logger] Failed to set bot admin: {e}")
-            return False
+        if isinstance(sender, Channel) and not getattr(sender, "megagroup", False):
+            return True
+        return False
 
     async def _send_with_flood_wait(self, coro_func, *args, **kwargs):
         max_retries = 5
@@ -309,11 +237,11 @@ class Logger(loader.Module):
                 return await coro_func(*args, **kwargs)
             except FloodWaitError as e:
                 wait_time = e.seconds + 1
+                logger.warning(f"[Logger] FloodWait {wait_time}s, retrying...")
                 await asyncio.sleep(wait_time)
             except Exception as e:
                 error_str = str(e).lower()
                 if "flood" in error_str and "retry after" in error_str:
-                    import re
                     match = re.search(r"retry after (\d+)", error_str)
                     if match:
                         wait_time = int(match.group(1)) + 1
@@ -322,342 +250,146 @@ class Logger(loader.Module):
                 raise
         return None
 
-    async def _send_inline_notification(self, text: str):
+    async def client_ready(self):
+        self._owner = await self._client.get_me()
+        self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
+
+        if not self._asset_channel:
+            logger.warning("[Logger] heroku.forums channel_id not found in DB, logging will be disabled.")
+            return
+
         try:
-            await self.inline.bot.send_message(
-                self._owner.id,
-                text,
-                parse_mode="HTML"
+            self._logger_topic = await utils.asset_forum_topic(
+                self._client,
+                self._db,
+                self._asset_channel,
+                "Logger",
+                description="All userbot commands will be logged here.",
+                icon_emoji_id=5188466187448650036,
             )
         except Exception as e:
-            logger.error(f"[Logger] Failed to send inline notification: {e}")
-
-    async def _send_greeting(self, is_recovery=False, error_text=None):
-        greeting_text = (
-            self.strings["greeting_recovery"]
-            if is_recovery
-            else self.strings["greeting_first"]
-        )
+            logger.error(f"[Logger] Failed to create/get forum topic: {e}")
+            return
 
         try:
             await self._send_with_flood_wait(
                 self.inline.bot.send_photo,
-                self.chat_logs,
+                int(f"-100{self._asset_channel}"),
                 photo=GREETING_MEDIA_URL,
-                caption=greeting_text,
-                parse_mode="HTML"
+                caption=self.strings["greeting_first"],
+                parse_mode="HTML",
+                message_thread_id=self._logger_topic.id,
             )
-
-            if is_recovery and error_text:
+        except Exception:
+            try:
                 await self._send_with_flood_wait(
                     self.inline.bot.send_message,
-                    self.chat_logs,
-                    self.strings["error_info"].format(error_text=self._escape(str(error_text))),
-                    parse_mode="HTML"
-                )
-        except Exception as e:
-            logger.error(f"[Logger] Greeting failed: {e}")
-
-    async def _try_setup_group(self, chat_entity, is_recovery=False, error_text=None):
-        try:
-            try:
-                bot_user = await self._client.get_entity(self.inline.bot_username)
-                await self._send_with_flood_wait(
-                    self._client,
-                    InviteToChannelRequest(chat_entity, [bot_user])
+                    int(f"-100{self._asset_channel}"),
+                    self.strings["reloaded"],
+                    parse_mode="HTML",
+                    message_thread_id=self._logger_topic.id,
                 )
             except Exception as e:
-                logger.warning(f"[Logger] Bot invite failed (maybe already in): {e}")
+                logger.error(f"[Logger] Failed to send greeting: {e}")
 
-            admin_set = await self._set_bot_admin(chat_entity)
-            if not admin_set:
-                return False, "Failed to set bot admin rights"
-
-            await asyncio.sleep(2)
-            await self._send_greeting(is_recovery=is_recovery, error_text=error_text)
-            return True, None
-            
-        except Exception as e:
-            return False, str(e)
-
-    async def _ensure_log_chat(self, error_text=None):
-        async with self._flood_lock:
-            is_recovery = self.config["LOG_CHAT_ID"] != 0
-
-            try:
-                chat_entity, _ = await utils.asset_channel(
-                    self._client,
-                    "Command Logs",
-                    "Command logs will appear here. @FireJester with ♡",
-                    silent=True,
-                    avatar=LOG_GROUP_AVATAR_URL,
-                )
-
-                self.config["LOG_CHAT_ID"] = chat_entity.id
-                self.config["LOG_CHAT_NAME"] = getattr(chat_entity, 'title', 'Command Logs')
-                self.chat_logs = int(f"-100{chat_entity.id}")
-
-                success, setup_error = await self._try_setup_group(
-                    chat_entity, 
-                    is_recovery=is_recovery, 
-                    error_text=error_text
-                )
-                
-                if not success:
-                    raise Exception(setup_error)
-                    
-                self._setup_failed = False
-                
-            except Exception as e:
-                logger.error(f"[Logger] Failed to create/setup log group: {e}")
-                self._setup_failed = True
-                await self._send_inline_notification(
-                    self.strings["inline_create_failed"]
-                )
-
-    async def _setup_existing_group(self, chat_entity):
-        try:
-            self.config["LOG_CHAT_ID"] = chat_entity.id
-            self.config["LOG_CHAT_NAME"] = getattr(chat_entity, 'title', 'Log Group')
-            self.chat_logs = int(f"-100{chat_entity.id}")
-
-            success, setup_error = await self._try_setup_group(chat_entity)
-            
-            if success:
-                self._setup_failed = False
-                return True, None
-            else:
-                await self._ensure_log_chat(error_text=setup_error)
-                if self._setup_failed:
-                    return False, setup_error
-                return True, None
-                
-        except Exception as e:
-            return False, str(e)
-
-    async def client_ready(self, client, _):
-        self._client = client
-        self._owner = await client.get_me()
-        saved_id = self.config["LOG_CHAT_ID"]
-
-        if saved_id != 0:
-            try:
-                self.chat_logs = int(f"-100{saved_id}")
-                chat_entity = await client.get_entity(self.chat_logs)
-                self.config["LOG_CHAT_NAME"] = getattr(chat_entity, 'title', 'Log Group')
-
-                try:
-                    await self._send_with_flood_wait(
-                        self.inline.bot.send_message,
-                        self.chat_logs,
-                        self.strings["reloaded"],
-                        parse_mode="HTML"
-                    )
-                    self._setup_failed = False
-                except Exception as e:
-                    try:
-                        bot_user = await self._client.get_entity(self.inline.bot_username)
-                        await self._send_with_flood_wait(
-                            self._client,
-                            InviteToChannelRequest(chat_entity, [bot_user])
-                        )
-                        await self._set_bot_admin(chat_entity)
-                        await self._send_with_flood_wait(
-                            self.inline.bot.send_message,
-                            self.chat_logs,
-                            self.strings["reloaded"],
-                            parse_mode="HTML"
-                        )
-                        self._setup_failed = False
-                    except Exception as invite_error:
-                        await self._ensure_log_chat(error_text=f"Bot invite failed: {invite_error}")
-            except Exception as e:
-                await self._ensure_log_chat(error_text=f"Startup check failed: {e}")
-        else:
-            await self._ensure_log_chat()
-
-    async def _send_log(self, text):
-        if not self.chat_logs:
-            if not self._setup_failed:
-                await self._ensure_log_chat(error_text="Memory empty")
+    async def _send_log(self, text: str):
+        if not self._logger_topic or not self._asset_channel:
             return
 
         try:
             await self._send_with_flood_wait(
                 self.inline.bot.send_message,
-                self.chat_logs,
+                int(f"-100{self._asset_channel}"),
                 text,
                 disable_web_page_preview=True,
-                parse_mode="HTML"
+                parse_mode="HTML",
+                message_thread_id=self._logger_topic.id,
             )
         except Exception as e:
-            error_str = str(e).lower()
-            if "flood" in error_str:
-                return
-            
-            try:
-                chat_entity = await self._client.get_entity(self.config["LOG_CHAT_ID"])
-                bot_user = await self._client.get_entity(self.inline.bot_username)
-                await self._send_with_flood_wait(
-                    self._client,
-                    InviteToChannelRequest(chat_entity, [bot_user])
-                )
-                await self._set_bot_admin(chat_entity)
-                await self._send_with_flood_wait(
-                    self.inline.bot.send_message,
-                    self.chat_logs,
-                    text,
-                    disable_web_page_preview=True,
-                    parse_mode="HTML"
-                )
-            except Exception:
-                if not self._setup_failed:
-                    await self._ensure_log_chat(error_text=e)
-                    try:
-                        await self._send_with_flood_wait(
-                            self.inline.bot.send_message,
-                            self.chat_logs,
-                            text,
-                            disable_web_page_preview=True,
-                            parse_mode="HTML"
-                        )
-                    except Exception:
-                        pass
+            logger.error(f"[Logger] Failed to send log: {e}")
 
     @loader.command(
         ru_doc="Показать справку по командам",
-        en_doc="Show help for commands"
+        en_doc="Show help for commands",
     )
     async def logger(self, message):
         """Show help for commands"""
         args = utils.get_args_raw(message).strip().lower()
-        
+
         if not args:
             await utils.answer(message, self.strings["help"])
             return
-        
+
         parts = args.split()
         cmd = parts[0]
-        
+
         if cmd == "status":
             await self._cmd_status(message)
-        elif cmd == "group":
-            await self._cmd_group(message)
         else:
             await utils.answer(message, self.strings["help"])
 
     async def _cmd_status(self, message):
-        if self.config["LOG_CHAT_ID"] == 0:
-            await utils.answer(message, self.strings["status_no_group"])
+        if not self._logger_topic or not self._asset_channel:
+            await utils.answer(message, self.strings["status_no_topic"])
             return
-        
-        try:
-            chat_entity = await self._client.get_entity(
-                int(f"-100{self.config['LOG_CHAT_ID']}")
-            )
-            group_name = self._escape(getattr(chat_entity, 'title', 'Unknown'))
-            username = self._get_username(chat_entity)
-            username_str = f"@{username}" if username else "—"
-            status = "Active"
-            
-        except Exception:
-            group_name = self.config.get("LOG_CHAT_NAME", "Unknown")
-            username_str = "—"
-            status = "Group unavailable"
-        
-        await utils.answer(message, self.strings["status"].format(
-            group_name=group_name,
-            group_id=self.config["LOG_CHAT_ID"],
-            group_username=username_str,
-            status=status
-        ))
 
-    async def _cmd_group(self, message):
-        if isinstance(message.peer_id, PeerUser):
-            await utils.answer(message, self.strings["group_not_group"])
-            return
-        
-        try:
-            chat = await self._client.get_entity(message.peer_id)
-            
-            if not isinstance(chat, Channel) or not getattr(chat, 'megagroup', False):
-                if not isinstance(chat, Channel):
-                    await utils.answer(message, self.strings["group_not_group"])
-                    return
-            
-            if hasattr(chat, 'admin_rights') and chat.admin_rights:
-                if not chat.admin_rights.add_admins:
-                    await utils.answer(message, self.strings["group_no_rights"])
-                    return
-            elif not getattr(chat, 'creator', False):
-                try:
-                    full = await self._client.get_permissions(chat, self._owner)
-                    if not full.is_admin or not getattr(full, 'add_admins', False):
-                        if not getattr(full, 'is_creator', False):
-                            await utils.answer(message, self.strings["group_no_rights"])
-                            return
-                except Exception:
-                    pass
-            
-            success, error = await self._setup_existing_group(chat)
-            
-            if success:
-                await utils.answer(message, self.strings["group_set"].format(
-                    group_name=self._escape(getattr(chat, 'title', 'Group')),
-                    group_id=chat.id
-                ))
-            else:
-                await utils.answer(message, self.strings["group_error"].format(error=error))
-                
-        except ChatAdminRequiredError:
-            await utils.answer(message, self.strings["group_no_rights"])
-        except Exception as e:
-            await utils.answer(message, self.strings["group_error"].format(error=str(e)))
-
-    def _is_channel_post(self, message, sender):
-        if message.post:
-            return True
-        if isinstance(sender, Channel) and not getattr(sender, "megagroup", False):
-            return True
-        return False
+        await utils.answer(
+            message,
+            self.strings["status"].format(
+                topic_name="Logger",
+                channel_id=self._asset_channel,
+                topic_id=self._logger_topic.id,
+                status="Active",
+            ),
+        )
 
     @loader.watcher(only_commands=True)
     async def watcher(self, message):
         try:
+            if not self._logger_topic or not self._asset_channel:
+                return
+
+            if message.chat_id == self._asset_channel:
+                return
+
             is_dm = isinstance(message.peer_id, PeerUser)
             sender = await message.get_sender()
             if not sender:
                 return
-            if self.config["LOG_CHAT_ID"] and message.chat_id == self.config["LOG_CHAT_ID"]:
-                return
 
             chat = await self._client.get_entity(message.peer_id)
-            
+
             sender_name = self._get_display_name(sender)
             sender_uname = self._format_username_row(sender)
-            
+
             chat_name = self._get_display_name(chat)
             chat_uname = self._format_username_row(chat)
-            
+
             cmd_text = self._escape(message.raw_text)
-            
+
             is_channel = self._is_channel_post(message, sender)
-            
+
             owner_prefix = ""
             if sender.id != self._owner.id and not is_channel:
                 owner_name = self._get_full_name(self._owner)
                 owner_link = self._get_user_link(self._owner.id, owner_name)
-                owner_prefix = self.strings["owner_attention"].format(owner_link=owner_link)
+                owner_prefix = self.strings["owner_attention"].format(
+                    owner_link=owner_link
+                )
 
             if is_dm:
                 is_bot_chat = isinstance(chat, User) and getattr(chat, "bot", False)
-                template = self.strings["log_dm_bot"] if is_bot_chat else self.strings["log_dm_user"]
+                template = (
+                    self.strings["log_dm_bot"]
+                    if is_bot_chat
+                    else self.strings["log_dm_user"]
+                )
                 log_text = template.format(
                     cmd=cmd_text,
                     from_name=sender_name,
                     from_uname=sender_uname,
                     to_name=chat_name,
-                    to_uname=chat_uname
+                    to_uname=chat_uname,
                 )
             elif is_channel:
                 msg_link = self._build_message_link(chat, message)
@@ -666,7 +398,7 @@ class Logger(loader.Module):
                     chat_name=chat_name,
                     chat_id=chat.id,
                     chat_uname=chat_uname,
-                    msg_link=msg_link
+                    msg_link=msg_link,
                 )
             else:
                 msg_link = self._build_message_link(chat, message)
@@ -677,11 +409,11 @@ class Logger(loader.Module):
                     chat_name=chat_name,
                     chat_id=chat.id,
                     chat_uname=chat_uname,
-                    msg_link=msg_link
+                    msg_link=msg_link,
                 )
 
             log_text = owner_prefix + log_text
-
             await self._send_log(log_text)
+
         except Exception as e:
             logger.error(f"[Logger] Watcher error: {e}")
