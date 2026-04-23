@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 # meta developer: FireJester.t.me
 
 import os
@@ -10,6 +10,8 @@ import tempfile
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
+
+MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
 
 
 def _escape(text):
@@ -134,6 +136,13 @@ class Uploader(loader.Module):
             "Use <code>{prefix}upl</code> without args to see supported formats"
             "</blockquote>"
         ),
+        "too_large": (
+            "<b>File too large</b>\n"
+            "<blockquote>"
+            "Max allowed size: 512 MB\n"
+            "File size: <code>{size}</code>"
+            "</blockquote>"
+        ),
         "downloading": "<b>Downloading</b>\n<blockquote><code>{time}</code></blockquote>",
         "uploading": "<b>Uploading to x0.at</b>\n<blockquote><code>{time}</code></blockquote>",
         "done": (
@@ -179,6 +188,13 @@ class Uploader(loader.Module):
             "<b>Неподдерживаемый формат</b>\n"
             "<blockquote>"
             "Используйте <code>{prefix}upl</code> без аргументов для списка форматов"
+            "</blockquote>"
+        ),
+        "too_large": (
+            "<b>Файл слишком большой</b>\n"
+            "<blockquote>"
+            "Максимальный размер: 512 МБ\n"
+            "Размер файла: <code>{size}</code>"
             "</blockquote>"
         ),
         "downloading": "<b>Скачивание</b>\n<blockquote><code>{time}</code></blockquote>",
@@ -285,6 +301,25 @@ class Uploader(loader.Module):
             return filename.rsplit(".", 1)[-1].lower()
         return ""
 
+    def _get_file_size(self, media):
+        """Get file size from Telegram metadata without downloading."""
+        # Document/video/audio/etc
+        doc = getattr(media, "document", None)
+        if doc and hasattr(doc, "size"):
+            return doc.size
+        # Direct document object
+        if hasattr(media, "size") and isinstance(getattr(media, "size"), int):
+            return media.size
+        # Photo — берём размер наибольшего варианта
+        photo = getattr(media, "photo", None)
+        if photo:
+            sizes = getattr(photo, "sizes", []) or []
+            for s in reversed(sizes):
+                sz = getattr(s, "size", None)
+                if isinstance(sz, int) and sz > 0:
+                    return sz
+        return None
+
     @loader.command(
         ru_doc="Реплай на фото/видео/файл - загрузить на x0.at",
         en_doc="Reply to photo/video/file - upload to x0.at",
@@ -307,6 +342,15 @@ class Uploader(loader.Module):
 
         if ext not in ALLOWED_EXTENSIONS:
             await utils.answer(message, self._s("unsupported"))
+            return
+
+        # Проверка размера до скачивания
+        file_size_meta = self._get_file_size(media)
+        if file_size_meta is not None and file_size_meta > MAX_FILE_SIZE:
+            await utils.answer(
+                message,
+                self._s("too_large", size=_format_bytes(file_size_meta)),
+            )
             return
 
         file_type = _detect_type(filename)
