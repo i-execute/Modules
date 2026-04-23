@@ -1,5 +1,6 @@
 __version__ = (2, 0, 2)
 # meta developer: FireJester.t.me
+# requires: qrcode[pil] Pillow
 
 import io
 import logging
@@ -8,8 +9,6 @@ import hashlib
 import base64
 import struct
 import ipaddress
-import subprocess
-import sys
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -21,27 +20,6 @@ from .. import loader, utils
 logger = logging.getLogger(__name__)
 
 QR_REFRESH = 15
-
-
-def _ensure_libs():
-    libs = {"qrcode": "qrcode[pil]", "PIL": "Pillow"}
-    for mod, pkg in libs.items():
-        try:
-            __import__(mod)
-        except ImportError:
-            logger.info("[QRAuth] Installing %s...", pkg)
-            try:
-                subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install", pkg, "-q"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                logger.info("[QRAuth] %s installed", pkg)
-            except Exception as e:
-                logger.error("[QRAuth] Failed to install %s: %s", pkg, e)
-
-
-_ensure_libs()
 
 
 def _escape(text):
