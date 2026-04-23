@@ -1,4 +1,4 @@
-__version__ = (2, 1, 0)
+__version__ = (2, 1, 1)
 # meta developer: FireJester.t.me
 
 import asyncio
@@ -40,13 +40,13 @@ class Deleter(loader.Module):
         "no_reply": "<b>Error:</b> Reply to a message",
         "no_user": "<b>Error:</b> User not found",
         "no_perms": "<b>Error:</b> Not enough permissions to delete some messages",
-        "error": "<b>Error:</b> {error}",
-        "done_me": "<b>✅ All your messages in chat <i>{chat}</i> have been deleted.</b>",
+        "error": "<b>Error:</b>\n<blockquote>{error}</blockquote>",
+        "done_me": "<b>All your messages in chat</b>\n<blockquote>{chat}</blockquote>\n<b>have been deleted.</b>",
         "done_leave": (
-            "<b>👋 Left chat: <i>{chat}</i></b>\n"
-            "<b>🗑 Deleted messages:</b> <code>{count}</code>\n"
-            "<b>📅 First message date:</b> <code>{first_date}</code>\n"
-            "<b>📅 Last message date:</b> <code>{last_date}</code>"
+            "<b>Left chat:</b>\n<blockquote>{chat}</blockquote>\n"
+            "<b>Deleted messages:</b> <code>{count}</code>\n"
+            "<b>First message date:</b> <code>{first_date}</code>\n"
+            "<b>Last message date:</b> <code>{last_date}</code>"
         ),
     }
 
@@ -69,13 +69,13 @@ class Deleter(loader.Module):
         "no_reply": "<b>Ошибка:</b> Ответьте на сообщение",
         "no_user": "<b>Ошибка:</b> Пользователь не найден",
         "no_perms": "<b>Ошибка:</b> Недостаточно прав для удаления некоторых сообщений",
-        "error": "<b>Ошибка:</b> {error}",
-        "done_me": "<b>✅ Все ваши сообщения в чате <i>{chat}</i> удалены.</b>",
+        "error": "<b>Ошибка:</b>\n<blockquote>{error}</blockquote>",
+        "done_me": "<b>Все ваши сообщения в чате</b>\n<blockquote>{chat}</blockquote>\n<b>удалены.</b>",
         "done_leave": (
-            "<b>👋 Вышел из чата: <i>{chat}</i></b>\n"
-            "<b>🗑 Удалено сообщений:</b> <code>{count}</code>\n"
-            "<b>📅 Дата первого сообщения:</b> <code>{first_date}</code>\n"
-            "<b>📅 Дата последнего сообщения:</b> <code>{last_date}</code>"
+            "<b>Вышел из чата:</b>\n<blockquote>{chat}</blockquote>\n"
+            "<b>Удалено сообщений:</b> <code>{count}</code>\n"
+            "<b>Дата первого сообщения:</b> <code>{first_date}</code>\n"
+            "<b>Дата последнего сообщения:</b> <code>{last_date}</code>"
         ),
     }
 
@@ -92,7 +92,6 @@ class Deleter(loader.Module):
         self._asset_channel = None
 
     async def client_ready(self):
-        # Получаем ID канала с логами из БД
         self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
 
         if not self._asset_channel:
@@ -106,15 +105,13 @@ class Deleter(loader.Module):
                 self._asset_channel,
                 "Deleter",
                 description="Logs of message deletion by Deleter module.",
-                icon_emoji_id=5278890005038284362,  # 🗑 emoji id (можно заменить)
+                icon_emoji_id=5188466187448650036,
             )
         except Exception as e:
             logger.error(f"[Deleter] Failed to create/get forum topic: {e}")
 
     async def _send_log(self, text: str):
-        """Отправить сообщение в топик Deleter в форуме логов."""
         if not self._deleter_topic or not self._asset_channel:
-            # fallback: отправить себе
             try:
                 me = await self._client.get_me()
                 await self._client.send_message(me.id, text, parse_mode="html")
@@ -239,24 +236,23 @@ class Deleter(loader.Module):
     async def _delete_me(self, message: Message, leave: bool = False):
         chat_id = message.chat_id
         client = message.client
+        cmd_msg_id = message.id
 
         chat_name = await self._get_chat_name(message)
 
-        # Удаляем командное сообщение сразу
+        # Удаляем командное сообщение
         await message.delete()
 
         try:
             if leave:
-                await self._delete_me_and_leave(client, chat_id, chat_name)
+                await self._delete_me_and_leave(client, chat_id, chat_name, cmd_msg_id)
             else:
                 await self._delete_me_simple(client, chat_id, chat_name)
-
         except Exception as e:
             logger.error(f"[Deleter] del me error: {e}")
             await self._send_log(self.strings["error"].format(error=str(e)))
 
     async def _delete_me_simple(self, client, chat_id, chat_name: str):
-        """Удалить все свои сообщения без выхода из чата."""
         try:
             ids = []
             async for msg in client.iter_messages(chat_id, from_user="me"):
@@ -269,7 +265,6 @@ class Deleter(loader.Module):
                 return
 
             await self._bulk_delete(client, chat_id, ids)
-
             await self._send_log(
                 self.strings["done_me"].format(chat=chat_name)
             )
@@ -278,52 +273,49 @@ class Deleter(loader.Module):
             logger.error(f"[Deleter] _delete_me_simple error: {e}")
             await self._send_log(self.strings["error"].format(error=str(e)))
 
-    async def _delete_me_and_leave(self, client, chat_id, chat_name: str):
-        """
-        Логика .del me -f:
-        1. Отправить Sayonara.mp4 в чат
-        2. Собрать все свои сообщения КРОМЕ видео
-        3. Удалить их
-        4. Выйти из чата
-        5. Написать лог в топик
-        """
+    async def _delete_me_and_leave(self, client, chat_id, chat_name: str, cmd_msg_id: int):
         try:
-            # 1. Отправляем видео
-            sayonara_msg = await client.send_file(
-                chat_id,
-                SAYONARA_URL,
-            )
-            sayonara_msg_id = sayonara_msg.id
-
-            # Небольшая пауза чтобы видео успело отправиться
-            await asyncio.sleep(1)
-
-            # 2. Собираем все свои сообщения кроме sayonara
-            ids = []
+            # 1. Сначала собираем ВСЕ свои сообщения до отправки видео
+            # чтобы точно не пропустить ничего
+            ids_to_delete = []
             first_date = None
             last_date = None
 
             async for msg in client.iter_messages(chat_id, from_user="me"):
-                if msg.id == sayonara_msg_id:
+                # Пропускаем командное сообщение - оно уже удалено,
+                # но на всякий случай исключаем
+                if msg.id == cmd_msg_id:
                     continue
-                ids.append(msg.id)
-
-                # iter_messages идёт от новых к старым
-                # значит последнее по времени — первое в итерации (кроме sayonara)
+                ids_to_delete.append(msg.id)
                 if last_date is None:
                     last_date = msg.date
-                first_date = msg.date  # будет перезаписываться, останется самое старое
+                first_date = msg.date
 
-            count = len(ids)
+            count = len(ids_to_delete)
 
-            # 3. Удаляем
-            if ids:
-                await self._bulk_delete(client, chat_id, ids)
+            # 2. Отправляем Sayonara видео
+            try:
+                sayonara_msg = await client.send_file(
+                    chat_id,
+                    SAYONARA_URL,
+                )
+                sayonara_msg_id = sayonara_msg.id
+            except Exception as e:
+                logger.error(f"[Deleter] Failed to send Sayonara: {e}")
+                sayonara_msg_id = None
+
+            # Небольшая пауза
+            await asyncio.sleep(1)
+
+            # 3. Удаляем все собранные сообщения
+            # (видео мы НЕ добавляли в список - оно было собрано до отправки)
+            if ids_to_delete:
+                await self._bulk_delete(client, chat_id, ids_to_delete)
 
             # 4. Выходим из чата
             await self._leave_chat(client, chat_id)
 
-            # 5. Пишем лог
+            # 5. Лог
             def fmt_date(d):
                 if d is None:
                     return "—"
