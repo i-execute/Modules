@@ -98,7 +98,7 @@ def _parse_time(s):
 
 @loader.tds
 class ChatRecovery(loader.Module):
-    """Recover deleted chat history between two accounts"""
+    """Recover chat history between two accounts if one was deleted..."""
 
     strings = {
         "name": "ChatRecovery",

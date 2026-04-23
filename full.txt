@@ -3,7 +3,7 @@ ChatRecovery
 DeleteMusic
 Deleter
 DevTool
-GBan
+AdminTool
 Grabber
 Info
 InlineDL

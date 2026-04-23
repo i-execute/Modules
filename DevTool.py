@@ -18,7 +18,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-BANNER = "https://github.com/FireJester/Modules/raw/main/Assets/DevTool/Inline_query.png"
+BANNER = "https://raw.githubusercontent.com/FireJester/Modules/main/Assets/DevTool/Inline_query.png"
 TL_BASE = "https://tl.telethon.dev"
 METHODS_CACHE_TTL = 86400
 DETAIL_CACHE_TTL = 3600

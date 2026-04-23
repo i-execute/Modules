@@ -62,7 +62,7 @@ def _in_docker():
 
 @loader.tds
 class XRay(loader.Module):
-    """XRay VLESS+Reality VPN server manager"""
+    """Run VPN on your VPS server (VLESS + reality)"""
 
     strings = {
         "name": "XRay",

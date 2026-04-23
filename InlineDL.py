@@ -1,4 +1,4 @@
-__version__ = (1, 6, 0)
+__version__ = (1, 9, 0)
 # meta developer: FireJester.t.me
 
 import re
@@ -58,14 +58,14 @@ def detect_platform(text):
 def make_kk_url(platform, url):
     if platform == "instagram":
         return re.sub(
-            r"(https?://(?:www\.)?)instagram\.com",
-            r"\1kksave.com",
+            r"https?://(?:www\.)?instagram\.com",
+            "https://kksave.com",
             url,
         )
     if platform == "tiktok":
         return re.sub(
-            r"(https?://(?:(?:vm|vt|www)\.)?)tiktok\.com",
-            r"\1kksave.com",
+            r"https?://(?:(?:vm|vt|www)\.)?tiktok\.com",
+            "https://kksave.com",
             url,
         )
     return url
@@ -91,15 +91,15 @@ class InlineDL(loader.Module):
 
     strings_ru = {
         "hint_title": "InlineDL",
-        "hint_desc": "Вставьте ссылку Instagram или TikTok",
-        "hint_msg": "<b>InlineDL:</b> Вставьте ссылку Instagram или TikTok",
-        "invalid_title": "Неверная ссылка",
-        "invalid_desc": "Не удалось распознать ссылку Instagram или TikTok",
-        "invalid_msg": "<b>InlineDL:</b> Неверная ссылка. Поддерживаются: Instagram, TikTok",
+        "hint_desc": "\u0412\u0441\u0442\u0430\u0432\u044c\u0442\u0435 \u0441\u0441\u044b\u043b\u043a\u0443 Instagram \u0438\u043b\u0438 TikTok",
+        "hint_msg": "<b>InlineDL:</b> \u0412\u0441\u0442\u0430\u0432\u044c\u0442\u0435 \u0441\u0441\u044b\u043b\u043a\u0443 Instagram \u0438\u043b\u0438 TikTok",
+        "invalid_title": "\u041d\u0435\u0432\u0435\u0440\u043d\u0430\u044f \u0441\u0441\u044b\u043b\u043a\u0430",
+        "invalid_desc": "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0440\u0430\u0441\u043f\u043e\u0437\u043d\u0430\u0442\u044c \u0441\u0441\u044b\u043b\u043a\u0443 Instagram \u0438\u043b\u0438 TikTok",
+        "invalid_msg": "<b>InlineDL:</b> \u041d\u0435\u0432\u0435\u0440\u043d\u0430\u044f \u0441\u0441\u044b\u043b\u043a\u0430. \u041f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u044e\u0442\u0441\u044f: Instagram, TikTok",
         "ready_ig": "Instagram",
         "ready_tt": "TikTok",
-        "ready_desc": "Нажмите чтобы скачать",
-        "err_title": "Ошибка",
+        "ready_desc": "\u041d\u0430\u0436\u043c\u0438\u0442\u0435 \u0447\u0442\u043e\u0431\u044b \u0441\u043a\u0430\u0447\u0430\u0442\u044c",
+        "err_title": "\u041e\u0448\u0438\u0431\u043a\u0430",
     }
 
     def __init__(self):
@@ -145,6 +145,8 @@ class InlineDL(loader.Module):
                         thumbnail_url=thumb,
                         title=title,
                         description=self.strings["ready_desc"],
+                        video_width=1080,
+                        video_height=1920,
                     )
                 ],
                 cache_time=0,

@@ -151,11 +151,11 @@ async def _bulk_delete(client, chat_id, msg_ids: list) -> int:
 
 
 @loader.tds
-class GBan(loader.Module):
-    """Global ban, mute and delete across all chats where you are admin"""
+class AdminTool(loader.Module):
+    """Ban, mute and delete across all chats where you are admin - available global ban and mute"""
 
     strings = {
-        "name": "GBan",
+        "name": "AdminTool",
         "no_args": "<b>Error:</b> Provide a user (reply, @username or ID)",
         "no_user": "<b>Error:</b> User not found",
         "no_access": "<b>Error:</b> No access hash for this user ID. Try using @username instead",

@@ -38,7 +38,7 @@ PAUSE_DURATION = 5
 
 @loader.tds
 class Robber(loader.Module):
-    """Steal channels and stories"""
+    """Fully steal channels and stories, support for private channels, look config"""
 
     strings = {
         "name": "Robber",

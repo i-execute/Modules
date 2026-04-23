@@ -42,7 +42,7 @@ def _safe_disconnect(client):
 
 @loader.tds
 class Session(loader.Module):
-    """Session manager for Telegram. Need access to .session files"""
+    """Create new session files/strings or HEX. Need unexternal flag for sending .session files"""
 
     strings = {
         "name": "Session",

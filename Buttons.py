@@ -12,7 +12,7 @@ _URL_PATTERN = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
 
 @loader.tds
 class Buttons(loader.Module):
-    """Inline buttons constructor"""
+    """Inline constructor for sending message with buttons"""
 
     strings = {
         "name": "Buttons",

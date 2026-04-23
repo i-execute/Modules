@@ -43,7 +43,7 @@ class GetSavedMusic(tlobject.TLRequest):
 
 @loader.tds
 class DeleteMusic(loader.Module):
-    """Delete music in your profile"""
+    """Delete all music in your profile"""
 
     strings = {
         "name": "DeleteMusic",

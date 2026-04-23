@@ -121,7 +121,7 @@ class AccountFloodError(Exception):
 
 @loader.tds
 class Manager(loader.Module):
-    """Multi-account session manager with cleanup capabilities"""
+    """Multi-account session manager with cleanup capabilities (if u wanna clean lzt account or preparing account for botnet usage)"""
 
     strings = {
         "name": "Manager",

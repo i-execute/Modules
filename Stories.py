@@ -12,7 +12,7 @@ from .. import loader, utils
 
 @loader.tds
 class Stories(loader.Module):
-    """Manage your Telegram stories"""
+    """Post photo in stories like grid, make albums, post new photos in early created albums and more other"""
 
     strings = {
         "name": "Stories",
