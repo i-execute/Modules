@@ -1,4 +1,4 @@
-__version__ = (2, 0, 5)
+__version__ = (2, 1, 0)
 # meta developer: FireJester.t.me
 
 import asyncio
@@ -12,6 +12,8 @@ from telethon.tl.types import Message, User
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
+
+SAYONARA_URL = "https://raw.githubusercontent.com/FireJester/Modules/main/Assets/Deleter/Sayonara.mp4"
 
 
 @loader.tds
@@ -39,7 +41,13 @@ class Deleter(loader.Module):
         "no_user": "<b>Error:</b> User not found",
         "no_perms": "<b>Error:</b> Not enough permissions to delete some messages",
         "error": "<b>Error:</b> {error}",
-        "done_me": "<b>All your messages in chat <i>{chat}</i> have been deleted.</b>",
+        "done_me": "<b>✅ All your messages in chat <i>{chat}</i> have been deleted.</b>",
+        "done_leave": (
+            "<b>👋 Left chat: <i>{chat}</i></b>\n"
+            "<b>🗑 Deleted messages:</b> <code>{count}</code>\n"
+            "<b>📅 First message date:</b> <code>{first_date}</code>\n"
+            "<b>📅 Last message date:</b> <code>{last_date}</code>"
+        ),
     }
 
     strings_ru = {
@@ -62,13 +70,67 @@ class Deleter(loader.Module):
         "no_user": "<b>Ошибка:</b> Пользователь не найден",
         "no_perms": "<b>Ошибка:</b> Недостаточно прав для удаления некоторых сообщений",
         "error": "<b>Ошибка:</b> {error}",
-        "done_me": "<b>Все ваши сообщения в чате <i>{chat}</i> удалены.</b>",
+        "done_me": "<b>✅ Все ваши сообщения в чате <i>{chat}</i> удалены.</b>",
+        "done_leave": (
+            "<b>👋 Вышел из чата: <i>{chat}</i></b>\n"
+            "<b>🗑 Удалено сообщений:</b> <code>{count}</code>\n"
+            "<b>📅 Дата первого сообщения:</b> <code>{first_date}</code>\n"
+            "<b>📅 Дата последнего сообщения:</b> <code>{last_date}</code>"
+        ),
     }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "TIMEZONE_OFFSET", 3, "UTC timezone. For .del today command",
+            loader.ConfigValue(
+                "TIMEZONE_OFFSET",
+                3,
+                doc="UTC timezone offset. Used for .del today command",
+                validator=loader.validators.Integer(),
+            ),
         )
+        self._deleter_topic = None
+        self._asset_channel = None
+
+    async def client_ready(self):
+        # Получаем ID канала с логами из БД
+        self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
+
+        if not self._asset_channel:
+            logger.warning("[Deleter] heroku.forums channel_id not found in DB, notifications will be disabled.")
+            return
+
+        try:
+            self._deleter_topic = await utils.asset_forum_topic(
+                self._client,
+                self._db,
+                self._asset_channel,
+                "Deleter",
+                description="Logs of message deletion by Deleter module.",
+                icon_emoji_id=5278890005038284362,  # 🗑 emoji id (можно заменить)
+            )
+        except Exception as e:
+            logger.error(f"[Deleter] Failed to create/get forum topic: {e}")
+
+    async def _send_log(self, text: str):
+        """Отправить сообщение в топик Deleter в форуме логов."""
+        if not self._deleter_topic or not self._asset_channel:
+            # fallback: отправить себе
+            try:
+                me = await self._client.get_me()
+                await self._client.send_message(me.id, text, parse_mode="html")
+            except Exception as e:
+                logger.error(f"[Deleter] Failed to send fallback log: {e}")
+            return
+
+        try:
+            await self.inline.bot.send_message(
+                int(f"-100{self._asset_channel}"),
+                text,
+                parse_mode="HTML",
+                message_thread_id=self._deleter_topic.id,
+            )
+        except Exception as e:
+            logger.error(f"[Deleter] Failed to send log to topic: {e}")
 
     async def _bulk_delete(self, client, chat_id, msg_ids: list) -> tuple:
         deleted = 0
@@ -174,92 +236,110 @@ class Deleter(loader.Module):
             pass
         return str(message.chat_id)
 
-    async def _notify_done(self, client, chat_name: str):
-        try:
-            await client.inline_query(
-                "@hikka_userbot_inline_helper_bot",
-                self.strings["done_me"].format(chat=chat_name),
-            )
-        except Exception:
-            pass
-        try:
-            me = await client.get_me()
-            await client.send_message(
-                me.id,
-                self.strings["done_me"].format(chat=chat_name),
-            )
-        except Exception:
-            pass
-
     async def _delete_me(self, message: Message, leave: bool = False):
         chat_id = message.chat_id
-        cmd_msg_id = message.id
+        client = message.client
 
+        chat_name = await self._get_chat_name(message)
+
+        # Удаляем командное сообщение сразу
         await message.delete()
 
         try:
-            chat_name = await _get_chat_name_static(message)
-        except Exception:
-            chat_name = str(chat_id)
-
-        try:
-            ids = []
-            async for msg in message.client.iter_messages(chat_id, from_user="me"):
-                ids.append(msg.id)
-
-            if not ids:
-                await self._notify_done(message.client, chat_name)
-                if leave:
-                    await self._leave_chat(message.client, chat_id)
-                return
-
-            chunk_size = random.randint(90, 110)
-            first_chunk = ids[:chunk_size]
-            rest = ids[chunk_size:]
-
-            failed = 0
-
-            try:
-                await message.client.delete_messages(chat_id, first_chunk)
-            except Exception:
-                failed += len(first_chunk)
-
-            chunk = []
-            chunk_size = random.randint(90, 110)
-
-            for mid in rest:
-                chunk.append(mid)
-                if len(chunk) >= chunk_size:
-                    await asyncio.sleep(random.uniform(0.5, 1.5))
-                    try:
-                        await message.client.delete_messages(chat_id, chunk)
-                    except Exception:
-                        failed += len(chunk)
-                    chunk.clear()
-                    chunk_size = random.randint(90, 110)
-
-            if chunk:
-                await asyncio.sleep(random.uniform(0.5, 1.5))
-                try:
-                    await message.client.delete_messages(chat_id, chunk)
-                except Exception:
-                    failed += len(chunk)
-
-            await self._notify_done(message.client, chat_name)
-
             if leave:
-                await self._leave_chat(message.client, chat_id)
+                await self._delete_me_and_leave(client, chat_id, chat_name)
+            else:
+                await self._delete_me_simple(client, chat_id, chat_name)
 
         except Exception as e:
             logger.error(f"[Deleter] del me error: {e}")
-            try:
-                me = await message.client.get_me()
-                await message.client.send_message(
-                    me.id,
-                    self.strings["error"].format(error=str(e)),
+            await self._send_log(self.strings["error"].format(error=str(e)))
+
+    async def _delete_me_simple(self, client, chat_id, chat_name: str):
+        """Удалить все свои сообщения без выхода из чата."""
+        try:
+            ids = []
+            async for msg in client.iter_messages(chat_id, from_user="me"):
+                ids.append(msg.id)
+
+            if not ids:
+                await self._send_log(
+                    self.strings["done_me"].format(chat=chat_name)
                 )
-            except Exception:
-                pass
+                return
+
+            await self._bulk_delete(client, chat_id, ids)
+
+            await self._send_log(
+                self.strings["done_me"].format(chat=chat_name)
+            )
+
+        except Exception as e:
+            logger.error(f"[Deleter] _delete_me_simple error: {e}")
+            await self._send_log(self.strings["error"].format(error=str(e)))
+
+    async def _delete_me_and_leave(self, client, chat_id, chat_name: str):
+        """
+        Логика .del me -f:
+        1. Отправить Sayonara.mp4 в чат
+        2. Собрать все свои сообщения КРОМЕ видео
+        3. Удалить их
+        4. Выйти из чата
+        5. Написать лог в топик
+        """
+        try:
+            # 1. Отправляем видео
+            sayonara_msg = await client.send_file(
+                chat_id,
+                SAYONARA_URL,
+            )
+            sayonara_msg_id = sayonara_msg.id
+
+            # Небольшая пауза чтобы видео успело отправиться
+            await asyncio.sleep(1)
+
+            # 2. Собираем все свои сообщения кроме sayonara
+            ids = []
+            first_date = None
+            last_date = None
+
+            async for msg in client.iter_messages(chat_id, from_user="me"):
+                if msg.id == sayonara_msg_id:
+                    continue
+                ids.append(msg.id)
+
+                # iter_messages идёт от новых к старым
+                # значит последнее по времени — первое в итерации (кроме sayonara)
+                if last_date is None:
+                    last_date = msg.date
+                first_date = msg.date  # будет перезаписываться, останется самое старое
+
+            count = len(ids)
+
+            # 3. Удаляем
+            if ids:
+                await self._bulk_delete(client, chat_id, ids)
+
+            # 4. Выходим из чата
+            await self._leave_chat(client, chat_id)
+
+            # 5. Пишем лог
+            def fmt_date(d):
+                if d is None:
+                    return "—"
+                return d.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+            log_text = self.strings["done_leave"].format(
+                chat=chat_name,
+                count=count,
+                first_date=fmt_date(first_date),
+                last_date=fmt_date(last_date),
+            )
+            await self._send_log(log_text)
+
+        except Exception as e:
+            logger.error(f"[Deleter] _delete_me_and_leave error: {e}")
+            await self._send_log(self.strings["error"].format(error=str(e)))
 
     async def _leave_chat(self, client, chat_id):
         try:
@@ -375,7 +455,7 @@ class Deleter(loader.Module):
         chat_id = message.chat_id
         cmd_msg_id = message.id
 
-        offset = self.config.get("TIMEZONE_OFFSET", 3)
+        offset = self.config["TIMEZONE_OFFSET"]
         tz = timezone(timedelta(hours=offset))
         now = datetime.now(tz)
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -428,18 +508,3 @@ class Deleter(loader.Module):
             await message.client.send_message(
                 chat_id, self.strings["error"].format(error=str(e))
             )
-
-
-async def _get_chat_name_static(message: Message) -> str:
-    try:
-        entity = await message.client.get_entity(message.chat_id)
-        if hasattr(entity, "title") and entity.title:
-            return entity.title
-        if hasattr(entity, "first_name"):
-            name = entity.first_name or ""
-            if hasattr(entity, "last_name") and entity.last_name:
-                name = name + " " + entity.last_name
-            return name.strip() or str(message.chat_id)
-    except Exception:
-        pass
-    return str(message.chat_id)
