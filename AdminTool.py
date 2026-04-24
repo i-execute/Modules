@@ -1,4 +1,4 @@
-__version__ = (3, 1, 0)
+__version__ = (3, 1, 1)
 # meta developer: I_execute.t.me
 
 import logging
@@ -115,6 +115,15 @@ def _extract_username(user: User) -> str:
             if getattr(u, "active", False):
                 return u.username
     return None
+
+
+def _has_ban_right(entity) -> bool:
+    if isinstance(entity, Chat) and getattr(entity, "creator", False):
+        return True
+    ar = getattr(entity, "admin_rights", None)
+    if not ar:
+        return False
+    return getattr(ar, "ban_users", False)
 
 
 async def _resolve_target(client, message: Message):
@@ -290,14 +299,12 @@ class AdminTool(loader.Module):
             if isinstance(entity, (ChannelForbidden, ChatForbidden)):
                 continue
             if isinstance(entity, Chat):
-                ar = entity.admin_rights
-                if ar and getattr(ar, "ban_users", False):
+                if _has_ban_right(entity):
                     result.append(("group", entity.id))
             elif isinstance(entity, Channel):
                 if entity.id in skip:
                     continue
-                ar = entity.admin_rights
-                if ar and getattr(ar, "ban_users", False):
+                if _has_ban_right(entity):
                     if getattr(entity, "megagroup", False):
                         result.append(("group", entity.id))
                     elif getattr(entity, "broadcast", False):
@@ -312,16 +319,14 @@ class AdminTool(loader.Module):
             if isinstance(entity, (ChannelForbidden, ChatForbidden)):
                 continue
             if isinstance(entity, Chat):
-                ar = entity.admin_rights
-                if ar and getattr(ar, "ban_users", False):
+                if _has_ban_right(entity):
                     result.append(entity.id)
             elif isinstance(entity, Channel):
                 if entity.id in skip:
                     continue
                 if not getattr(entity, "megagroup", False):
                     continue
-                ar = entity.admin_rights
-                if ar and getattr(ar, "ban_users", False):
+                if _has_ban_right(entity):
                     result.append(entity.id)
         return result
 
@@ -353,8 +358,7 @@ class AdminTool(loader.Module):
                 total += 1
                 if getattr(entity, "creator", False):
                     created += 1
-                ar = entity.admin_rights
-                if ar and getattr(ar, "ban_users", False):
+                if _has_ban_right(entity):
                     can_mute += 1
                     can_ban += 1
 
@@ -364,8 +368,7 @@ class AdminTool(loader.Module):
                 total += 1
                 if getattr(entity, "creator", False):
                     created += 1
-                ar = entity.admin_rights
-                if ar and getattr(ar, "ban_users", False):
+                if _has_ban_right(entity):
                     can_ban += 1
                     if getattr(entity, "megagroup", False):
                         can_mute += 1
