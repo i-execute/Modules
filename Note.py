@@ -1,4 +1,4 @@
-__version__ = (3, 0, 0)
+__version__ = (3, 0, 1)
 # meta developer: I_execute.t.me
 
 import logging
@@ -224,12 +224,37 @@ class Note(loader.Module):
             ids=msg_ids,
         )
 
+    def _collect_ids_from_note(self, note_groups):
+        all_ids = []
+        for group in note_groups:
+            if isinstance(group, list):
+                for item in group:
+                    if isinstance(item, int):
+                        all_ids.append(item)
+                    elif isinstance(item, list):
+                        all_ids.extend(i for i in item if isinstance(i, int))
+            elif isinstance(group, int):
+                all_ids.append(group)
+        return all_ids
+
     async def _delete_messages_from_storage(self, msg_ids):
+        """
+        Удаляет только конкретные сообщения по их ID из storage-канала.
+        Никогда не вызывается с пустым списком.
+        """
+        if not msg_ids:
+            logger.debug("[Note] _delete_messages_from_storage: пустой список, пропускаем.")
+            return
+
         storage_chat_id = int(f"-100{self._asset_channel}")
+        unique_ids = list(set(msg_ids))
+        logger.debug(f"[Note] Удаляем сообщения {unique_ids} из {storage_chat_id}")
+
         await self._send_with_flood_wait(
             self._client.delete_messages,
             storage_chat_id,
-            msg_ids,
+            unique_ids,
+            revoke=True,
         )
 
     @loader.command(
@@ -317,18 +342,13 @@ class Note(loader.Module):
                 if name not in notes:
                     await utils.answer(message, self._get_str("not_found").format(name=name))
                     return
-
-                all_ids = []
-                for group in notes[name]:
-                    if isinstance(group, list):
-                        all_ids.extend(group)
-                    else:
-                        all_ids.append(group)
+                ids_to_delete = self._collect_ids_from_note(notes[name])
+                logger.debug(f"[Note] remove '{name}': удаляем ID {ids_to_delete}")
 
                 try:
-                    await self._delete_messages_from_storage(all_ids)
-                except Exception:
-                    pass
+                    await self._delete_messages_from_storage(ids_to_delete)
+                except Exception as e:
+                    logger.warning(f"[Note] Ошибка при удалении файлов заметки '{name}': {e}")
 
                 del notes[name]
                 self.config["NOTES"] = notes
@@ -339,19 +359,16 @@ class Note(loader.Module):
                 if not notes:
                     await utils.answer(message, self._get_str("rmall_empty"))
                     return
-
                 all_ids = []
-                for groups in notes.values():
-                    for group in groups:
-                        if isinstance(group, list):
-                            all_ids.extend(group)
-                        else:
-                            all_ids.append(group)
+                for note_name, note_groups in notes.items():
+                    ids = self._collect_ids_from_note(note_groups)
+                    logger.debug(f"[Note] rmall: заметка '{note_name}' → ID {ids}")
+                    all_ids.extend(ids)
 
                 try:
                     await self._delete_messages_from_storage(all_ids)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[Note] Ошибка при удалении всех файлов: {e}")
 
                 self.config["NOTES"] = {}
                 await utils.answer(message, self._get_str("rmall_done"))
