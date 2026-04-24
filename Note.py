@@ -1,4 +1,4 @@
-__version__ = (2, 2, 9)
+__version__ = (3, 0, 0)
 # meta developer: FireJester.t.me
 
 import logging
@@ -21,31 +21,36 @@ class Note(loader.Module):
             "<code>{prefix}note create [name]</code> - save replied media\n"
             "<code>{prefix}note add [name]</code> - add media to existing note\n"
             "<code>{prefix}note remove [name]</code> - delete note\n"
+            "<code>{prefix}note rmall</code> - delete all notes\n"
             "<code>{prefix}note list</code> - list all notes\n"
             "<code>{prefix}note [name]</code> - post note"
         ),
         "created": "<b>Note</b> <code>{name}</code> <b>saved!</b>",
-        "created_prem": "<emoji document_id=5265214770537075100>\U0001f920</emoji><emoji document_id=5265253528321954044>\U0001f920</emoji> <b>Note</b> <code>{name}</code> <b>saved!</b>",
+        "created_prem": "<tg-emoji emoji-id=5431518146211125713>😎</tg-emoji> <b>Note</b> <code>{name}</code> <b>saved!</b>",
         "added": "<b>Media added to note</b> <code>{name}</code><b>!</b>",
-        "added_prem": "<emoji document_id=5265214770537075100>\U0001f920</emoji><emoji document_id=5265253528321954044>\U0001f920</emoji> <b>Media added to note</b> <code>{name}</code><b>!</b>",
+        "added_prem": "<tg-emoji emoji-id=5431518146211125713>😎</tg-emoji> <b>Media added to note</b> <code>{name}</code><b>!</b>",
         "no_media": "<b>Error: reply to media!</b>",
-        "no_media_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Error: reply to media!</b>",
+        "no_media_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Error: reply to media!</b>",
         "no_reply": "<b>Error: reply to a message!</b>",
-        "no_reply_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Error: reply to a message!</b>",
+        "no_reply_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Error: reply to a message!</b>",
         "name_required": "<b>Error: specify a name!</b>",
-        "name_required_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Error: specify a name!</b>",
+        "name_required_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Error: specify a name!</b>",
         "exists": "<b>Error: note <code>{name}</code> already exists!</b>",
-        "exists_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Error: note <code>{name}</code> already exists!</b>",
+        "exists_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Error: note <code>{name}</code> already exists!</b>",
         "not_found": "<b>Error: note <code>{name}</code> not found!</b>",
-        "not_found_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Error: note <code>{name}</code> not found!</b>",
+        "not_found_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Error: note <code>{name}</code> not found!</b>",
         "removed": "<b>Note <code>{name}</code> removed!</b>",
-        "removed_prem": "<emoji document_id=5265050947599508098>\u2b50</emoji> <b>Note <code>{name}</code> removed!</b>",
+        "removed_prem": "<tg-emoji emoji-id=5429351975160421386>😸</tg-emoji> <b>Note <code>{name}</code> removed!</b>",
+        "rmall_done": "<b>All notes removed!</b>",
+        "rmall_done_prem": "<tg-emoji emoji-id=5429351975160421386>😸</tg-emoji> <b>All notes removed!</b>",
+        "rmall_empty": "<b>No notes to remove.</b>",
+        "rmall_empty_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>No notes to remove.</b>",
         "list_header": "<b>Your notes list:</b>\n<blockquote expandable>{notes}</blockquote>",
-        "list_header_prem": "<emoji document_id=5264781623085276513>\u2764\ufe0f</emoji> <b>Your notes list:</b>\n<blockquote expandable>{notes}</blockquote>",
+        "list_header_prem": "<tg-emoji emoji-id=5429203764428971590>😠</tg-emoji> <b>Your notes list:</b>\n<blockquote expandable>{notes}</blockquote>",
         "no_notes": "<b>No notes saved yet.</b>",
-        "no_notes_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>No notes saved yet.</b>",
+        "no_notes_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>No notes saved yet.</b>",
         "storage_error": "<b>Error interacting with storage. Please try again.</b>",
-        "storage_error_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Storage error. Please try again.</b>",
+        "storage_error_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Storage error. Please try again.</b>",
     }
 
     strings_ru = {
@@ -54,31 +59,36 @@ class Note(loader.Module):
             "<code>{prefix}note create [название]</code> - сохранить медиа из реплая\n"
             "<code>{prefix}note add [название]</code> - добавить медиа к существующей заметке\n"
             "<code>{prefix}note remove [название]</code> - удалить заметку\n"
+            "<code>{prefix}note rmall</code> - удалить все заметки\n"
             "<code>{prefix}note list</code> - список всех заметок\n"
             "<code>{prefix}note [название]</code> - отправить заметку"
         ),
         "created": "<b>Заметка</b> <code>{name}</code> <b>сохранена!</b>",
-        "created_prem": "<emoji document_id=5265214770537075100>\U0001f920</emoji><emoji document_id=5265253528321954044>\U0001f920</emoji> <b>Заметка</b> <code>{name}</code> <b>сохранена!</b>",
+        "created_prem": "<tg-emoji emoji-id=5431518146211125713>😎</tg-emoji> <b>Заметка</b> <code>{name}</code> <b>сохранена!</b>",
         "added": "<b>Медиа добавлено в заметку</b> <code>{name}</code><b>!</b>",
-        "added_prem": "<emoji document_id=5265214770537075100>\U0001f920</emoji><emoji document_id=5265253528321954044>\U0001f920</emoji> <b>Медиа добавлено в заметку</b> <code>{name}</code><b>!</b>",
+        "added_prem": "<tg-emoji emoji-id=5431518146211125713>😎</tg-emoji> <b>Медиа добавлено в заметку</b> <code>{name}</code><b>!</b>",
         "no_media": "<b>Ошибка: ответьте на медиа!</b>",
-        "no_media_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Ошибка: ответьте на медиа!</b>",
+        "no_media_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Ошибка: ответьте на медиа!</b>",
         "no_reply": "<b>Ошибка: ответьте на сообщение!</b>",
-        "no_reply_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Ошибка: ответьте на сообщение!</b>",
+        "no_reply_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Ошибка: ответьте на сообщение!</b>",
         "name_required": "<b>Ошибка: укажите название!</b>",
-        "name_required_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Ошибка: укажите название!</b>",
+        "name_required_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Ошибка: укажите название!</b>",
         "exists": "<b>Ошибка: заметка <code>{name}</code> уже существует!</b>",
-        "exists_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Ошибка: заметка <code>{name}</code> уже существует!</b>",
+        "exists_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Ошибка: заметка <code>{name}</code> уже существует!</b>",
         "not_found": "<b>Ошибка: заметка <code>{name}</code> не найдена!</b>",
-        "not_found_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Ошибка: заметка <code>{name}</code> не найдена!</b>",
+        "not_found_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Ошибка: заметка <code>{name}</code> не найдена!</b>",
         "removed": "<b>Заметка <code>{name}</code> удалена!</b>",
-        "removed_prem": "<emoji document_id=5265050947599508098>\u2b50</emoji> <b>Заметка <code>{name}</code> удалена!</b>",
+        "removed_prem": "<tg-emoji emoji-id=5429351975160421386>😸</tg-emoji> <b>Заметка <code>{name}</code> удалена!</b>",
+        "rmall_done": "<b>Все заметки удалены!</b>",
+        "rmall_done_prem": "<tg-emoji emoji-id=5429351975160421386>😸</tg-emoji> <b>Все заметки удалены!</b>",
+        "rmall_empty": "<b>Нет заметок для удаления.</b>",
+        "rmall_empty_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Нет заметок для удаления.</b>",
         "list_header": "<b>Список ваших заметок:</b>\n<blockquote expandable>{notes}</blockquote>",
-        "list_header_prem": "<emoji document_id=5264781623085276513>\u2764\ufe0f</emoji> <b>Список ваших заметок:</b>\n<blockquote expandable>{notes}</blockquote>",
+        "list_header_prem": "<tg-emoji emoji-id=5429203764428971590>😠</tg-emoji> <b>Список ваших заметок:</b>\n<blockquote expandable>{notes}</blockquote>",
         "no_notes": "<b>У вас пока нет сохраненных заметок.</b>",
-        "no_notes_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>У вас пока нет сохраненных заметок.</b>",
+        "no_notes_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>У вас пока нет сохраненных заметок.</b>",
         "storage_error": "<b>Ошибка взаимодействия с хранилищем. Попробуйте снова.</b>",
-        "storage_error_prem": "<emoji document_id=5265046712761748665>\u2757</emoji> <b>Ошибка хранилища. Попробуйте снова.</b>",
+        "storage_error_prem": "<tg-emoji emoji-id=5429196733567504495>😵</tg-emoji> <b>Ошибка хранилища. Попробуйте снова.</b>",
     }
 
     def __init__(self):
@@ -126,22 +136,6 @@ class Note(loader.Module):
             )
         except Exception as e:
             logger.error(f"[Note] Failed to create/get storage topic: {e}")
-
-        self._migrate_notes()
-
-    def _migrate_notes(self):
-        notes = self.config["NOTES"]
-        changed = False
-        for name in notes:
-            val = notes[name]
-            if not isinstance(val, list):
-                notes[name] = [[val]]
-                changed = True
-            elif val and not isinstance(val[0], list):
-                notes[name] = [val]
-                changed = True
-        if changed:
-            self.config["NOTES"] = notes
 
     async def _send_with_flood_wait(self, coro, *a, **k):
         try:
@@ -285,7 +279,6 @@ class Note(loader.Module):
                     return
 
                 stored_ids = await self._store_media_to_storage(reply)
-
                 notes[name] = [stored_ids]
                 self.config["NOTES"] = notes
                 await utils.answer(message, self._get_str("created").format(name=name))
@@ -310,7 +303,6 @@ class Note(loader.Module):
                     return
 
                 stored_ids = await self._store_media_to_storage(reply)
-
                 notes[name].append(stored_ids)
                 self.config["NOTES"] = notes
                 await utils.answer(message, self._get_str("added").format(name=name))
@@ -342,12 +334,34 @@ class Note(loader.Module):
                 self.config["NOTES"] = notes
                 await utils.answer(message, self._get_str("removed").format(name=name))
 
+            elif cmd == "rmall":
+                notes = self.config["NOTES"]
+                if not notes:
+                    await utils.answer(message, self._get_str("rmall_empty"))
+                    return
+
+                all_ids = []
+                for groups in notes.values():
+                    for group in groups:
+                        if isinstance(group, list):
+                            all_ids.extend(group)
+                        else:
+                            all_ids.append(group)
+
+                try:
+                    await self._delete_messages_from_storage(all_ids)
+                except Exception:
+                    pass
+
+                self.config["NOTES"] = {}
+                await utils.answer(message, self._get_str("rmall_done"))
+
             elif cmd == "list":
                 notes = self.config["NOTES"]
                 if not notes:
                     await utils.answer(message, self._get_str("no_notes"))
                 else:
-                    n_list = "\n".join([f"\u2022 <code>{n}</code>" for n in sorted(notes.keys())])
+                    n_list = "\n".join([f"• <code>{n}</code>" for n in sorted(notes.keys())])
                     await utils.answer(message, self._get_str("list_header").format(notes=n_list))
 
             else:
@@ -390,25 +404,14 @@ class Note(loader.Module):
                         else:
                             reply_to = None
                     else:
-                        if is_first_group and reply_id:
-                            reply_to = reply_id
-                        else:
-                            reply_to = None
+                        reply_to = reply_id if is_first_group else None
 
                     if any(not self._is_albumable(m) for m in media_to_send) or len(media_to_send) == 1:
                         for idx, m in enumerate(media_to_send):
-                            if idx == 0:
-                                r = reply_to
-                            else:
-                                if is_forum and topic_id:
-                                    r = topic_id
-                                else:
-                                    r = None
+                            r = reply_to if idx == 0 else (topic_id if is_forum and topic_id else None)
                             await self._client.send_file(chat_id, m, reply_to=r)
                     else:
-                        await self._client.send_file(
-                            chat_id, media_to_send, reply_to=reply_to
-                        )
+                        await self._client.send_file(chat_id, media_to_send, reply_to=reply_to)
 
                     is_first_group = False
 
