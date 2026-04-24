@@ -1,4 +1,4 @@
-__version__ = (2, 1, 0)
+__version__ = (2, 2, 0)
 # meta developer: FireJester.t.me
 
 import asyncio
@@ -9,7 +9,6 @@ from collections import Counter
 
 from telethon.tl.functions.contacts import BlockRequest
 from telethon.tl.functions.messages import DeleteHistoryRequest, ReportSpamRequest
-from telethon.tl.functions.channels import InviteToChannelRequest, EditAdminRequest
 from telethon.tl.types import (
     Message,
     PeerUser,
@@ -23,8 +22,6 @@ from telethon.utils import get_display_name
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
-
-LOG_GROUP_AVATAR_URL = "https://github.com/FireJester/Media/raw/main/Group_avatar_in_RaidProtection.jpeg"
 
 
 @loader.tds
@@ -60,7 +57,7 @@ class RaidProtection(loader.Module):
         "raid_message": "Spam ban btw",
         "reloaded": "<b>RaidProtection module reloaded, active</b>",
         "inline_create_failed": (
-            "<b>Failed to create/setup log group</b>\n\n"
+            "<b>Failed to setup log topic</b>\n\n"
             "The module will still work but without logging."
         ),
         "stat_header": "<b>RaidProtection Statistics</b>",
@@ -100,7 +97,7 @@ class RaidProtection(loader.Module):
         "raid_message": "Spam ban btw",
         "reloaded": "<b>Модуль RaidProtection перезагружен, активен</b>",
         "inline_create_failed": (
-            "<b>Не удалось создать/настроить группу логов</b>\n\n"
+            "<b>Не удалось настроить топик логов</b>\n\n"
             "Модуль продолжит работать, но без логирования."
         ),
         "stat_header": "<b>Статистика RaidProtection</b>",
@@ -113,16 +110,9 @@ class RaidProtection(loader.Module):
     }
 
     def __init__(self):
-        self.config = loader.ModuleConfig(
-            loader.ConfigValue(
-                "LOG_CHAT_ID",
-                0,
-                lambda: "ID of the log group",
-                validator=loader.validators.Integer(),
-            ),
-        )
         self._owner = None
-        self.chat_logs = None
+        self._asset_channel = None
+        self._storage_topic = None
         self._whitelist = []
         self._queue = []
         self._ban_queue = []
@@ -168,76 +158,32 @@ class RaidProtection(loader.Module):
                 raise
         return None
 
-    async def _set_bot_admin(self, chat_entity):
-        try:
-            bot_user = await self._client.get_entity(self.inline.bot_username)
-            admin_rights = ChatAdminRights(
-                post_messages=True,
-                edit_messages=True,
-                delete_messages=True,
-                ban_users=False,
-                invite_users=False,
-                pin_messages=True,
-                add_admins=False,
-                anonymous=False,
-                manage_call=False,
-                other=False,
-            )
-            await self._client(EditAdminRequest(
-                channel=chat_entity,
-                user_id=bot_user,
-                admin_rights=admin_rights,
-                rank="Raid Guard",
-            ))
-            return True
-        except ChatAdminRequiredError:
-            return False
-        except Exception as e:
-            logger.error(f"[RaidProtection] Failed to set bot admin: {e}")
-            return False
-
-    async def _try_setup_group(self, chat_entity):
-        try:
-            try:
-                bot_user = await self._client.get_entity(self.inline.bot_username)
-                await self._send_with_flood_wait(
-                    self._client,
-                    InviteToChannelRequest(chat_entity, [bot_user]),
-                )
-            except Exception as e:
-                logger.warning(f"[RaidProtection] Bot invite failed (maybe already in): {e}")
-            admin_set = await self._set_bot_admin(chat_entity)
-            if not admin_set:
-                return False, "Failed to set bot admin rights"
-            await asyncio.sleep(2)
-            return True, None
-        except Exception as e:
-            return False, str(e)
-
-    async def _ensure_log_chat(self):
+    async def _ensure_log_topic(self):
         async with self._flood_lock:
+            self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
+            if not self._asset_channel:
+                logger.warning("[RaidProtection] heroku.forums channel_id not found in DB.")
+                self._setup_failed = True
+                return
+
             try:
-                chat_entity, _ = await utils.asset_channel(
+                self._storage_topic = await utils.asset_forum_topic(
                     self._client,
-                    "Raid logs",
-                    "Raid protection logs. @FireJester with <3",
-                    silent=True,
-                    avatar=LOG_GROUP_AVATAR_URL,
+                    self._db,
+                    self._asset_channel,
+                    "Raid Logs",
+                    description="Raid protection logs.",
+                    icon_emoji_id=5188466187448650036,
                 )
-                self.config["LOG_CHAT_ID"] = chat_entity.id
-                self.chat_logs = int(f"-100{chat_entity.id}")
-                success, setup_error = await self._try_setup_group(chat_entity)
-                if not success:
-                    raise Exception(setup_error)
                 self._setup_failed = False
             except Exception as e:
-                logger.error(f"[RaidProtection] Failed to create/setup log group: {e}")
+                logger.error(f"[RaidProtection] Failed to create/get log topic: {e}")
                 self._setup_failed = True
                 try:
-                    await self.inline.bot.send_message(
+                    await self._client.send_message(
                         self._owner.id,
                         self.strings["inline_create_failed"],
-                        parse_mode="HTML",
+                        parse_mode="html",
                     )
                 except Exception:
                     pass
@@ -246,76 +192,39 @@ class RaidProtection(loader.Module):
         self._client = client
         self._owner = await client.get_me()
         self._whitelist = self.get("whitelist", [])
-        saved_id = self.config["LOG_CHAT_ID"]
-        if saved_id != 0:
+
+        await self._ensure_log_topic()
+
+        if self._storage_topic and self._asset_channel:
             try:
-                self.chat_logs = int(f"-100{saved_id}")
-                chat_entity = await client.get_entity(self.chat_logs)
-                try:
-                    await self._send_with_flood_wait(
-                        self.inline.bot.send_message,
-                        self.chat_logs,
-                        self.strings["reloaded"],
-                        parse_mode="HTML",
-                    )
-                    self._setup_failed = False
-                except Exception:
-                    try:
-                        bot_user = await self._client.get_entity(self.inline.bot_username)
-                        await self._send_with_flood_wait(
-                            self._client,
-                            InviteToChannelRequest(chat_entity, [bot_user]),
-                        )
-                        await self._set_bot_admin(chat_entity)
-                        await self._send_with_flood_wait(
-                            self.inline.bot.send_message,
-                            self.chat_logs,
-                            self.strings["reloaded"],
-                            parse_mode="HTML",
-                        )
-                        self._setup_failed = False
-                    except Exception:
-                        await self._ensure_log_chat()
-            except Exception:
-                await self._ensure_log_chat()
-        else:
-            await self._ensure_log_chat()
+                await self._send_with_flood_wait(
+                    self._client.send_message,
+                    int(f"-100{self._asset_channel}"),
+                    self.strings["reloaded"],
+                    reply_to=self._storage_topic.id,
+                    parse_mode="html",
+                )
+            except Exception as e:
+                logger.warning(f"[RaidProtection] Failed to send reloaded message: {e}")
 
     async def _send_log(self, text):
-        if not self.chat_logs:
+        if not self._storage_topic or not self._asset_channel:
             if not self._setup_failed:
-                await self._ensure_log_chat()
+                await self._ensure_log_topic()
             return
         try:
             await self._send_with_flood_wait(
-                self.inline.bot.send_message,
-                self.chat_logs,
+                self._client.send_message,
+                int(f"-100{self._asset_channel}"),
                 text,
-                disable_web_page_preview=True,
-                parse_mode="HTML",
+                reply_to=self._storage_topic.id,
+                parse_mode="html",
+                link_preview=False,
             )
         except Exception as e:
-            error_str = str(e).lower()
-            if "flood" in error_str:
-                return
-            try:
-                chat_entity = await self._client.get_entity(self.config["LOG_CHAT_ID"])
-                bot_user = await self._client.get_entity(self.inline.bot_username)
-                await self._send_with_flood_wait(
-                    self._client,
-                    InviteToChannelRequest(chat_entity, [bot_user]),
-                )
-                await self._set_bot_admin(chat_entity)
-                await self._send_with_flood_wait(
-                    self.inline.bot.send_message,
-                    self.chat_logs,
-                    text,
-                    disable_web_page_preview=True,
-                    parse_mode="HTML",
-                )
-            except Exception:
-                if not self._setup_failed:
-                    await self._ensure_log_chat()
+            logger.error(f"[RaidProtection] Failed to send log: {e}")
+            if not self._setup_failed:
+                await self._ensure_log_topic()
 
     def _approve(self, user_id, reason="unknown"):
         if user_id not in self._whitelist:
