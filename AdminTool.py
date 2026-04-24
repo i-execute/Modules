@@ -1,7 +1,6 @@
-__version__ = (3, 0, 0)
+__version__ = (3, 1, 0)
 # meta developer: I_execute.t.me
 
-import asyncio
 import logging
 import time
 from telethon.tl.types import (
@@ -139,10 +138,9 @@ async def _resolve_target(client, message: Message):
         sender = reply.sender_id
         if not sender:
             return None, "no_user", []
-        extra = args_list 
         try:
             entity = await client.get_entity(sender)
-            return entity, None, extra
+            return entity, None, args_list
         except Exception:
             return None, "no_access", []
 
@@ -193,10 +191,21 @@ class AdminTool(loader.Module):
         "banned_noprem":      "<b>{user} banned in this chat</b>",
         "muted_noprem":       "<b>{user} muted [{duration}] in this chat</b>",
         "gtest": (
+            f"{E_OK} <b>Stats</b>\n"
+            "<blockquote>"
+            "Total chats: <b>{total}</b>\n"
+            "Created by me: <b>{created}</b>\n"
+            "Can mute: <b>{can_mute}</b>\n"
+            "Can ban: <b>{can_ban}</b>"
+            "</blockquote>"
+        ),
+        "gtest_noprem": (
             "<b>Stats</b>\n"
             "<blockquote>"
-            "Ban rights: {ban_groups} group(s), {ban_channels} channel(s)\n"
-            "Mute rights: {mute_groups} group(s)"
+            "Total chats: <b>{total}</b>\n"
+            "Created by me: <b>{created}</b>\n"
+            "Can mute: <b>{can_mute}</b>\n"
+            "Can ban: <b>{can_ban}</b>"
             "</blockquote>"
         ),
     }
@@ -228,10 +237,21 @@ class AdminTool(loader.Module):
         "banned_noprem":      "<b>{user} забанен в этом чате</b>",
         "muted_noprem":       "<b>{user} замучен [{duration}] в этом чате</b>",
         "gtest": (
+            f"{E_OK} <b>Статистика</b>\n"
+            "<blockquote>"
+            "Всего чатов: <b>{total}</b>\n"
+            "Создано мной: <b>{created}</b>\n"
+            "Можно мутить: <b>{can_mute}</b>\n"
+            "Можно банить: <b>{can_ban}</b>"
+            "</blockquote>"
+        ),
+        "gtest_noprem": (
             "<b>Статистика</b>\n"
             "<blockquote>"
-            "Бан: {ban_groups} групп, {ban_channels} каналов\n"
-            "Мут: {mute_groups} групп"
+            "Всего чатов: <b>{total}</b>\n"
+            "Создано мной: <b>{created}</b>\n"
+            "Можно мутить: <b>{can_mute}</b>\n"
+            "Можно банить: <b>{can_ban}</b>"
             "</blockquote>"
         ),
     }
@@ -257,7 +277,6 @@ class AdminTool(loader.Module):
         return self._premium_status
 
     def _s(self, key: str, is_prem: bool) -> str:
-        """Возвращает prem или noprem строку по ключу."""
         if is_prem:
             return self.strings[key]
         noprem_key = f"{key}_noprem"
@@ -272,15 +291,13 @@ class AdminTool(loader.Module):
                 continue
             if isinstance(entity, Chat):
                 ar = entity.admin_rights
-                if getattr(entity, "creator", False) or (ar and getattr(ar, "ban_users", False)):
+                if ar and getattr(ar, "ban_users", False):
                     result.append(("group", entity.id))
             elif isinstance(entity, Channel):
                 if entity.id in skip:
                     continue
-                if not entity.admin_rights and not getattr(entity, "creator", False):
-                    continue
                 ar = entity.admin_rights
-                if getattr(entity, "creator", False) or (ar and getattr(ar, "ban_users", False)):
+                if ar and getattr(ar, "ban_users", False):
                     if getattr(entity, "megagroup", False):
                         result.append(("group", entity.id))
                     elif getattr(entity, "broadcast", False):
@@ -296,17 +313,15 @@ class AdminTool(loader.Module):
                 continue
             if isinstance(entity, Chat):
                 ar = entity.admin_rights
-                if getattr(entity, "creator", False) or (ar and getattr(ar, "ban_users", False)):
+                if ar and getattr(ar, "ban_users", False):
                     result.append(entity.id)
             elif isinstance(entity, Channel):
                 if entity.id in skip:
                     continue
                 if not getattr(entity, "megagroup", False):
                     continue
-                if not entity.admin_rights and not getattr(entity, "creator", False):
-                    continue
                 ar = entity.admin_rights
-                if getattr(entity, "creator", False) or (ar and getattr(ar, "ban_users", False)):
+                if ar and getattr(ar, "ban_users", False):
                     result.append(entity.id)
         return result
 
@@ -321,6 +336,41 @@ class AdminTool(loader.Module):
             chats = await self._collect_mute_chats()
             self._mute_cache = {"exp": time.time() + 600, "chats": chats}
         return self._mute_cache["chats"]
+
+    async def _collect_full_stats(self):
+        total = 0
+        created = 0
+        can_mute = 0
+        can_ban = 0
+        skip = list(self.config["skip_ids"] or [])
+
+        async for dialog in self._client.iter_dialogs():
+            entity = dialog.entity
+            if isinstance(entity, (ChannelForbidden, ChatForbidden)):
+                continue
+
+            if isinstance(entity, Chat):
+                total += 1
+                if getattr(entity, "creator", False):
+                    created += 1
+                ar = entity.admin_rights
+                if ar and getattr(ar, "ban_users", False):
+                    can_mute += 1
+                    can_ban += 1
+
+            elif isinstance(entity, Channel):
+                if entity.id in skip:
+                    continue
+                total += 1
+                if getattr(entity, "creator", False):
+                    created += 1
+                ar = entity.admin_rights
+                if ar and getattr(ar, "ban_users", False):
+                    can_ban += 1
+                    if getattr(entity, "megagroup", False):
+                        can_mute += 1
+
+        return total, created, can_mute, can_ban
 
     @loader.command(
         ru_doc="реплай / @username / ID — бан в этом чате",
@@ -346,18 +396,12 @@ class AdminTool(loader.Module):
         display = _build_display(target)
         try:
             await self._client.edit_permissions(
-                message.chat_id,
-                target,
-                until_date=0,
-                **RESTRICT_BANNED,
+                message.chat_id, target, until_date=0, **RESTRICT_BANNED,
             )
         except Exception:
             pass
 
-        await utils.answer(
-            message,
-            self._s("banned", is_prem).format(user=display),
-        )
+        await utils.answer(message, self._s("banned", is_prem).format(user=display))
 
     @loader.command(
         ru_doc="реплай / @username / ID [1m/1h/1d] — мут в этом чате",
@@ -387,19 +431,13 @@ class AdminTool(loader.Module):
 
         try:
             await self._client.edit_permissions(
-                message.chat_id,
-                target,
-                until_date=until_date,
-                **RESTRICT_MUTED,
+                message.chat_id, target, until_date=until_date, **RESTRICT_MUTED,
             )
         except Exception:
             pass
 
         self._watched.add(target.id)
-        await utils.answer(
-            message,
-            self._s("muted", is_prem).format(user=display, duration=duration_str),
-        )
+        await utils.answer(message, self._s("muted", is_prem).format(user=display, duration=duration_str))
 
     @loader.command(
         ru_doc="реплай / @username / ID — глобальный бан",
@@ -433,10 +471,7 @@ class AdminTool(loader.Module):
             except Exception:
                 pass
 
-        await utils.answer(
-            message,
-            self._s("gbanned", is_prem).format(user=display, count=count),
-        )
+        await utils.answer(message, self._s("gbanned", is_prem).format(user=display, count=count))
 
     @loader.command(
         ru_doc="реплай / @username / ID — глобальный разбан",
@@ -470,10 +505,7 @@ class AdminTool(loader.Module):
             except Exception:
                 pass
 
-        await utils.answer(
-            message,
-            self._s("gunbanned", is_prem).format(user=display, count=count),
-        )
+        await utils.answer(message, self._s("gunbanned", is_prem).format(user=display, count=count))
 
     @loader.command(
         ru_doc="реплай / @username / ID [1m/1h/1d] — глобальный мут",
@@ -510,11 +542,7 @@ class AdminTool(loader.Module):
                 pass
 
         self._watched.add(target.id)
-
-        await utils.answer(
-            message,
-            self._s("gmuted", is_prem).format(user=display, count=count, duration=duration_str),
-        )
+        await utils.answer(message, self._s("gmuted", is_prem).format(user=display, count=count, duration=duration_str))
 
     @loader.command(
         ru_doc="реплай / @username / ID — глобальный размут",
@@ -547,11 +575,7 @@ class AdminTool(loader.Module):
                 pass
 
         self._watched.discard(target.id)
-
-        await utils.answer(
-            message,
-            self._s("gunmuted", is_prem).format(user=display, count=count),
-        )
+        await utils.answer(message, self._s("gunmuted", is_prem).format(user=display, count=count))
 
     @loader.command(
         ru_doc="реплай / @username / ID — удалить ВСЕ сообщения и забанить глобально",
@@ -595,30 +619,26 @@ class AdminTool(loader.Module):
             except Exception:
                 pass
 
-        await utils.answer(
-            message,
-            self._s("gdeleted", is_prem).format(user=display, count=count),
-        )
+        await utils.answer(message, self._s("gdeleted", is_prem).format(user=display, count=count))
 
     @loader.command(
-        ru_doc="статистика чатов где ты админ",
-        en_doc="stats of chats where you are admin",
+        ru_doc="полная статистика всех чатов на аккаунте",
+        en_doc="full stats of all chats on account",
     )
     async def gtest(self, message: Message):
-        """stats of chats where you are admin"""
-        ban_chats = await self._collect_ban_chats()
-        mute_chats = await self._collect_mute_chats()
+        """full stats of all chats on account"""
+        is_prem = await self._check_premium()
+        await utils.answer(message, self.strings["processing"])
 
-        ban_groups   = sum(1 for t, _ in ban_chats if t == "group")
-        ban_channels = sum(1 for t, _ in ban_chats if t == "channel")
-        mute_groups  = len(mute_chats)
+        total, created, can_mute, can_ban = await self._collect_full_stats()
 
         await utils.answer(
             message,
-            self.strings["gtest"].format(
-                ban_groups=ban_groups,
-                ban_channels=ban_channels,
-                mute_groups=mute_groups,
+            self._s("gtest", is_prem).format(
+                total=total,
+                created=created,
+                can_mute=can_mute,
+                can_ban=can_ban,
             ),
         )
 
@@ -633,6 +653,7 @@ class AdminTool(loader.Module):
             return
         if message.sender_id not in self._watched:
             return
+
         mute_chat_ids = self._mute_cache.get("chats", [])
         if message.chat_id not in mute_chat_ids:
             return
