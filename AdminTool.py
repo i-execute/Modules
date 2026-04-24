@@ -1,9 +1,9 @@
-__version__ = (2, 0, 0)
-# meta developer: FireJester.t.me
+__version__ = (3, 0, 0)
+# meta developer: I_execute.t.me
 
 import asyncio
 import logging
-import random
+import time
 from telethon.tl.types import (
     Message,
     User,
@@ -27,6 +27,14 @@ RESTRICT_BANNED = {
     "send_polls": False,
     "change_info": False,
     "invite_users": False,
+    "pin_messages": False,
+    "send_photos": False,
+    "send_videos": False,
+    "send_roundvideos": False,
+    "send_audios": False,
+    "send_voices": False,
+    "send_docs": False,
+    "send_plain": False,
 }
 
 RESTRICT_MUTED = {
@@ -40,7 +48,51 @@ RESTRICT_MUTED = {
     "send_polls": False,
     "change_info": False,
     "invite_users": False,
+    "pin_messages": False,
+    "send_photos": False,
+    "send_videos": False,
+    "send_roundvideos": False,
+    "send_audios": False,
+    "send_voices": False,
+    "send_docs": False,
+    "send_plain": False,
 }
+
+E_OK    = '<tg-emoji emoji-id=5429319011286423791>😎</tg-emoji>'
+E_DEAD1 = '<tg-emoji emoji-id=5429465319347362227>😵</tg-emoji>'
+E_ANGRY = '<tg-emoji emoji-id=5429638101586711317>😠</tg-emoji>'
+E_DEAD2 = '<tg-emoji emoji-id=5429112861446147403>😵</tg-emoji>'
+E_DEAD3 = '<tg-emoji emoji-id=5429369507216924126>😵</tg-emoji>'
+
+
+def _parse_duration(raw: str):
+    if not raw:
+        return None
+    raw = raw.strip().lower()
+    if len(raw) < 2:
+        return None
+    suffix = raw[-1]
+    num_str = raw[:-1]
+    if not num_str.isdigit():
+        return None
+    num = int(num_str)
+    if suffix == "m":
+        return num * 60
+    if suffix == "h":
+        return num * 3600
+    if suffix == "d":
+        return num * 86400
+    return None
+
+
+def _format_duration(seconds: int) -> str:
+    if not seconds or seconds <= 0:
+        return "∞"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 86400}d"
 
 
 def _build_display(user: User) -> str:
@@ -68,104 +120,78 @@ def _extract_username(user: User) -> str:
 
 async def _resolve_target(client, message: Message):
     reply = await message.get_reply_message()
-    args = utils.get_args_raw(message)
+    args_raw = utils.get_args_raw(message)
+    args_list = args_raw.strip().split() if args_raw.strip() else []
 
-    if reply and not args:
-        sender = reply.sender_id
-        if not sender:
-            return None, "no_user"
-        try:
-            entity = await client.get_entity(sender)
-            return entity, None
-        except Exception:
-            return None, "no_access"
-
-    if args:
-        raw = args.strip().split()[0]
+    if args_list:
+        raw = args_list[0]
+        extra = args_list[1:]
         try:
             if raw.lstrip("-").isdigit():
-                uid = int(raw)
-                try:
-                    entity = await client.get_entity(uid)
-                    return entity, None
-                except Exception:
-                    return None, "no_access"
+                entity = await client.get_entity(int(raw))
             else:
                 entity = await client.get_entity(raw)
-                return entity, None
+            return entity, None, extra
         except Exception:
-            return None, "no_user"
+            return None, "no_user", []
 
     if reply:
         sender = reply.sender_id
         if not sender:
-            return None, "no_user"
+            return None, "no_user", []
+        extra = args_list 
         try:
             entity = await client.get_entity(sender)
-            return entity, None
+            return entity, None, extra
         except Exception:
-            return None, "no_access"
+            return None, "no_access", []
 
-    return None, "no_args"
+    return None, "no_args", []
 
 
 async def _bulk_delete(client, chat_id, msg_ids: list) -> int:
     deleted = 0
-    if not msg_ids:
-        return deleted
-
-    chunk_size = random.randint(90, 110)
-    first_chunk = msg_ids[:chunk_size]
-    rest = msg_ids[chunk_size:]
-
-    try:
-        await client.delete_messages(chat_id, first_chunk)
-        deleted += len(first_chunk)
-    except Exception:
-        pass
-
-    chunk = []
-    chunk_size = random.randint(90, 110)
-
-    for mid in rest:
-        chunk.append(mid)
-        if len(chunk) >= chunk_size:
-            await asyncio.sleep(random.uniform(0.5, 1.5))
-            try:
-                await client.delete_messages(chat_id, chunk)
-                deleted += len(chunk)
-            except Exception:
-                pass
-            chunk.clear()
-            chunk_size = random.randint(90, 110)
-
-    if chunk:
-        await asyncio.sleep(random.uniform(0.5, 1.5))
+    for i in range(0, len(msg_ids), 100):
+        chunk = msg_ids[i:i + 100]
         try:
             await client.delete_messages(chat_id, chunk)
             deleted += len(chunk)
         except Exception:
             pass
-
     return deleted
 
 
 @loader.tds
 class AdminTool(loader.Module):
-    """Ban, mute and delete across all chats where you are admin - available global ban and mute"""
+    """Ban, mute and delete across all chats where you are admin"""
 
     strings = {
         "name": "AdminTool",
-        "no_args": "<b>Error:</b> Provide a user (reply, @username or ID)",
-        "no_user": "<b>Error:</b> User not found",
-        "no_access": "<b>Error:</b> No access hash for this user ID. Try using @username instead",
-        "self_action": "<b>Error:</b> You seriously?",
-        "processing": "<b>Processing...</b>",
-        "gbanned": "<b>{user} globally banned in {count} chat(s)</b>",
-        "gunbanned": "<b>{user} globally unbanned in {count} chat(s)</b>",
-        "gmuted": "<b>{user} globally muted in {count} chat(s)</b>",
-        "gunmuted": "<b>{user} globally unmuted in {count} chat(s)</b>",
-        "gdeleted": "<b>{user} globally banned and messages deleted in {count} chat(s)</b>",
+        "no_args":            f"{E_DEAD1} <b>Error:</b> Provide a user (reply, @username or ID)",
+        "no_user":            f"{E_DEAD1} <b>Error:</b> User not found",
+        "no_access":          f"{E_DEAD1} <b>Error:</b> No access hash. Try @username instead",
+        "self_action":        f"{E_DEAD1} <b>Error:</b> You seriously?",
+        "not_group":          f"{E_DEAD1} <b>Error:</b> This command works only in groups",
+        "no_args_noprem":     "<b>Error:</b> Provide a user (reply, @username or ID)",
+        "no_user_noprem":     "<b>Error:</b> User not found",
+        "no_access_noprem":   "<b>Error:</b> No access hash. Try @username instead",
+        "self_action_noprem": "<b>Error:</b> You seriously?",
+        "not_group_noprem":   "<b>Error:</b> This command works only in groups",
+        "processing":         f"{E_DEAD2} <b>Processing...</b>",
+        "gbanned":            f"{E_OK} <b>{{user}} globally banned in {{count}} chat(s)</b>",
+        "gunbanned":          f"{E_DEAD3} <b>{{user}} globally unbanned in {{count}} chat(s)</b>",
+        "gmuted":             f"{E_ANGRY} <b>{{user}} globally muted [{{duration}}] in {{count}} chat(s)</b>",
+        "gunmuted":           f"{E_DEAD3} <b>{{user}} globally unmuted in {{count}} chat(s)</b>",
+        "gdeleted":           f"{E_ANGRY} <b>{{user}} banned and messages deleted in {{count}} chat(s)</b>",
+        "banned":             f"{E_OK} <b>{{user}} banned in this chat</b>",
+        "muted":              f"{E_ANGRY} <b>{{user}} muted [{{duration}}] in this chat</b>",
+        "gbanned_noprem":     "<b>{user} globally banned in {count} chat(s)</b>",
+        "gunbanned_noprem":   "<b>{user} globally unbanned in {count} chat(s)</b>",
+        "gmuted_noprem":      "<b>{user} globally muted [{duration}] in {count} chat(s)</b>",
+        "gunmuted_noprem":    "<b>{user} globally unmuted in {count} chat(s)</b>",
+        "gdeleted_noprem":    "<b>{user} banned and messages deleted in {count} chat(s)</b>",
+        "banned_noprem":      "<b>{user} banned in this chat</b>",
+        "muted_noprem":       "<b>{user} muted [{duration}] in this chat</b>",
         "gtest": (
             "<b>Stats</b>\n"
             "<blockquote>"
@@ -176,16 +202,31 @@ class AdminTool(loader.Module):
     }
 
     strings_ru = {
-        "no_args": "<b>Ошибка:</b> Укажи пользователя (реплай, @username или ID)",
-        "no_user": "<b>Ошибка:</b> Пользователь не найден",
-        "no_access": "<b>Ошибка:</b> Нет access hash. Попробуй @username",
-        "self_action": "<b>Ошибка:</b> Ты серьёзно?",
-        "processing": "<b>Обработка...</b>",
-        "gbanned": "<b>{user} глобально забанен в {count} чат(ах)</b>",
-        "gunbanned": "<b>{user} глобально разбанен в {count} чат(ах)</b>",
-        "gmuted": "<b>{user} глобально замучен в {count} чат(ах)</b>",
-        "gunmuted": "<b>{user} глобально размучен в {count} чат(ах)</b>",
-        "gdeleted": "<b>{user} забанен и сообщения удалены в {count} чат(ах)</b>",
+        "no_args":            f"{E_DEAD1} <b>Ошибка:</b> Укажи пользователя (реплай, @username или ID)",
+        "no_user":            f"{E_DEAD1} <b>Ошибка:</b> Пользователь не найден",
+        "no_access":          f"{E_DEAD1} <b>Ошибка:</b> Нет access hash. Попробуй @username",
+        "self_action":        f"{E_DEAD1} <b>Ошибка:</b> Ты серьёзно?",
+        "not_group":          f"{E_DEAD1} <b>Ошибка:</b> Команда работает только в группах",
+        "no_args_noprem":     "<b>Ошибка:</b> Укажи пользователя (реплай, @username или ID)",
+        "no_user_noprem":     "<b>Ошибка:</b> Пользователь не найден",
+        "no_access_noprem":   "<b>Ошибка:</b> Нет access hash. Попробуй @username",
+        "self_action_noprem": "<b>Ошибка:</b> Ты серьёзно?",
+        "not_group_noprem":   "<b>Ошибка:</b> Команда работает только в группах",
+        "processing":         f"{E_DEAD2} <b>Обработка...</b>",
+        "gbanned":            f"{E_OK} <b>{{user}} глобально забанен в {{count}} чат(ах)</b>",
+        "gunbanned":          f"{E_DEAD3} <b>{{user}} глобально разбанен в {{count}} чат(ах)</b>",
+        "gmuted":             f"{E_ANGRY} <b>{{user}} глобально замучен [{{duration}}] в {{count}} чат(ах)</b>",
+        "gunmuted":           f"{E_DEAD3} <b>{{user}} глобально размучен в {{count}} чат(ах)</b>",
+        "gdeleted":           f"{E_ANGRY} <b>{{user}} забанен и сообщения удалены в {{count}} чат(ах)</b>",
+        "banned":             f"{E_OK} <b>{{user}} забанен в этом чате</b>",
+        "muted":              f"{E_ANGRY} <b>{{user}} замучен [{{duration}}] в этом чате</b>",
+        "gbanned_noprem":     "<b>{user} глобально забанен в {count} чат(ах)</b>",
+        "gunbanned_noprem":   "<b>{user} глобально разбанен в {count} чат(ах)</b>",
+        "gmuted_noprem":      "<b>{user} глобально замучен [{duration}] в {count} чат(ах)</b>",
+        "gunmuted_noprem":    "<b>{user} глобально размучен в {count} чат(ах)</b>",
+        "gdeleted_noprem":    "<b>{user} забанен и сообщения удалены в {count} чат(ах)</b>",
+        "banned_noprem":      "<b>{user} забанен в этом чате</b>",
+        "muted_noprem":       "<b>{user} замучен [{duration}] в этом чате</b>",
         "gtest": (
             "<b>Статистика</b>\n"
             "<blockquote>"
@@ -198,6 +239,8 @@ class AdminTool(loader.Module):
     def __init__(self):
         self._ban_cache = {}
         self._mute_cache = {}
+        self._watched: set = set()
+        self._premium_status = None
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "skip_ids",
@@ -206,6 +249,19 @@ class AdminTool(loader.Module):
                 validator=loader.validators.Series(loader.validators.Integer()),
             )
         )
+
+    async def _check_premium(self) -> bool:
+        if self._premium_status is None:
+            me = await self._client.get_me()
+            self._premium_status = getattr(me, "premium", False)
+        return self._premium_status
+
+    def _s(self, key: str, is_prem: bool) -> str:
+        """Возвращает prem или noprem строку по ключу."""
+        if is_prem:
+            return self.strings[key]
+        noprem_key = f"{key}_noprem"
+        return self.strings.get(noprem_key, self.strings[key])
 
     async def _collect_ban_chats(self):
         result = []
@@ -255,18 +311,95 @@ class AdminTool(loader.Module):
         return result
 
     async def _get_ban_chats(self):
-        import time as _time
-        if not self._ban_cache or self._ban_cache.get("exp", 0) < _time.time():
+        if not self._ban_cache or self._ban_cache.get("exp", 0) < time.time():
             chats = await self._collect_ban_chats()
-            self._ban_cache = {"exp": _time.time() + 600, "chats": chats}
+            self._ban_cache = {"exp": time.time() + 600, "chats": chats}
         return self._ban_cache["chats"]
 
     async def _get_mute_chats(self):
-        import time as _time
-        if not self._mute_cache or self._mute_cache.get("exp", 0) < _time.time():
+        if not self._mute_cache or self._mute_cache.get("exp", 0) < time.time():
             chats = await self._collect_mute_chats()
-            self._mute_cache = {"exp": _time.time() + 600, "chats": chats}
+            self._mute_cache = {"exp": time.time() + 600, "chats": chats}
         return self._mute_cache["chats"]
+
+    @loader.command(
+        ru_doc="реплай / @username / ID — бан в этом чате",
+        en_doc="reply / @username / ID — ban in this chat",
+    )
+    async def ban(self, message: Message):
+        """reply / @username / ID — ban in this chat"""
+        me = await self._client.get_me()
+        is_prem = await self._check_premium()
+        target, err, _ = await _resolve_target(self._client, message)
+
+        if err:
+            return await utils.answer(message, self._s(err, is_prem))
+        if not isinstance(target, User):
+            return await utils.answer(message, self._s("no_user", is_prem))
+        if target.id == me.id:
+            return await utils.answer(message, self._s("self_action", is_prem))
+
+        chat = await message.get_chat()
+        if isinstance(chat, User):
+            return await utils.answer(message, self._s("not_group", is_prem))
+
+        display = _build_display(target)
+        try:
+            await self._client.edit_permissions(
+                message.chat_id,
+                target,
+                until_date=0,
+                **RESTRICT_BANNED,
+            )
+        except Exception:
+            pass
+
+        await utils.answer(
+            message,
+            self._s("banned", is_prem).format(user=display),
+        )
+
+    @loader.command(
+        ru_doc="реплай / @username / ID [1m/1h/1d] — мут в этом чате",
+        en_doc="reply / @username / ID [1m/1h/1d] — mute in this chat",
+    )
+    async def mute(self, message: Message):
+        """reply / @username / ID [1m/1h/1d] — mute in this chat"""
+        me = await self._client.get_me()
+        is_prem = await self._check_premium()
+        target, err, extra = await _resolve_target(self._client, message)
+
+        if err:
+            return await utils.answer(message, self._s(err, is_prem))
+        if not isinstance(target, User):
+            return await utils.answer(message, self._s("no_user", is_prem))
+        if target.id == me.id:
+            return await utils.answer(message, self._s("self_action", is_prem))
+
+        chat = await message.get_chat()
+        if isinstance(chat, User):
+            return await utils.answer(message, self._s("not_group", is_prem))
+
+        seconds = _parse_duration(extra[0]) if extra else None
+        until_date = int(time.time()) + seconds if seconds else 0
+        duration_str = _format_duration(seconds)
+        display = _build_display(target)
+
+        try:
+            await self._client.edit_permissions(
+                message.chat_id,
+                target,
+                until_date=until_date,
+                **RESTRICT_MUTED,
+            )
+        except Exception:
+            pass
+
+        self._watched.add(target.id)
+        await utils.answer(
+            message,
+            self._s("muted", is_prem).format(user=display, duration=duration_str),
+        )
 
     @loader.command(
         ru_doc="реплай / @username / ID — глобальный бан",
@@ -275,16 +408,15 @@ class AdminTool(loader.Module):
     async def gban(self, message: Message):
         """reply / @username / ID — global ban"""
         me = await self._client.get_me()
-        target, err = await _resolve_target(self._client, message)
+        is_prem = await self._check_premium()
+        target, err, _ = await _resolve_target(self._client, message)
 
         if err:
-            return await utils.answer(message, self.strings[err if err in self.strings else "no_args"])
-
+            return await utils.answer(message, self._s(err, is_prem))
         if not isinstance(target, User):
-            return await utils.answer(message, self.strings["no_user"])
-
+            return await utils.answer(message, self._s("no_user", is_prem))
         if target.id == me.id:
-            return await utils.answer(message, self.strings["self_action"])
+            return await utils.answer(message, self._s("self_action", is_prem))
 
         await utils.answer(message, self.strings["processing"])
 
@@ -292,13 +424,10 @@ class AdminTool(loader.Module):
         display = _build_display(target)
         count = 0
 
-        for chat_type, chat_id in chats:
+        for _, chat_id in chats:
             try:
                 await self._client.edit_permissions(
-                    chat_id,
-                    target,
-                    until_date=0,
-                    **RESTRICT_BANNED,
+                    chat_id, target, until_date=0, **RESTRICT_BANNED,
                 )
                 count += 1
             except Exception:
@@ -306,7 +435,7 @@ class AdminTool(loader.Module):
 
         await utils.answer(
             message,
-            self.strings["gbanned"].format(user=display, count=count),
+            self._s("gbanned", is_prem).format(user=display, count=count),
         )
 
     @loader.command(
@@ -316,16 +445,15 @@ class AdminTool(loader.Module):
     async def gunban(self, message: Message):
         """reply / @username / ID — global unban"""
         me = await self._client.get_me()
-        target, err = await _resolve_target(self._client, message)
+        is_prem = await self._check_premium()
+        target, err, _ = await _resolve_target(self._client, message)
 
         if err:
-            return await utils.answer(message, self.strings[err if err in self.strings else "no_args"])
-
+            return await utils.answer(message, self._s(err, is_prem))
         if not isinstance(target, User):
-            return await utils.answer(message, self.strings["no_user"])
-
+            return await utils.answer(message, self._s("no_user", is_prem))
         if target.id == me.id:
-            return await utils.answer(message, self.strings["self_action"])
+            return await utils.answer(message, self._s("self_action", is_prem))
 
         await utils.answer(message, self.strings["processing"])
 
@@ -333,13 +461,10 @@ class AdminTool(loader.Module):
         display = _build_display(target)
         count = 0
 
-        for chat_type, chat_id in chats:
+        for _, chat_id in chats:
             try:
                 await self._client.edit_permissions(
-                    chat_id,
-                    target,
-                    until_date=0,
-                    **{k: True for k in RESTRICT_BANNED},
+                    chat_id, target, until_date=0, **{k: True for k in RESTRICT_BANNED},
                 )
                 count += 1
             except Exception:
@@ -347,26 +472,29 @@ class AdminTool(loader.Module):
 
         await utils.answer(
             message,
-            self.strings["gunbanned"].format(user=display, count=count),
+            self._s("gunbanned", is_prem).format(user=display, count=count),
         )
 
     @loader.command(
-        ru_doc="реплай / @username / ID — глобальный мут",
-        en_doc="reply / @username / ID — global mute",
+        ru_doc="реплай / @username / ID [1m/1h/1d] — глобальный мут",
+        en_doc="reply / @username / ID [1m/1h/1d] — global mute",
     )
     async def gmute(self, message: Message):
-        """reply / @username / ID — global mute"""
+        """reply / @username / ID [1m/1h/1d] — global mute"""
         me = await self._client.get_me()
-        target, err = await _resolve_target(self._client, message)
+        is_prem = await self._check_premium()
+        target, err, extra = await _resolve_target(self._client, message)
 
         if err:
-            return await utils.answer(message, self.strings[err if err in self.strings else "no_args"])
-
+            return await utils.answer(message, self._s(err, is_prem))
         if not isinstance(target, User):
-            return await utils.answer(message, self.strings["no_user"])
-
+            return await utils.answer(message, self._s("no_user", is_prem))
         if target.id == me.id:
-            return await utils.answer(message, self.strings["self_action"])
+            return await utils.answer(message, self._s("self_action", is_prem))
+
+        seconds = _parse_duration(extra[0]) if extra else None
+        until_date = int(time.time()) + seconds if seconds else 0
+        duration_str = _format_duration(seconds)
 
         chats = await self._get_mute_chats()
         display = _build_display(target)
@@ -375,20 +503,17 @@ class AdminTool(loader.Module):
         for chat_id in chats:
             try:
                 await self._client.edit_permissions(
-                    chat_id,
-                    target,
-                    until_date=0,
-                    **RESTRICT_MUTED,
+                    chat_id, target, until_date=until_date, **RESTRICT_MUTED,
                 )
                 count += 1
             except Exception:
                 pass
 
-        self._mute_cache.setdefault("watched", set()).add(target.id)
+        self._watched.add(target.id)
 
         await utils.answer(
             message,
-            self.strings["gmuted"].format(user=display, count=count),
+            self._s("gmuted", is_prem).format(user=display, count=count, duration=duration_str),
         )
 
     @loader.command(
@@ -398,16 +523,15 @@ class AdminTool(loader.Module):
     async def gunmute(self, message: Message):
         """reply / @username / ID — global unmute"""
         me = await self._client.get_me()
-        target, err = await _resolve_target(self._client, message)
+        is_prem = await self._check_premium()
+        target, err, _ = await _resolve_target(self._client, message)
 
         if err:
-            return await utils.answer(message, self.strings[err if err in self.strings else "no_args"])
-
+            return await utils.answer(message, self._s(err, is_prem))
         if not isinstance(target, User):
-            return await utils.answer(message, self.strings["no_user"])
-
+            return await utils.answer(message, self._s("no_user", is_prem))
         if target.id == me.id:
-            return await utils.answer(message, self.strings["self_action"])
+            return await utils.answer(message, self._s("self_action", is_prem))
 
         chats = await self._get_mute_chats()
         display = _build_display(target)
@@ -416,40 +540,35 @@ class AdminTool(loader.Module):
         for chat_id in chats:
             try:
                 await self._client.edit_permissions(
-                    chat_id,
-                    target,
-                    until_date=0,
-                    **{k: True for k in RESTRICT_MUTED},
+                    chat_id, target, until_date=0, **{k: True for k in RESTRICT_MUTED},
                 )
                 count += 1
             except Exception:
                 pass
 
-        watched = self._mute_cache.get("watched", set())
-        watched.discard(target.id)
+        self._watched.discard(target.id)
 
         await utils.answer(
             message,
-            self.strings["gunmuted"].format(user=display, count=count),
+            self._s("gunmuted", is_prem).format(user=display, count=count),
         )
 
     @loader.command(
-        ru_doc="реплай / @username / ID — удалить сообщения и забанить",
-        en_doc="reply / @username / ID — delete messages and ban",
+        ru_doc="реплай / @username / ID — удалить ВСЕ сообщения и забанить глобально",
+        en_doc="reply / @username / ID — delete ALL messages and global ban",
     )
     async def gdelete(self, message: Message):
-        """reply / @username / ID — delete messages and ban"""
+        """reply / @username / ID — delete ALL messages and global ban"""
         me = await self._client.get_me()
-        target, err = await _resolve_target(self._client, message)
+        is_prem = await self._check_premium()
+        target, err, _ = await _resolve_target(self._client, message)
 
         if err:
-            return await utils.answer(message, self.strings[err if err in self.strings else "no_args"])
-
+            return await utils.answer(message, self._s(err, is_prem))
         if not isinstance(target, User):
-            return await utils.answer(message, self.strings["no_user"])
-
+            return await utils.answer(message, self._s("no_user", is_prem))
         if target.id == me.id:
-            return await utils.answer(message, self.strings["self_action"])
+            return await utils.answer(message, self._s("self_action", is_prem))
 
         await utils.answer(message, self.strings["processing"])
 
@@ -457,11 +576,12 @@ class AdminTool(loader.Module):
         display = _build_display(target)
         count = 0
 
-        for chat_type, chat_id in chats:
+        for _, chat_id in chats:
             try:
-                msg_ids = []
-                async for msg in self._client.iter_messages(chat_id, from_user=target.id):
-                    msg_ids.append(msg.id)
+                msg_ids = [
+                    msg.id
+                    async for msg in self._client.iter_messages(chat_id, from_user=target.id)
+                ]
                 if msg_ids:
                     await _bulk_delete(self._client, chat_id, msg_ids)
             except Exception:
@@ -469,10 +589,7 @@ class AdminTool(loader.Module):
 
             try:
                 await self._client.edit_permissions(
-                    chat_id,
-                    target,
-                    until_date=0,
-                    **RESTRICT_BANNED,
+                    chat_id, target, until_date=0, **RESTRICT_BANNED,
                 )
                 count += 1
             except Exception:
@@ -480,7 +597,7 @@ class AdminTool(loader.Module):
 
         await utils.answer(
             message,
-            self.strings["gdeleted"].format(user=display, count=count),
+            self._s("gdeleted", is_prem).format(user=display, count=count),
         )
 
     @loader.command(
@@ -492,9 +609,9 @@ class AdminTool(loader.Module):
         ban_chats = await self._collect_ban_chats()
         mute_chats = await self._collect_mute_chats()
 
-        ban_groups = sum(1 for t, _ in ban_chats if t == "group")
+        ban_groups   = sum(1 for t, _ in ban_chats if t == "group")
         ban_channels = sum(1 for t, _ in ban_chats if t == "channel")
-        mute_groups = len(mute_chats)
+        mute_groups  = len(mute_chats)
 
         await utils.answer(
             message,
@@ -512,16 +629,12 @@ class AdminTool(loader.Module):
             return
         if not message.is_group:
             return
-
-        watched = self._mute_cache.get("watched", set())
-        if not watched:
+        if not self._watched:
             return
-
-        if message.sender_id not in watched:
+        if message.sender_id not in self._watched:
             return
-
-        mute_chats = self._mute_cache.get("chats", [])
-        if message.chat_id not in mute_chats:
+        mute_chat_ids = self._mute_cache.get("chats", [])
+        if message.chat_id not in mute_chat_ids:
             return
 
         try:

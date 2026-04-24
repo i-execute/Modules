@@ -1,9 +1,9 @@
+AdminTool
 Buttons
 ChatRecovery
 DeleteMusic
 Deleter
 DevTool
-AdminTool
 Grabber
 Info
 InlineDL

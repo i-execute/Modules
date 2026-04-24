@@ -1,5 +1,5 @@
 __version__ = (2, 0, 0)
-# meta developer: FireJester.t.me
+# meta developer: I_execute.t.me
 
 import logging
 import asyncio

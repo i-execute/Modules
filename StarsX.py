@@ -1,5 +1,5 @@
 __version__ = (1, 3, 5)
-# meta developer: FireJester.t.me
+# meta developer: I_execute.t.me
 
 import os
 import re

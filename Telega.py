@@ -1,5 +1,5 @@
 __version__ = (2, 0, 0)
-# meta developer: FireJester.t.me forked from @dev_angel_7553
+# meta developer: I_execute.t.me forked from @dev_angel_7553
 
 import io
 import json

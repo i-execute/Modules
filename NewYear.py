@@ -1,5 +1,5 @@
 __version__ = (2, 1, 1)
-# meta developer: FireJester.t.me 
+# meta developer: I_execute.t.me
 
 from .. import loader, utils
 from datetime import datetime, timezone, timedelta
