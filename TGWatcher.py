@@ -1,11 +1,10 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 # meta developer: FireJester.t.me
 
 import logging
 import asyncio
 import re
 import os
-import stat
 import sqlite3
 import base64
 import ipaddress
@@ -17,11 +16,8 @@ import time
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.tl.types import Message, Channel
-from telethon.tl.functions.channels import InviteToChannelRequest, EditAdminRequest
-from telethon.tl.types import ChatAdminRights
 from telethon.errors import (
     FloodWaitError,
-    ChatAdminRequiredError,
     AuthKeyUnregisteredError,
     UserDeactivatedBanError,
 )
@@ -32,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_ID = 777000
 STRING_SESSION_PATTERN = re.compile(r'1[A-Za-z0-9_-]{200,}={0,2}')
-LOG_GROUP_AVATAR_URL = "https://github.com/FireJester/Media/raw/main/Group_avatar_in_TGWatcher.jpeg"
 
 DC_IP_MAP = {
     1: "149.154.175.53",
@@ -130,7 +125,7 @@ def read_session_file(file_path):
 
 @loader.tds
 class TGWatcher(loader.Module):
-    """Watches linked Telegram accounts and forwards messages from Telegram (777000) to a log group"""
+    """Watches linked Telegram accounts and forwards messages from Telegram (777000) to a log topic"""
 
     strings = {
         "name": "TGWatcher",
@@ -170,12 +165,6 @@ class TGWatcher(loader.Module):
             "Accounts: {count}\n\n"
             "Messages from Telegram (777000) will appear here."
         ),
-        "log_recovery": (
-            "<b>TGWatcher recovered</b>\n\n"
-            "Owner: {owner_link}\n"
-            "Previous group was unavailable.\n"
-            "Error: {error}"
-        ),
         "log_reloaded": "<b>TGWatcher reloaded, watchers active</b>",
         "log_message": (
             "<b>[TG Message]</b>\n\n"
@@ -189,6 +178,10 @@ class TGWatcher(loader.Module):
         "log_account_removed": "[REMOVED] Account #{num}: {name}",
         "log_health_dead": "[ALERT] {owner_link} - Session #{num} ({name}) is dead! Removing...",
         "log_health_result": "[HEALTH] Alive: {alive} | Dead: {dead} | Removed: {removed}",
+        "setup_failed": (
+            "<b>Failed to setup TGWatcher log topic</b>\n\n"
+            "The module will still work but without logging."
+        ),
     }
 
     strings_ru = {
@@ -228,12 +221,6 @@ class TGWatcher(loader.Module):
             "Аккаунтов: {count}\n\n"
             "Сообщения от Telegram (777000) будут появляться здесь."
         ),
-        "log_recovery": (
-            "<b>TGWatcher восстановлен</b>\n\n"
-            "Владелец: {owner_link}\n"
-            "Предыдущая группа была недоступна.\n"
-            "Ошибка: {error}"
-        ),
         "log_reloaded": "<b>TGWatcher перезагружен, вотчеры активны</b>",
         "log_message": (
             "<b>[TG Сообщение]</b>\n\n"
@@ -247,6 +234,10 @@ class TGWatcher(loader.Module):
         "log_account_removed": "[УДАЛЕН] Аккаунт #{num}: {name}",
         "log_health_dead": "[ALERT] {owner_link} - Сессия #{num} ({name}) мертва! Удаление...",
         "log_health_result": "[HEALTH] Живых: {alive} | Мертвых: {dead} | Удалено: {removed}",
+        "setup_failed": (
+            "<b>Не удалось настроить топик TGWatcher</b>\n\n"
+            "Модуль продолжит работать, но без логирования."
+        ),
     }
 
     def __init__(self):
@@ -269,8 +260,8 @@ class TGWatcher(loader.Module):
         self._handlers = {}
         self._owner = None
         self._my_id = None
-        self._chat_logs = None
-        self._log_group_id = None
+        self._asset_channel = None
+        self._log_topic = None
         self._health_task = None
         self._flood_lock = asyncio.Lock()
         self._setup_failed = False
@@ -280,8 +271,7 @@ class TGWatcher(loader.Module):
         self._db = db
         self._owner = await client.get_me()
         self._my_id = self._owner.id
-        self._log_group_id = self._db.get("TGWatcher", "log_group_id", None)
-        await self._ensure_log_chat()
+        await self._ensure_log_topic()
         await self._restore_sessions()
         self._start_health_loop()
 
@@ -304,36 +294,6 @@ class TGWatcher(loader.Module):
                     return u.username
         return None
 
-    async def _set_bot_admin(self, chat_entity):
-        try:
-            bot_user = await self._client.get_entity(self.inline.bot_username)
-            admin_rights = ChatAdminRights(
-                post_messages=True,
-                edit_messages=True,
-                delete_messages=True,
-                ban_users=False,
-                invite_users=False,
-                pin_messages=True,
-                add_admins=False,
-                anonymous=False,
-                manage_call=False,
-                other=False,
-            )
-            await self._client(
-                EditAdminRequest(
-                    channel=chat_entity,
-                    user_id=bot_user,
-                    admin_rights=admin_rights,
-                    rank="TGWatcher",
-                )
-            )
-            return True
-        except ChatAdminRequiredError:
-            return False
-        except Exception as e:
-            logger.error(f"[TGWatcher] Failed to set bot admin: {e}")
-            return False
-
     async def _send_with_flood_wait(self, coro_func, *args, **kwargs):
         max_retries = 5
         for attempt in range(max_retries):
@@ -351,164 +311,79 @@ class TGWatcher(loader.Module):
                 raise
         return None
 
-    async def _try_setup_group(self, chat_entity, is_recovery=False, error_text=None):
-        try:
-            try:
-                bot_user = await self._client.get_entity(self.inline.bot_username)
-                await self._send_with_flood_wait(
-                    self._client, InviteToChannelRequest(chat_entity, [bot_user])
-                )
-            except Exception as e:
-                logger.warning(f"[TGWatcher] Bot invite failed (maybe already in): {e}")
-            admin_set = await self._set_bot_admin(chat_entity)
-            if not admin_set:
-                return False, "Failed to set bot admin rights"
-            await asyncio.sleep(2)
-            await self._send_greeting(is_recovery=is_recovery, error_text=error_text)
-            return True, None
-        except Exception as e:
-            return False, str(e)
+    async def _ensure_log_topic(self):
+        async with self._flood_lock:
+            self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
+            if not self._asset_channel:
+                logger.warning("[TGWatcher] heroku.forums channel_id not found in DB.")
+                self._setup_failed = True
+                return
 
-    async def _send_greeting(self, is_recovery=False, error_text=None):
-        owner_link = get_user_link(self._my_id, get_full_name(self._owner))
-        active_count = len(self._accounts)
-        if is_recovery:
-            text = self.strings["log_recovery"].format(
-                owner_link=owner_link,
-                error=escape_html(str(error_text)[:200]) if error_text else "Unknown",
-            )
-        else:
-            text = self.strings["log_greeting"].format(
-                owner_link=owner_link, count=active_count
-            )
-        try:
-            await self._send_with_flood_wait(
-                self.inline.bot.send_photo,
-                self._chat_logs,
-                photo=LOG_GROUP_AVATAR_URL,
-                caption=text,
-                parse_mode="HTML",
-            )
-        except Exception:
+            try:
+                self._log_topic = await utils.asset_forum_topic(
+                    self._client,
+                    self._db,
+                    self._asset_channel,
+                    "TGWatcher Logs",
+                    description="TGWatcher message logs.",
+                    icon_emoji_id=5188466187448650036,
+                )
+                self._setup_failed = False
+            except Exception as e:
+                logger.error(f"[TGWatcher] Failed to create/get log topic: {e}")
+                self._setup_failed = True
+                try:
+                    await self.inline.bot.send_message(
+                        self._my_id,
+                        self.strings["setup_failed"],
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+                return
+
+            owner_link = get_user_link(self._my_id, get_full_name(self._owner))
             try:
                 await self._send_with_flood_wait(
                     self.inline.bot.send_message,
-                    self._chat_logs,
-                    text,
+                    int(f"-100{self._asset_channel}"),
+                    self.strings["log_greeting"].format(
+                        owner_link=owner_link,
+                        count=len(self._accounts),
+                    ),
                     parse_mode="HTML",
+                    message_thread_id=self._log_topic.id,
                 )
-            except Exception as e:
-                logger.error(f"[TGWatcher] Greeting failed: {e}")
-
-    async def _ensure_log_chat(self, error_text=None):
-        async with self._flood_lock:
-            is_recovery = self._log_group_id is not None
-            if self._log_group_id:
+            except Exception:
                 try:
-                    self._chat_logs = int(f"-100{self._log_group_id}")
-                    await self._client.get_entity(self._chat_logs)
-                    try:
-                        await self._send_with_flood_wait(
-                            self.inline.bot.send_message,
-                            self._chat_logs,
-                            self.strings["log_reloaded"],
-                            parse_mode="HTML",
-                        )
-                        self._setup_failed = False
-                        return
-                    except Exception as e:
-                        logger.warning(f"[TGWatcher] Bot cant send to log chat: {e}")
-                        try:
-                            chat_entity = await self._client.get_entity(self._chat_logs)
-                            bot_user = await self._client.get_entity(
-                                self.inline.bot_username
-                            )
-                            await self._send_with_flood_wait(
-                                self._client,
-                                InviteToChannelRequest(chat_entity, [bot_user]),
-                            )
-                            await self._set_bot_admin(chat_entity)
-                            await self._send_with_flood_wait(
-                                self.inline.bot.send_message,
-                                self._chat_logs,
-                                self.strings["log_reloaded"],
-                                parse_mode="HTML",
-                            )
-                            self._setup_failed = False
-                            return
-                        except Exception as invite_err:
-                            is_recovery = True
-                            error_text = f"Bot reinvite failed: {invite_err}"
+                    await self._send_with_flood_wait(
+                        self.inline.bot.send_message,
+                        int(f"-100{self._asset_channel}"),
+                        self.strings["log_reloaded"],
+                        parse_mode="HTML",
+                        message_thread_id=self._log_topic.id,
+                    )
                 except Exception as e:
-                    is_recovery = True
-                    error_text = f"Log chat not found: {e}"
-
-            try:
-                chat_entity, _ = await utils.asset_channel(
-                    self._client,
-                    "TGWatcher Logs",
-                    "TGWatcher message logs. @FireJester",
-                    silent=True,
-                    avatar=LOG_GROUP_AVATAR_URL,
-                )
-                self._log_group_id = chat_entity.id
-                self._chat_logs = int(f"-100{chat_entity.id}")
-                self._db.set("TGWatcher", "log_group_id", self._log_group_id)
-                success, setup_error = await self._try_setup_group(
-                    chat_entity, is_recovery=is_recovery, error_text=error_text
-                )
-                if not success:
-                    raise Exception(setup_error)
-                self._setup_failed = False
-            except Exception as e:
-                logger.error(f"[TGWatcher] Failed to create log group: {e}")
-                self._setup_failed = True
+                    logger.error(f"[TGWatcher] Failed to send greeting: {e}")
 
     async def _send_log(self, text):
-        if not self._chat_logs:
+        if not self._log_topic or not self._asset_channel:
             if not self._setup_failed:
-                await self._ensure_log_chat(error_text="No chat in memory")
+                await self._ensure_log_topic()
             return
         try:
             await self._send_with_flood_wait(
                 self.inline.bot.send_message,
-                self._chat_logs,
+                int(f"-100{self._asset_channel}"),
                 text,
                 disable_web_page_preview=True,
                 parse_mode="HTML",
+                message_thread_id=self._log_topic.id,
             )
         except Exception as e:
-            error_str = str(e).lower()
-            if "flood" in error_str:
-                return
-            try:
-                chat_entity = await self._client.get_entity(self._chat_logs)
-                bot_user = await self._client.get_entity(self.inline.bot_username)
-                await self._send_with_flood_wait(
-                    self._client,
-                    InviteToChannelRequest(chat_entity, [bot_user]),
-                )
-                await self._set_bot_admin(chat_entity)
-                await self._send_with_flood_wait(
-                    self.inline.bot.send_message,
-                    self._chat_logs,
-                    text,
-                    disable_web_page_preview=True,
-                    parse_mode="HTML",
-                )
-            except Exception:
-                if not self._setup_failed:
-                    await self._ensure_log_chat(error_text=e)
-                    try:
-                        await self._send_with_flood_wait(
-                            self.inline.bot.send_message,
-                            self._chat_logs,
-                            text,
-                            disable_web_page_preview=True,
-                            parse_mode="HTML",
-                        )
-                    except Exception:
-                        pass
+            logger.error(f"[TGWatcher] Failed to send log: {e}")
+            if not self._setup_failed:
+                await self._ensure_log_topic()
 
     def _extract_session_from_text(self, text):
         if not text:
@@ -540,9 +415,7 @@ class TGWatcher(loader.Module):
     def _get_sessions_list(self):
         sessions = self.config["sessions"]
         if isinstance(sessions, str):
-            if not sessions:
-                return []
-            return [sessions]
+            return [sessions] if sessions else []
         if isinstance(sessions, list):
             return list(sessions)
         return []
@@ -579,7 +452,6 @@ class TGWatcher(loader.Module):
         self._clients = new_clients
         self._handlers = new_handlers
         self._save_sessions_list(new_sessions)
-        self._save_accounts_meta()
 
     def _save_accounts_meta(self):
         meta = {}
@@ -654,7 +526,6 @@ class TGWatcher(loader.Module):
 
     async def _restore_sessions(self):
         sessions = self._get_sessions_list()
-        meta = self._load_accounts_meta()
         if not sessions:
             return
         restored = 0
@@ -677,9 +548,7 @@ class TGWatcher(loader.Module):
                     del self._accounts[num]
             self._renumber_accounts()
         if restored > 0:
-            await self._send_log(
-                f"[RESTORE] Restored {restored} account(s)"
-            )
+            await self._send_log(f"[RESTORE] Restored {restored} account(s)")
 
     async def _setup_watcher(self, num, client):
         if num in self._handlers:
@@ -696,9 +565,7 @@ class TGWatcher(loader.Module):
                     return
                 text = event.message.text or event.message.message or "[no text]"
                 owner_link = get_user_link(self._my_id, get_full_name(self._owner))
-                account_link = get_user_link(
-                    acc["user_id"], acc.get("name", "Unknown")
-                )
+                account_link = get_user_link(acc["user_id"], acc.get("name", "Unknown"))
                 log_text = self.strings["log_message"].format(
                     account_link=account_link,
                     num=num,
@@ -711,8 +578,6 @@ class TGWatcher(loader.Module):
                 logger.error(f"[TGWatcher] Watcher #{num} error: {e}")
 
         self._handlers[num] = handler
-
-    # --- Health check ---
 
     def _start_health_loop(self):
         if self._health_task:
@@ -768,6 +633,14 @@ class TGWatcher(loader.Module):
             )
         )
 
+    def _get_topic_id(self, message):
+        reply_to = getattr(message, "reply_to", None)
+        if reply_to:
+            return getattr(reply_to, "reply_to_top_id", None) or getattr(
+                reply_to, "reply_to_msg_id", None
+            )
+        return None
+
     @loader.command(
         ru_doc="Управление TGWatcher",
         en_doc="TGWatcher management",
@@ -779,9 +652,7 @@ class TGWatcher(loader.Module):
         prefix = self.get_prefix()
 
         if not args_list:
-            await utils.answer(
-                message, self.strings["help"].format(prefix=prefix)
-            )
+            await utils.answer(message, self.strings["help"].format(prefix=prefix))
             return
 
         cmd = args_list[0].lower()
@@ -793,9 +664,7 @@ class TGWatcher(loader.Module):
         elif cmd == "status":
             await self._cmd_status(message)
         else:
-            await utils.answer(
-                message, self.strings["help"].format(prefix=prefix)
-            )
+            await utils.answer(message, self.strings["help"].format(prefix=prefix))
 
     async def _cmd_add(self, message: Message, args):
         session_str = None
@@ -814,18 +683,12 @@ class TGWatcher(loader.Module):
                     if file_name.endswith(".session"):
                         file_data = await reply.download_media(bytes)
                         if file_data:
-                            session_str = self._read_session_from_file_bytes(
-                                file_data
-                            )
+                            session_str = self._read_session_from_file_bytes(file_data)
                         if not session_str:
-                            return await utils.answer(
-                                message, self.strings["invalid_file"]
-                            )
+                            return await utils.answer(message, self.strings["invalid_file"])
 
         if not session_str:
-            return await utils.answer(
-                message, self.strings["provide_session"]
-            )
+            return await utils.answer(message, self.strings["provide_session"])
 
         status_msg = await utils.answer(message, self.strings["connecting"])
 
@@ -838,11 +701,7 @@ class TGWatcher(loader.Module):
                 ),
             )
 
-        if self._accounts:
-            next_num = max(self._accounts.keys()) + 1
-        else:
-            next_num = 1
-
+        next_num = max(self._accounts.keys()) + 1 if self._accounts else 1
         me, error = await self._connect_session(session_str, next_num)
 
         if not me:
@@ -892,9 +751,7 @@ class TGWatcher(loader.Module):
     async def _cmd_rm(self, message: Message, args):
         prefix = self.get_prefix()
         if len(args) < 2:
-            return await utils.answer(
-                message, self.strings["rm_usage"].format(prefix=prefix)
-            )
+            return await utils.answer(message, self.strings["rm_usage"].format(prefix=prefix))
 
         target = args[1].lower()
 
@@ -907,35 +764,25 @@ class TGWatcher(loader.Module):
             self._handlers.clear()
             self._save_sessions_list([])
             self._save_accounts_meta()
-            await utils.answer(
-                message, self.strings["all_removed"].format(count=count)
-            )
+            await utils.answer(message, self.strings["all_removed"].format(count=count))
             await self._send_log(f"[REMOVED ALL] {count} account(s)")
             return
 
         try:
             num = int(target)
         except ValueError:
-            return await utils.answer(
-                message, self.strings["rm_usage"].format(prefix=prefix)
-            )
+            return await utils.answer(message, self.strings["rm_usage"].format(prefix=prefix))
 
         if num not in self._accounts:
-            return await utils.answer(
-                message, self.strings["account_not_found"].format(num=num)
-            )
+            return await utils.answer(message, self.strings["account_not_found"].format(num=num))
 
         acc = self._accounts[num]
         name = acc.get("name", "Unknown")
         await self._disconnect_account(num, save=True)
 
-        await utils.answer(
-            message, self.strings["account_removed"].format(num=num)
-        )
+        await utils.answer(message, self.strings["account_removed"].format(num=num))
         await self._send_log(
-            self.strings["log_account_removed"].format(
-                num=num, name=escape_html(name)
-            )
+            self.strings["log_account_removed"].format(num=num, name=escape_html(name))
         )
 
     async def _cmd_status(self, message: Message):
@@ -943,12 +790,13 @@ class TGWatcher(loader.Module):
             return await utils.answer(message, self.strings["no_accounts"])
 
         lines = []
-        lines.append(f"TGWatcher Status Report")
+        lines.append("TGWatcher Status Report")
         lines.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}")
         lines.append(f"Owner ID: {self._my_id}")
         lines.append(f"Owner: {get_full_name(self._owner)}")
         lines.append(f"Health interval: {self.config['health_interval']}h")
-        lines.append(f"Log group ID: {self._log_group_id or 'N/A'}")
+        lines.append(f"Log channel ID: {self._asset_channel or 'N/A'}")
+        lines.append(f"Log topic ID: {self._log_topic.id if self._log_topic else 'N/A'}")
         lines.append(f"Total accounts: {len(self._accounts)}")
         lines.append("")
         lines.append("=" * 40)
@@ -1002,11 +850,3 @@ class TGWatcher(loader.Module):
             reply_to=topic_id,
         )
         await message.delete()
-
-    def _get_topic_id(self, message):
-        reply_to = getattr(message, "reply_to", None)
-        if reply_to:
-            return getattr(reply_to, "reply_to_top_id", None) or getattr(
-                reply_to, "reply_to_msg_id", None
-            )
-        return None
