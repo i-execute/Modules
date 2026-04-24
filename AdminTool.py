@@ -125,12 +125,20 @@ def _has_ban_right(entity) -> bool:
         return False
     return getattr(ar, "ban_users", False)
 
-
 async def _resolve_target(client, message: Message):
     reply = await message.get_reply_message()
     args_raw = utils.get_args_raw(message)
-    args_list = args_raw.strip().split() if args_raw.strip() else []
+    args_list = args_raw.strip().split() if args_raw and args_raw.strip() else []
 
+    if reply:
+        sender = reply.sender_id
+        if not sender:
+            return None, "no_user", []
+        try:
+            entity = await client.get_entity(sender)
+            return entity, None, args_list
+        except Exception:
+            return None, "no_access", []
     if args_list:
         raw = args_list[0]
         extra = args_list[1:]
@@ -142,16 +150,6 @@ async def _resolve_target(client, message: Message):
             return entity, None, extra
         except Exception:
             return None, "no_user", []
-
-    if reply:
-        sender = reply.sender_id
-        if not sender:
-            return None, "no_user", []
-        try:
-            entity = await client.get_entity(sender)
-            return entity, None, args_list
-        except Exception:
-            return None, "no_access", []
 
     return None, "no_args", []
 
@@ -299,16 +297,19 @@ class AdminTool(loader.Module):
             if isinstance(entity, (ChannelForbidden, ChatForbidden)):
                 continue
             if isinstance(entity, Chat):
+                if entity.id in skip:
+                    continue
                 if _has_ban_right(entity):
-                    result.append(("group", entity.id))
+                    result.append(("group", dialog.input_entity))
             elif isinstance(entity, Channel):
                 if entity.id in skip:
                     continue
                 if _has_ban_right(entity):
                     if getattr(entity, "megagroup", False):
-                        result.append(("group", entity.id))
+                        result.append(("group", dialog.input_entity))
                     elif getattr(entity, "broadcast", False):
-                        result.append(("channel", entity.id))
+                        result.append(("channel", dialog.input_entity))
+        return result
         return result
 
     async def _collect_mute_chats(self):
@@ -319,15 +320,17 @@ class AdminTool(loader.Module):
             if isinstance(entity, (ChannelForbidden, ChatForbidden)):
                 continue
             if isinstance(entity, Chat):
+                if entity.id in skip:
+                    continue
                 if _has_ban_right(entity):
-                    result.append(entity.id)
+                    result.append(dialog.input_entity)
             elif isinstance(entity, Channel):
                 if entity.id in skip:
                     continue
                 if not getattr(entity, "megagroup", False):
                     continue
                 if _has_ban_right(entity):
-                    result.append(entity.id)
+                    result.append(dialog.input_entity)
         return result
 
     async def _get_ban_chats(self):
@@ -339,7 +342,11 @@ class AdminTool(loader.Module):
     async def _get_mute_chats(self):
         if not self._mute_cache or self._mute_cache.get("exp", 0) < time.time():
             chats = await self._collect_mute_chats()
-            self._mute_cache = {"exp": time.time() + 600, "chats": chats}
+            self._mute_cache = {
+                "exp": time.time() + 600,
+                "chats": chats,
+                "ids": {getattr(p, "channel_id", None) or getattr(p, "chat_id", None) for p in chats},
+            }
         return self._mute_cache["chats"]
 
     async def _collect_full_stats(self):
@@ -657,7 +664,7 @@ class AdminTool(loader.Module):
         if message.sender_id not in self._watched:
             return
 
-        mute_chat_ids = self._mute_cache.get("chats", [])
+        mute_chat_ids = self._mute_cache.get("ids", set())
         if message.chat_id not in mute_chat_ids:
             return
 
