@@ -12,8 +12,6 @@ from telethon.tl.functions.messages import DeleteHistoryRequest, ReportSpamReque
 from telethon.tl.types import (
     Message,
     PeerUser,
-    User,
-    Channel,
     ChatAdminRights,
 )
 from telethon.errors import FloodWaitError, ChatAdminRequiredError
@@ -139,7 +137,6 @@ class RaidProtection(loader.Module):
         today = datetime.now().strftime("%d.%m.%Y")
         ban_dates.append(today)
         self.set("ban_dates", ban_dates)
-
         total = self.get("total_bans", 0)
         self.set("total_bans", total + 1)
 
@@ -180,10 +177,10 @@ class RaidProtection(loader.Module):
                 logger.error(f"[RaidProtection] Failed to create/get log topic: {e}")
                 self._setup_failed = True
                 try:
-                    await self._client.send_message(
+                    await self.inline.bot.send_message(
                         self._owner.id,
                         self.strings["inline_create_failed"],
-                        parse_mode="html",
+                        parse_mode="HTML",
                     )
                 except Exception:
                     pass
@@ -198,11 +195,11 @@ class RaidProtection(loader.Module):
         if self._storage_topic and self._asset_channel:
             try:
                 await self._send_with_flood_wait(
-                    self._client.send_message,
+                    self.inline.bot.send_message,
                     int(f"-100{self._asset_channel}"),
                     self.strings["reloaded"],
-                    reply_to=self._storage_topic.id,
-                    parse_mode="html",
+                    parse_mode="HTML",
+                    message_thread_id=self._storage_topic.id,
                 )
             except Exception as e:
                 logger.warning(f"[RaidProtection] Failed to send reloaded message: {e}")
@@ -214,12 +211,12 @@ class RaidProtection(loader.Module):
             return
         try:
             await self._send_with_flood_wait(
-                self._client.send_message,
+                self.inline.bot.send_message,
                 int(f"-100{self._asset_channel}"),
                 text,
-                reply_to=self._storage_topic.id,
-                parse_mode="html",
-                link_preview=False,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+                message_thread_id=self._storage_topic.id,
             )
         except Exception as e:
             logger.error(f"[RaidProtection] Failed to send log: {e}")
@@ -287,11 +284,7 @@ class RaidProtection(loader.Module):
             or not isinstance(message, Message)
             or not isinstance(message.peer_id, PeerUser)
             or not self.get("state", False)
-            or utils.get_chat_id(message)
-            in {
-                777000,
-                self._tg_id,
-            }
+            or utils.get_chat_id(message) in {777000, self._tg_id}
         ):
             return
         cid = utils.get_chat_id(message)
@@ -321,11 +314,7 @@ class RaidProtection(loader.Module):
                 return self._approve(cid, "contact")
         try:
             first_message = (
-                await self._client.get_messages(
-                    peer,
-                    limit=1,
-                    reverse=True,
-                )
+                await self._client.get_messages(peer, limit=1, reverse=True)
             )[0]
             if first_message.sender_id == self._tg_id:
                 return self._approve(cid, "started_by_you")
@@ -388,26 +377,14 @@ class RaidProtection(loader.Module):
 
             raw = getattr(message, "raw_text", None) or ""
             msg_text = self._escape(
-                "<sticker>"
-                if message.sticker
-                else (
-                    "<photo>"
-                    if message.photo
-                    else (
-                        "<video>"
-                        if message.video
-                        else (
-                            "<file>"
-                            if message.document
-                            else raw[:3000]
-                        )
-                    )
-                )
+                "<sticker>" if message.sticker
+                else "<photo>" if message.photo
+                else "<video>" if message.video
+                else "<file>" if message.document
+                else raw[:3000]
             )
 
-            username_line = ""
-            if username:
-                username_line = f"<b>Username:</b> @{username}\n"
+            username_line = f"<b>Username:</b> @{username}\n" if username else ""
 
             log_text = self.strings["banned_log"].format(
                 user_id=sender_id,
