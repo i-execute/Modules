@@ -10,8 +10,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-GREETING_MEDIA_URL = "https://github.com/FireJester/Media/raw/main/Greeting_in_Logger.jpeg"
-
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/Logger/Greetings.jpeg"
 
 @loader.tds
 class Logger(loader.Module):
@@ -68,24 +67,6 @@ class Logger(loader.Module):
             "{chat_uname}"
             "<a href='{msg_link}'>Open message</a>"
         ),
-        "help": (
-            "<b>Logger Commands</b>\n\n"
-            "<code>.logger</code> - show this help\n"
-            "<code>.logger status</code> - current logger status\n"
-        ),
-        "status": (
-            "<b>Logger Status</b>\n\n"
-            "<b>Log topic:</b> {topic_name}\n"
-            "<b>Channel ID:</b> <code>{channel_id}</code>\n"
-            "<b>Topic ID:</b> <code>{topic_id}</code>\n"
-            "<b>Status:</b> {status}\n"
-        ),
-        "status_no_topic": (
-            "<b>Logger Status</b>\n\n"
-            "<b>Log topic:</b> Not configured\n"
-            "<b>Status:</b> Inactive\n\n"
-            "Make sure heroku.forums channel_id is set in DB"
-        ),
     }
 
     strings_ru = {
@@ -137,24 +118,6 @@ class Logger(loader.Module):
             "<b>Канал:</b> {chat_name} [<code>{chat_id}</code>]\n"
             "{chat_uname}"
             "<a href='{msg_link}'>Открыть сообщение</a>"
-        ),
-        "help": (
-            "<b>Команды Logger</b>\n\n"
-            "<code>.logger</code> - показать эту справку\n"
-            "<code>.logger status</code> - текущий статус логгера\n"
-        ),
-        "status": (
-            "<b>Статус Logger</b>\n\n"
-            "<b>Топик:</b> {topic_name}\n"
-            "<b>ID канала:</b> <code>{channel_id}</code>\n"
-            "<b>ID топика:</b> <code>{topic_id}</code>\n"
-            "<b>Статус:</b> {status}\n"
-        ),
-        "status_no_topic": (
-            "<b>Статус Logger</b>\n\n"
-            "<b>Топик:</b> Не настроен\n"
-            "<b>Статус:</b> Неактивен\n\n"
-            "Убедись что heroku.forums channel_id установлен в БД"
         ),
     }
 
@@ -307,41 +270,6 @@ class Logger(loader.Module):
             )
         except Exception as e:
             logger.error(f"[Logger] Failed to send log: {e}")
-
-    @loader.command(
-        ru_doc="Показать справку по командам",
-        en_doc="Show help for commands",
-    )
-    async def logger(self, message):
-        """Show help for commands"""
-        args = utils.get_args_raw(message).strip().lower()
-
-        if not args:
-            await utils.answer(message, self.strings["help"])
-            return
-
-        parts = args.split()
-        cmd = parts[0]
-
-        if cmd == "status":
-            await self._cmd_status(message)
-        else:
-            await utils.answer(message, self.strings["help"])
-
-    async def _cmd_status(self, message):
-        if not self._logger_topic or not self._asset_channel:
-            await utils.answer(message, self.strings["status_no_topic"])
-            return
-
-        await utils.answer(
-            message,
-            self.strings["status"].format(
-                topic_name="Logger",
-                channel_id=self._asset_channel,
-                topic_id=self._logger_topic.id,
-                status="Active",
-            ),
-        )
 
     @loader.watcher(only_commands=True)
     async def watcher(self, message):
