@@ -1,5 +1,5 @@
-__version__ = (1, 0, 1)
-# meta developer: FireJester.t.me
+__version__ = (1, 0, 3)
+# meta developer: I_execute.t.me
 # requires: aiohttp, yt-dlp, mutagen, Pillow
 
 import os
@@ -71,7 +71,7 @@ MAX_FILE_SIZE = 50 * 1024 * 1024
 REQUEST_OK    = 200
 
 INLINE_QUERY_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/YTMusic/Inline_query.png"
-DOWNLOADING_STUB = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/YTMusic/Downloading.mp3"
+DOWNLOADING_STUB    = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/YTMusic/Downloading.mp3"
 
 LOG_ENTRIES = []
 MAX_LOG     = 300
@@ -94,7 +94,7 @@ def sanitize_fn(n: str) -> str:
     return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", n).strip(". ")[:180] or "track"
 
 
-def normalize_cover(raw: bytes, max_size: int | None = None, force_jpeg: bool = False) -> bytes | None:
+def normalize_cover(raw: bytes, max_size: int | None = None) -> bytes | None:
     if not raw or len(raw) < 100:
         return None
     try:
@@ -122,7 +122,7 @@ async def _download_image(url: str) -> bytes | None:
                 if r.status != REQUEST_OK:
                     return None
                 data = await r.read()
-                return data if len(data) > 500 else None
+                return data if len(data) >= 1000 else None
     except Exception as e:
         _log("DL_IMG", f"Error {url[:80]}: {e}")
         return None
@@ -141,7 +141,7 @@ async def _check_thumb(session: aiohttp.ClientSession, url: str) -> bool:
     return False
 
 
-async def _best_thumb(video_id: str) -> str:
+async def _best_thumb_for_inline(video_id: str) -> str:
     candidates = {k: f"https://img.youtube.com/vi/{video_id}/{k}.jpg" for k in THUMB_KEYS}
     async with aiohttp.ClientSession(headers=HEADERS_WEB) as s:
         results = await asyncio.gather(
@@ -150,9 +150,8 @@ async def _best_thumb(video_id: str) -> str:
         )
     for key, ok in zip(THUMB_KEYS, results):
         if ok is True:
-            url = candidates[key]
             _log("THUMB", f"{video_id} best={key}")
-            return url
+            return candidates[key]
     fallback = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
     _log("THUMB", f"{video_id} fallback")
     return fallback
@@ -287,13 +286,7 @@ class YTMusic(loader.Module):
         "not_found_desc":   "Try a different query",
         "hint_title":       "YTMusic",
         "hint_desc":        "Type a track name to search on YouTube",
-        "too_large_msg":    "<b>Track is over 50 MB - cannot download</b>",
-        "dl_failed_msg":    "<b>Download failed</b>",
-        "searching":        "Searching...",
         "downloading":      "Downloading...",
-        "yt_wait_title":    "YouTube: downloading track...",
-        "yt_wait_desc":     "Please wait and repeat the query",
-        "yt_wait_text":     "<b>YTMusic:</b> Track is being downloaded. Please wait and try again.",
     }
 
     strings_ru = {
@@ -305,13 +298,7 @@ class YTMusic(loader.Module):
         "not_found_desc":   "Попробуй другой запрос",
         "hint_title":       "YTMusic",
         "hint_desc":        "Введи название трека для поиска на YouTube",
-        "too_large_msg":    "<b>Трек больше 50 МБ - скачать нельзя</b>",
-        "dl_failed_msg":    "<b>Не удалось скачать</b>",
-        "searching":        "Поиск...",
         "downloading":      "Загрузка...",
-        "yt_wait_title":    "YouTube: скачиваю трек...",
-        "yt_wait_desc":     "Подожди и повтори запрос",
-        "yt_wait_text":     "<b>YTMusic:</b> Трек скачивается. Подожди и попробуй ещё раз.",
     }
 
     def __init__(self):
@@ -327,10 +314,10 @@ class YTMusic(loader.Module):
                 validator=loader.validators.Hidden(),
             ),
         )
-        self._tmp          = None
-        self._me_id        = None
-        self._patched      = False
-        self._upload_lock  = None
+        self._tmp:          str | None       = None
+        self._me_id:        int | None       = None
+        self._patched:      bool             = False
+        self._upload_lock:  asyncio.Lock | None = None
         self._real_cache:   dict[str, tuple] = {}
         self._stub_cache:   dict[str, str]   = {}
         self._search_cache: dict[str, list]  = {}
@@ -456,73 +443,134 @@ class YTMusic(loader.Module):
         ddir = tempfile.mkdtemp(dir=self._tmp)
         try:
             yt_url   = f"https://youtu.be/{video_id}"
-            out_tmpl = os.path.join(ddir, "%(title)s.%(ext)s")
             cookies  = self._cookies_file()
+            loop     = asyncio.get_event_loop()
 
-            opts = {
-                "format": "bestaudio/best",
-                "outtmpl": out_tmpl,
-                "quiet": True,
-                "no_warnings": True,
-                "postprocessors": [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "320",
-                }],
-                "writethumbnail": False,
-                "noplaylist": True,
-            }
-            if cookies:
-                opts["cookiefile"] = cookies
-
-            loop        = asyncio.get_event_loop()
             info_holder = {}
 
-            def _run():
+            def _extract():
+                opts = {"quiet": True, "no_warnings": True, "socket_timeout": 30}
+                if cookies:
+                    opts["cookiefile"] = cookies
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(yt_url, download=True)
-                    info_holder["info"] = info
+                    info_holder["info"] = ydl.extract_info(yt_url, download=False)
 
-            await loop.run_in_executor(None, _run)
+            await loop.run_in_executor(None, _extract)
+            info = info_holder.get("info") or {}
 
-            info   = info_holder.get("info", {})
-            title  = info.get("title", "Unknown") or "Unknown"
-            artist = info.get("uploader") or info.get("channel") or "YouTube"
-            dur_s  = int(info.get("duration") or 0)
+            title         = info.get("title", "Unknown") or "Unknown"
+            artist        = info.get("uploader") or info.get("channel") or "YouTube"
+            dur_s         = int(info.get("duration") or 0)
+            thumbnail_url = info.get("thumbnail", "")
 
-            mp3_path = None
+            _log("DL", f"title={title!r} artist={artist!r} thumb={thumbnail_url[:80]}")
+
+            safe_name  = sanitize_fn(f"{artist} - {title}")
+            out_tmpl   = os.path.join(ddir, f"{safe_name}.%(ext)s")
+
+            def _download():
+                opts = {
+                    "outtmpl": out_tmpl,
+                    "quiet": True,
+                    "no_warnings": True,
+                    "format": "bestaudio/best",
+                    "postprocessors": [{
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "320",
+                    }],
+                    "noplaylist": True,
+                }
+                if cookies:
+                    opts["cookiefile"] = cookies
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.download([yt_url])
+
+            await loop.run_in_executor(None, _download)
+
+            audio_exts = (".mp3", ".m4a", ".opus", ".ogg", ".wav", ".webm")
+            found = None
             for fn in os.listdir(ddir):
-                if fn.endswith(".mp3"):
-                    mp3_path = os.path.join(ddir, fn)
+                if any(fn.endswith(ext) for ext in audio_exts):
+                    found = os.path.join(ddir, fn)
                     break
 
-            if not mp3_path or not os.path.exists(mp3_path):
-                return {"error": "mp3 not found after download"}
+            if not found or not os.path.exists(found):
+                return {"error": "audio file not found after download"}
 
-            size = os.path.getsize(mp3_path)
-            if size > MAX_FILE_SIZE:
-                _log("DL", f"File too large: {size // (1024 * 1024)} MB")
-                return {"error": "too_large"}
-            if size == 0:
+            final_mp3 = os.path.join(ddir, f"{safe_name}.mp3")
+            if not found.endswith(".mp3"):
+                proc = await asyncio.create_subprocess_exec(
+                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    "-y", "-i", found, "-vn", "-acodec", "libmp3lame", "-ab", "320k", final_mp3,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await asyncio.wait_for(proc.communicate(), timeout=120)
+                if proc.returncode == 0 and os.path.exists(final_mp3) and os.path.getsize(final_mp3) > 0:
+                    try:
+                        os.remove(found)
+                    except Exception:
+                        pass
+                else:
+                    final_mp3 = found
+            else:
+                if found != final_mp3:
+                    try:
+                        os.rename(found, final_mp3)
+                    except Exception:
+                        final_mp3 = found
+
+            if not os.path.exists(final_mp3) or os.path.getsize(final_mp3) == 0:
                 return {"error": "empty file"}
 
-            thumb_url  = await self._best_thumb_cached(video_id)
-            cover_data = None
-            thumb_data = None
-            if thumb_url:
-                raw = await _download_image(thumb_url)
-                if raw:
-                    cover_data = normalize_cover(raw, force_jpeg=True)
-                    thumb_data = normalize_cover(raw, max_size=320, force_jpeg=True)
+            size = os.path.getsize(final_mp3)
+            if size > MAX_FILE_SIZE:
+                _log("DL", f"Too large: {size // (1024 * 1024)} MB")
+                return {"error": "too_large"}
 
-            _embed_id3(mp3_path, title, artist, cover_data)
+            raw_cover  = await _download_image(thumbnail_url) if thumbnail_url else None
+            cover_data = normalize_cover(raw_cover) if raw_cover else None
+            thumb_data = normalize_cover(raw_cover, max_size=320) if raw_cover else None
 
-            with open(mp3_path, "rb") as f:
+            if cover_data and final_mp3.endswith(".mp3"):
+                cover_path   = os.path.join(ddir, "cover.jpg")
+                covered_mp3  = os.path.join(ddir, f"{safe_name}_cover.mp3")
+                with open(cover_path, "wb") as cf:
+                    cf.write(cover_data)
+                proc = await asyncio.create_subprocess_exec(
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                    "-i", final_mp3, "-i", cover_path,
+                    "-map", "0:a", "-map", "1:0",
+                    "-c:a", "copy", "-c:v", "copy",
+                    "-id3v2_version", "3",
+                    "-metadata:s:v", "title=Cover",
+                    "-metadata:s:v", "comment=Cover (front)",
+                    "-disposition:v", "attached_pic", covered_mp3,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await asyncio.wait_for(proc.communicate(), timeout=60)
+                if proc.returncode == 0 and os.path.exists(covered_mp3) and os.path.getsize(covered_mp3) > 0:
+                    try:
+                        os.remove(final_mp3)
+                    except Exception:
+                        pass
+                    final_mp3 = covered_mp3
+                else:
+                    _embed_id3(final_mp3, title, artist, cover_data)
+            elif final_mp3.endswith(".mp3"):
+                _embed_id3(final_mp3, title, artist, None)
+
+            if not thumb_data and cover_data:
+                thumb_data = cover_data
+
+            with open(final_mp3, "rb") as f:
                 audio_bytes = f.read()
 
             file_id = await self._upload_to_tg(
                 audio_bytes,
-                sanitize_fn(f"{artist} - {title}") + ".mp3",
+                os.path.basename(final_mp3),
                 title,
                 artist,
                 dur_s,
@@ -533,9 +581,8 @@ class YTMusic(loader.Module):
             return {"error": "Telegram upload failed"}
 
         except Exception as e:
-            err = str(e)[:120]
-            _log("DL", f"Exception: {err}")
-            return {"error": err}
+            _log("DL", f"Exception: {str(e)[:120]}")
+            return {"error": str(e)[:120]}
         finally:
             shutil.rmtree(ddir, ignore_errors=True)
 
@@ -579,11 +626,6 @@ class YTMusic(loader.Module):
                 return fid
             return None
 
-    async def _best_thumb_cached(self, video_id: str) -> str:
-        if video_id not in self._thumb_cache:
-            self._thumb_cache[video_id] = await _best_thumb(video_id)
-        return self._thumb_cache[video_id]
-
     async def _get_stub(self, video_id: str, title: str, artist: str) -> str | None:
         if video_id in self._stub_cache:
             return self._stub_cache[video_id]
@@ -604,7 +646,7 @@ class YTMusic(loader.Module):
 
         hq_url     = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
         raw        = await _download_image(hq_url)
-        thumb_data = normalize_cover(raw, max_size=320, force_jpeg=True) if raw else None
+        thumb_data = normalize_cover(raw, max_size=320) if raw else None
 
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(
@@ -662,8 +704,7 @@ class YTMusic(loader.Module):
             await utils.answer(message, self.strings["cookies_bad_file"])
             return
 
-        txt = data.decode("utf-8", errors="replace")
-        self.config["YT_COOKIES"] = txt
+        self.config["YT_COOKIES"] = data.decode("utf-8", errors="replace")
         await utils.answer(message, self.strings["cookies_saved"])
 
     @loader.inline_handler(ru_doc="YouTube поиск", en_doc="YouTube search")
@@ -695,24 +736,22 @@ class YTMusic(loader.Module):
             await self._inline_msg(query, self.strings["not_found"], self.strings["not_found_desc"])
             return
 
-        thumb_tasks  = [self._best_thumb_cached(t["video_id"]) for t in tracks]
+        thumb_tasks   = [_best_thumb_for_inline(t["video_id"]) for t in tracks]
         thumb_results = await asyncio.gather(*thumb_tasks, return_exceptions=True)
 
-        stub_tasks = []
         for i, t in enumerate(tracks):
-            thumb_ok = thumb_results[i] if not isinstance(thumb_results[i], Exception) else None
-            if thumb_ok:
-                self._thumb_cache[t["video_id"]] = thumb_ok
-            stub_tasks.append(self._get_stub(t["video_id"], t["title"], t["channel"]))
+            if not isinstance(thumb_results[i], Exception):
+                self._thumb_cache[t["video_id"]] = thumb_results[i]
 
+        stub_tasks   = [self._get_stub(t["video_id"], t["title"], t["channel"]) for t in tracks]
         stub_results = await asyncio.gather(*stub_tasks, return_exceptions=True)
 
         inline_results = []
         for i, t in enumerate(tracks):
-            vid      = t["video_id"]
-            title    = t["title"]
-            channel  = t["channel"]
-            dur_str  = t["dur_str"]
+            vid     = t["video_id"]
+            title   = t["title"]
+            channel = t["channel"]
+            dur_str = t["dur_str"]
 
             thumb = (
                 thumb_results[i]
@@ -735,10 +774,9 @@ class YTMusic(loader.Module):
             ]])
 
             if vid in self._real_cache:
-                fid = self._real_cache[vid][0]
                 inline_results.append(InlineQueryResultCachedAudio(
                     id=f"yt_{vid}",
-                    audio_file_id=fid,
+                    audio_file_id=self._real_cache[vid][0],
                 ))
             elif stub_fid:
                 inline_results.append(InlineQueryResultCachedAudio(
@@ -752,9 +790,7 @@ class YTMusic(loader.Module):
                     title=title,
                     description=f"{channel} | {dur_str}",
                     input_message_content=InputTextMessageContent(
-                        message_text=(
-                            f"<b>YTMusic:</b> {escape_html(title)}"
-                        ),
+                        message_text=f"<b>YTMusic:</b> {escape_html(title)}",
                         parse_mode="HTML",
                     ),
                     reply_markup=kb,
