@@ -18,12 +18,11 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-BANNER = "https://raw.githubusercontent.com/FireJester/Modules/main/Assets/DevTool/Inline_query.png"
+BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/DevTool/Inline_query.png"
 TL_BASE = "https://tl.telethon.dev"
 METHODS_CACHE_TTL = 86400
 DETAIL_CACHE_TTL = 3600
 PAGE_SIZE = 10
-
 
 class _LinksParser(HTMLParser):
     def __init__(self):
@@ -53,7 +52,6 @@ class _LinksParser(HTMLParser):
     def handle_data(self, data):
         if self._in_a:
             self._buf += data
-
 
 class _DetailParser(HTMLParser):
     def __init__(self):
@@ -132,7 +130,6 @@ class _DetailParser(HTMLParser):
             return self._pres[-1].strip()
         return ""
 
-
 async def _fetch(url: str, timeout: int = 20):
     import aiohttp
     try:
@@ -144,7 +141,6 @@ async def _fetch(url: str, timeout: int = 20):
     except Exception as ex:
         logger.debug("_fetch error %s: %s", url, ex)
         return None
-
 
 async def _collect_methods_from_page(page_url: str, base_url: str):
     text = await _fetch(page_url)
@@ -165,7 +161,6 @@ async def _collect_methods_from_page(page_url: str, base_url: str):
         rel = abs_href.replace(TL_BASE, "")
         results.append({"name": text_content, "href": rel})
     return results
-
 
 async def _load_index():
     root_url = TL_BASE + "/methods/"
@@ -207,7 +202,6 @@ async def _load_index():
 
     return deduped
 
-
 async def _load_detail(href: str):
     url = TL_BASE + href
     text = await _fetch(url)
@@ -228,7 +222,6 @@ async def _load_detail(href: str):
         "url": url,
     }
 
-
 def _search(items, query: str):
     q = query.lower().strip()
     if not q:
@@ -239,7 +232,6 @@ def _search(items, query: str):
         if q in n:
             name_hits.append(item)
     return name_hits
-
 
 def _build_result_message(detail: dict, display_name: str, url: str) -> str:
     e = html.escape
@@ -369,7 +361,7 @@ class DevTool(loader.Module):
             ),
             thumbnail_url=BANNER,
             thumbnail_width=640,
-            thumbnail_height=360,
+            thumbnail_height=640,
         )
 
     @loader.inline_handler(

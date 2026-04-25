@@ -238,17 +238,13 @@ class Note(loader.Module):
         return all_ids
 
     async def _delete_messages_from_storage(self, msg_ids):
-        """
-        Удаляет только конкретные сообщения по их ID из storage-канала.
-        Никогда не вызывается с пустым списком.
-        """
         if not msg_ids:
-            logger.debug("[Note] _delete_messages_from_storage: пустой список, пропускаем.")
+            logger.debug("[Note] _delete_messages_from_storage: empty list, skipping...")
             return
 
         storage_chat_id = int(f"-100{self._asset_channel}")
         unique_ids = list(set(msg_ids))
-        logger.debug(f"[Note] Удаляем сообщения {unique_ids} из {storage_chat_id}")
+        logger.debug(f"[Note] Removing media... {unique_ids} из {storage_chat_id}")
 
         await self._send_with_flood_wait(
             self._client.delete_messages,
@@ -343,12 +339,12 @@ class Note(loader.Module):
                     await utils.answer(message, self._get_str("not_found").format(name=name))
                     return
                 ids_to_delete = self._collect_ids_from_note(notes[name])
-                logger.debug(f"[Note] remove '{name}': удаляем ID {ids_to_delete}")
+                logger.debug(f"[Note] remove '{name}': Removing ID {ids_to_delete}")
 
                 try:
                     await self._delete_messages_from_storage(ids_to_delete)
                 except Exception as e:
-                    logger.warning(f"[Note] Ошибка при удалении файлов заметки '{name}': {e}")
+                    logger.warning(f"[Note] Deleting error '{name}': {e}")
 
                 del notes[name]
                 self.config["NOTES"] = notes
@@ -368,7 +364,7 @@ class Note(loader.Module):
                 try:
                     await self._delete_messages_from_storage(all_ids)
                 except Exception as e:
-                    logger.warning(f"[Note] Ошибка при удалении всех файлов: {e}")
+                    logger.warning(f"[Note] Total error: {e}")
 
                 self.config["NOTES"] = {}
                 await utils.answer(message, self._get_str("rmall_done"))

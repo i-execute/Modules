@@ -20,7 +20,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-BANNER = "https://github.com/FireJester/Modules/raw/main/Assets/TONScanner/Inline_query.png"
+BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/TONScanner/Inline_query.png"
 
 TONAPI_BASE = "https://tonapi.io/v2"
 
@@ -441,7 +441,7 @@ class TONScanner(loader.Module):
                         ),
                         thumbnail_url=BANNER,
                         thumbnail_width=640,
-                        thumbnail_height=360,
+                        thumbnail_height=640,
                     )
                 ],
                 cache_time=0,
@@ -465,7 +465,7 @@ class TONScanner(loader.Module):
                         ),
                         thumbnail_url=BANNER,
                         thumbnail_width=640,
-                        thumbnail_height=360,
+                        thumbnail_height=640,
                     )
                 ],
                 cache_time=0,
@@ -489,7 +489,7 @@ class TONScanner(loader.Module):
                         ),
                         thumbnail_url=BANNER,
                         thumbnail_width=640,
-                        thumbnail_height=360,
+                        thumbnail_height=640,
                     )
                 ],
                 cache_time=0,
@@ -514,7 +514,7 @@ class TONScanner(loader.Module):
                         ),
                         thumbnail_url=BANNER,
                         thumbnail_width=640,
-                        thumbnail_height=360,
+                        thumbnail_height=640,
                     )
                 ],
                 cache_time=0,

@@ -16,9 +16,9 @@ from .. import loader
 
 logger = logging.getLogger(__name__)
 
-BANNER = "https://raw.githubusercontent.com/FireJester/Modules/main/Assets/InlineDL/Inline_query_new.png"
-THUMB_IG = "https://raw.githubusercontent.com/FireJester/Modules/main/Assets/InlineDL/Instagram.png"
-THUMB_TT = "https://raw.githubusercontent.com/FireJester/Modules/main/Assets/InlineDL/TikTok.png"
+BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/InlineDL/Inline_query.png"
+THUMB_IG = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/InlineDL/Instagram.png"
+THUMB_TT = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/InlineDL/TikTok.png"
 
 INSTAGRAM_RE = re.compile(
     r"https?://(?:www\.)?instagram\.com/"
@@ -35,10 +35,8 @@ TIKTOK_SHORT_RE = re.compile(
     r"https?://(?:(?:vm|vt|www)\.)?tiktok\.com/(?:t/)?([A-Za-z0-9_-]+)"
 )
 
-
 def escape_html(t):
     return (t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
 
 def detect_platform(text):
     if not text:
@@ -53,7 +51,6 @@ def detect_platform(text):
         if m:
             return "tiktok", m.group(0)
     return None, None
-
 
 def make_kk_url(platform, url):
     if platform == "instagram":
@@ -170,7 +167,7 @@ class InlineDL(loader.Module):
                         ),
                         thumbnail_url=BANNER,
                         thumbnail_width=640,
-                        thumbnail_height=360,
+                        thumbnail_height=640,
                     )
                 ],
                 cache_time=0,
@@ -194,7 +191,7 @@ class InlineDL(loader.Module):
                         ),
                         thumbnail_url=BANNER,
                         thumbnail_width=640,
-                        thumbnail_height=360,
+                        thumbnail_height=640,
                     )
                 ],
                 cache_time=0,

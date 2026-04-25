@@ -898,7 +898,7 @@ class XRay(loader.Module):
             f"&sid={short_id}"
             f"&type=tcp"
             f"&headerType=none"
-            f"#FireJester"
+            f"#I-execute"
         )
 
     def _format_bytes(self, b):
