@@ -1,4 +1,4 @@
-__version__ = (1, 0, 3)
+__version__ = (1, 1, 0)
 # meta developer: I_execute.t.me
 # requires: aiohttp, yt-dlp, mutagen, Pillow
 
@@ -72,6 +72,22 @@ REQUEST_OK    = 200
 
 INLINE_QUERY_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/YTMusic/Inline_query.png"
 DOWNLOADING_STUB    = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/YTMusic/Downloading.mp3"
+
+YT_URL_RE = re.compile(
+    r"(?:https?://)?(?:www\.|m\.)??"
+    r"(?:"
+    r"youtu\.be/([a-zA-Z0-9_-]{11})"
+    r"|youtube\.com/watch\?(?:[^&]*&)*?v=([a-zA-Z0-9_-]{11})"
+    r"|youtube\.com/shorts/([a-zA-Z0-9_-]{11})"
+    r"|youtube\.com/live/([a-zA-Z0-9_-]{11})"
+    r"|youtube\.com/embed/([a-zA-Z0-9_-]{11})"
+    r"|youtube\.com/v/([a-zA-Z0-9_-]{11})"
+    r"|youtube\.com/e/([a-zA-Z0-9_-]{11})"
+    r"|music\.youtube\.com/watch\?(?:[^&]*&)*?v=([a-zA-Z0-9_-]{11})"
+    r"|youtube\.com/watch/([a-zA-Z0-9_-]{11})"
+    r")",
+    re.IGNORECASE,
+)
 
 LOG_ENTRIES = []
 MAX_LOG     = 300
@@ -155,6 +171,16 @@ async def _best_thumb_for_inline(video_id: str) -> str:
     fallback = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
     _log("THUMB", f"{video_id} fallback")
     return fallback
+
+
+def _extract_video_id(text: str) -> str | None:
+    m = YT_URL_RE.search(text)
+    if not m:
+        return None
+    for group in m.groups():
+        if group:
+            return group
+    return None
 
 
 async def _search_innertube(query: str, limit: int = 5) -> list[dict]:
@@ -255,6 +281,42 @@ async def _search_ytdlp(query: str, limit: int = 5) -> list[dict]:
         return []
 
 
+async def _get_video_info_ytdlp(video_id: str, cookies: str | None = None) -> dict | None:
+    if not YT_DLP_OK:
+        return None
+    try:
+        loop = asyncio.get_event_loop()
+        opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": False,
+            "skip_download": True,
+            "socket_timeout": 30,
+        }
+        if cookies:
+            opts["cookiefile"] = cookies
+
+        def _run():
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(f"https://youtu.be/{video_id}", download=False)
+
+        info = await loop.run_in_executor(None, _run)
+        if not info:
+            return None
+        dur_s   = int(info.get("duration") or 0)
+        dur_str = f"{dur_s // 60}:{dur_s % 60:02d}" if dur_s else "?:??"
+        return {
+            "video_id": video_id,
+            "title":    info.get("title", "Unknown") or "Unknown",
+            "channel":  info.get("uploader") or info.get("channel") or "YouTube",
+            "dur_str":  dur_str,
+            "yt_url":   f"https://youtu.be/{video_id}",
+        }
+    except Exception as e:
+        _log("INFO_YTDLP", f"Failed for {video_id}: {e}")
+        return None
+
+
 def _embed_id3(filepath: str, title: str, artist: str, cover_data: bytes | None):
     if not MUTAGEN_OK:
         return
@@ -285,8 +347,10 @@ class YTMusic(loader.Module):
         "not_found":        "Nothing found",
         "not_found_desc":   "Try a different query",
         "hint_title":       "YTMusic",
-        "hint_desc":        "Type a track name to search on YouTube",
+        "hint_desc":        "Type a track name or paste a YouTube link",
         "downloading":      "Downloading...",
+        "link_not_found":   "Video not found",
+        "link_not_found_desc": "Could not get video info by link",
     }
 
     strings_ru = {
@@ -297,8 +361,10 @@ class YTMusic(loader.Module):
         "not_found":        "Ничего не найдено",
         "not_found_desc":   "Попробуй другой запрос",
         "hint_title":       "YTMusic",
-        "hint_desc":        "Введи название трека для поиска на YouTube",
+        "hint_desc":        "Введи название трека или вставь ссылку на YouTube",
         "downloading":      "Загрузка...",
+        "link_not_found":   "Видео не найдено",
+        "link_not_found_desc": "Не удалось получить информацию о видео по ссылке",
     }
 
     def __init__(self):
@@ -445,7 +511,6 @@ class YTMusic(loader.Module):
             yt_url   = f"https://youtu.be/{video_id}"
             cookies  = self._cookies_file()
             loop     = asyncio.get_event_loop()
-
             info_holder = {}
 
             def _extract():
@@ -465,8 +530,8 @@ class YTMusic(loader.Module):
 
             _log("DL", f"title={title!r} artist={artist!r} thumb={thumbnail_url[:80]}")
 
-            safe_name  = sanitize_fn(f"{artist} - {title}")
-            out_tmpl   = os.path.join(ddir, f"{safe_name}.%(ext)s")
+            safe_name = sanitize_fn(f"{artist} - {title}")
+            out_tmpl  = os.path.join(ddir, f"{safe_name}.%(ext)s")
 
             def _download():
                 opts = {
@@ -534,8 +599,8 @@ class YTMusic(loader.Module):
             thumb_data = normalize_cover(raw_cover, max_size=320) if raw_cover else None
 
             if cover_data and final_mp3.endswith(".mp3"):
-                cover_path   = os.path.join(ddir, "cover.jpg")
-                covered_mp3  = os.path.join(ddir, f"{safe_name}_cover.mp3")
+                cover_path  = os.path.join(ddir, "cover.jpg")
+                covered_mp3 = os.path.join(ddir, f"{safe_name}_cover.mp3")
                 with open(cover_path, "wb") as cf:
                     cf.write(cover_data)
                 proc = await asyncio.create_subprocess_exec(
@@ -720,6 +785,94 @@ class YTMusic(loader.Module):
 
         _log("INLINE", f"query={text!r} from={query.from_user.id}")
 
+        video_id = _extract_video_id(text)
+        if video_id:
+            await self._handle_link_inline(query, video_id)
+        else:
+            await self._handle_search_inline(query, text)
+
+    async def _handle_link_inline(self, query: InlineQuery, video_id: str):
+        _log("LINK", f"video_id={video_id}")
+
+        if video_id in self._real_cache:
+            fid = self._real_cache[video_id][0]
+            try:
+                await self.inline_bot.answer_inline_query(
+                    inline_query_id=query.id,
+                    results=[InlineQueryResultCachedAudio(
+                        id=f"yt_{video_id}",
+                        audio_file_id=fid,
+                    )],
+                    cache_time=0,
+                    is_personal=True,
+                )
+            except Exception:
+                pass
+            return
+
+        cookies = self._cookies_file()
+        track   = await _get_video_info_ytdlp(video_id, cookies)
+
+        if not track:
+            await self._inline_msg(
+                query,
+                self.strings["link_not_found"],
+                self.strings["link_not_found_desc"],
+            )
+            return
+
+        title   = track["title"]
+        channel = track["channel"]
+
+        thumb = self._thumb_cache.get(video_id)
+        if not thumb:
+            thumb = await _best_thumb_for_inline(video_id)
+            self._thumb_cache[video_id] = thumb
+
+        stub_fid = await self._get_stub(video_id, title, channel)
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text=self.strings["downloading"],
+                callback_data=f"ytm_dl_{video_id[:32]}",
+            )
+        ]])
+
+        if stub_fid:
+            results = [InlineQueryResultCachedAudio(
+                id=f"yt_{video_id}",
+                audio_file_id=stub_fid,
+                reply_markup=kb,
+            )]
+        else:
+            kwargs = dict(
+                id=f"yt_{video_id}",
+                title=title,
+                description=channel,
+                input_message_content=InputTextMessageContent(
+                    message_text=f"<b>YTMusic:</b> {escape_html(title)}",
+                    parse_mode="HTML",
+                ),
+                reply_markup=kb,
+            )
+            if thumb:
+                kwargs["thumbnail_url"]    = thumb
+                kwargs["thumbnail_width"]  = 480
+                kwargs["thumbnail_height"] = 360
+            results = [InlineQueryResultArticle(**kwargs)]
+
+        try:
+            await self.inline_bot.answer_inline_query(
+                inline_query_id=query.id,
+                results=results,
+                cache_time=0,
+                is_personal=True,
+            )
+            _log("LINK", f"Answered OK video_id={video_id}")
+        except Exception as e:
+            _log("LINK", f"answer_inline_query FAILED: {e}")
+
+    async def _handle_search_inline(self, query: InlineQuery, text: str):
         limit     = max(1, min(10, int(self.config["SEARCH_LIMIT"])))
         cache_key = text.lower()[:80]
 
