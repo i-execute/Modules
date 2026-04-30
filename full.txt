@@ -12,6 +12,7 @@ Manager
 Market
 MTProxy
 NewYear
+NFTChecker
 Note
 QRAuthDumper
 RaidProtection
