@@ -1,4 +1,4 @@
-__version__ = (3, 0, 0)
+__version__ = (3, 1, 0)
 # meta developer: I_execute.t.me
 
 import logging
@@ -6,6 +6,7 @@ import asyncio
 import re
 from telethon.tl.types import PeerUser, Channel, User
 from telethon.errors import FloodWaitError
+from aiogram.types import LinkPreviewOptions
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
@@ -19,105 +20,69 @@ class Logger(loader.Module):
     strings = {
         "name": "Logger",
         "greeting_first": (
-            "<b>Yo!</b>\n\n"
-            "Watchers are active. "
-            "Now every command will be logged here, if some asshole uses your userbot I'll tag you"
+            "<blockquote><b>Yo!</b></blockquote>\n"
+            "<blockquote>Watchers are active. Now every command will be logged here, if some asshole uses your userbot I'll tag you</blockquote>"
         ),
         "greeting_recovery": (
-            "<b>Hey!</b>\n\n"
-            "Everything went to shit\nOld group disappeared somewhere, who the fuck knows what happened"
+            "<blockquote><b>Hey!</b></blockquote>\n"
+            "<blockquote>Everything went to shit. Old group disappeared somewhere, who the fuck knows what happened</blockquote>"
         ),
-        "error_info": (
-            "<b>What happened:</b>\n"
-            "Bot fucked up trying to send message to old group.\n"
-            "Reason for the shitshow:\n<code>{error_text}</code>\n\n"
-        ),
-        "reloaded": "<b>Module successfully reloaded, everything works</b>",
-        "username_row": "┗ <code>@{uname}</code>\n",
-        "owner_attention": "<b>{owner_link},</b> attention please\n\n",
+        "reloaded": "<blockquote><b>Module successfully reloaded, everything works</b></blockquote>",
+        "username_row": "@{uname}",
+        "owner_attention": "<blockquote><b>{owner_link}, attention please</b></blockquote>\n",
         "log_dm_user": (
-            "<b>DIRECT MESSAGE</b>\n\n"
-            "<b>Command:</b>\n<code>{cmd}</code>\n\n"
-            "<b>From:</b> {from_name}\n"
-            "{from_uname}"
-            "<b>Chat:</b> {to_name}\n"
-            "{to_uname}"
+            "<blockquote><b>DIRECT MESSAGE</b></blockquote>\n"
+            "<blockquote><b>Command:</b> <code>{cmd}</code></blockquote>\n"
+            "<blockquote><b>From:</b> {from_name}{from_uname}<b>Chat:</b> {to_name}{to_uname}</blockquote>"
         ),
         "log_dm_bot": (
-            "<b>DIRECT MESSAGE (BOT)</b>\n\n"
-            "<b>Command:</b>\n<code>{cmd}</code>\n\n"
-            "<b>From:</b> {from_name}\n"
-            "{from_uname}"
-            "<b>Bot:</b> {to_name}\n"
-            "{to_uname}"
+            "<blockquote><b>DIRECT MESSAGE (BOT)</b></blockquote>\n"
+            "<blockquote><b>Command:</b> <code>{cmd}</code></blockquote>\n"
+            "<blockquote><b>From:</b> {from_name}{from_uname}<b>Bot:</b> {to_name}{to_uname}</blockquote>"
         ),
         "log_group": (
-            "<b>GROUP</b>\n\n"
-            "<b>Command:</b>\n<code>{cmd}</code>\n\n"
-            "<b>From:</b> {from_name}\n"
-            "{from_uname}"
-            "<b>Group:</b> {chat_name} [<code>{chat_id}</code>]\n"
-            "{chat_uname}"
-            "<a href='{msg_link}'>Open message</a>"
+            "<blockquote><b>GROUP</b></blockquote>\n"
+            "<blockquote><b>Command:</b> <code>{cmd}</code></blockquote>\n"
+            "<blockquote><b>From:</b> {from_name}{from_uname}<b>Group:</b> {chat_name} [<code>{chat_id}</code>]{chat_uname}<a href='{msg_link}'>Open message</a></blockquote>"
         ),
         "log_channel": (
-            "<b>CHANNEL</b>\n\n"
-            "<b>Command:</b>\n<code>{cmd}</code>\n\n"
-            "<b>Channel:</b> {chat_name} [<code>{chat_id}</code>]\n"
-            "{chat_uname}"
-            "<a href='{msg_link}'>Open message</a>"
+            "<blockquote><b>CHANNEL</b></blockquote>\n"
+            "<blockquote><b>Command:</b> <code>{cmd}</code></blockquote>\n"
+            "<blockquote><b>Channel:</b> {chat_name} [<code>{chat_id}</code>]{chat_uname}<a href='{msg_link}'>Open message</a></blockquote>"
         ),
     }
 
     strings_ru = {
         "greeting_first": (
-            "<b>Ку!</b>\n\n"
-            "Вотчеры активны. "
-            "Теперь каждая команда будет залетать сюда, если какой-то хуй будет использовать твой юзербот то я тэгну тебя"
+            "<blockquote><b>Ку!</b></blockquote>\n"
+            "<blockquote>Вотчеры активны. Теперь каждая команда будет залетать сюда, если какой-то хуй будет использовать твой юзербот то я тэгну тебя</blockquote>"
         ),
         "greeting_recovery": (
-            "<b>Прием!</b>\n\n"
-            "Всё наебнулось к хуям\nСтарая группа куда-то съебалась, хер знает че такое"
+            "<blockquote><b>Прием!</b></blockquote>\n"
+            "<blockquote>Всё наебнулось к хуям. Старая группа куда-то съебалась, хер знает че такое</blockquote>"
         ),
-        "error_info": (
-            "<b>Чё произошло:</b>\n"
-            "Бот обосрался при попытке отправить сообщение в старую группу.\n"
-            "Причина тряски:\n<code>{error_text}</code>\n\n"
-        ),
-        "reloaded": "<b>Модуль был успешно перезагружен, все воркает</b>",
-        "username_row": "┗ <code>@{uname}</code>\n",
-        "owner_attention": "<b>{owner_link},</b> минуточку внимания\n\n",
+        "reloaded": "<blockquote><b>Модуль был успешно перезагружен, все воркает</b></blockquote>",
+        "username_row": "@{uname}",
+        "owner_attention": "<blockquote><b>{owner_link}, минуточку внимания</b></blockquote>\n",
         "log_dm_user": (
-            "<b>DIRECT MESSAGE</b>\n\n"
-            "<b>Команда:</b>\n<code>{cmd}</code>\n\n"
-            "<b>От:</b> {from_name}\n"
-            "{from_uname}"
-            "<b>Чат:</b> {to_name}\n"
-            "{to_uname}"
+            "<blockquote><b>DIRECT MESSAGE</b></blockquote>\n"
+            "<blockquote><b>Команда:</b> <code>{cmd}</code></blockquote>\n"
+            "<blockquote><b>От:</b> {from_name}{from_uname}<b>Чат:</b> {to_name}{to_uname}</blockquote>"
         ),
         "log_dm_bot": (
-            "<b>DIRECT MESSAGE (BOT)</b>\n\n"
-            "<b>Команда:</b>\n<code>{cmd}</code>\n\n"
-            "<b>От:</b> {from_name}\n"
-            "{from_uname}"
-            "<b>Бот:</b> {to_name}\n"
-            "{to_uname}"
+            "<blockquote><b>DIRECT MESSAGE (BOT)</b></blockquote>\n"
+            "<blockquote><b>Команда:</b> <code>{cmd}</code></blockquote>\n"
+            "<blockquote><b>От:</b> {from_name}{from_uname}<b>Бот:</b> {to_name}{to_uname}</blockquote>"
         ),
         "log_group": (
-            "<b>GROUP</b>\n\n"
-            "<b>Команда:</b>\n<code>{cmd}</code>\n\n"
-            "<b>От:</b> {from_name}\n"
-            "{from_uname}"
-            "<b>Группа:</b> {chat_name} [<code>{chat_id}</code>]\n"
-            "{chat_uname}"
-            "<a href='{msg_link}'>Открыть сообщение</a>"
+            "<blockquote><b>GROUP</b></blockquote>\n"
+            "<blockquote><b>Команда:</b> <code>{cmd}</code></blockquote>\n"
+            "<blockquote><b>От:</b> {from_name}{from_uname}<b>Группа:</b> {chat_name} [<code>{chat_id}</code>]{chat_uname}<a href='{msg_link}'>Открыть сообщение</a></blockquote>"
         ),
         "log_channel": (
-            "<b>CHANNEL</b>\n\n"
-            "<b>Команда:</b>\n<code>{cmd}</code>\n\n"
-            "<b>Канал:</b> {chat_name} [<code>{chat_id}</code>]\n"
-            "{chat_uname}"
-            "<a href='{msg_link}'>Открыть сообщение</a>"
+            "<blockquote><b>CHANNEL</b></blockquote>\n"
+            "<blockquote><b>Команда:</b> <code>{cmd}</code></blockquote>\n"
+            "<blockquote><b>Канал:</b> {chat_name} [<code>{chat_id}</code>]{chat_uname}<a href='{msg_link}'>Открыть сообщение</a></blockquote>"
         ),
     }
 
@@ -160,7 +125,7 @@ class Logger(loader.Module):
 
     def _format_username_row(self, entity):
         username = self._get_username(entity)
-        return self.strings["username_row"].format(uname=username) if username else ""
+        return "\n" + self.strings["username_row"].format(uname=username) + "\n" if username else "\n"
 
     def _get_topic_id(self, message):
         reply_to = getattr(message, "reply_to", None)
@@ -234,14 +199,21 @@ class Logger(loader.Module):
             logger.error(f"[Logger] Failed to create/get forum topic: {e}")
             return
 
+        lp = LinkPreviewOptions(
+            url=GREETING_MEDIA_URL,
+            prefer_large_media=True,
+            show_above_text=True,
+            is_disabled=False,
+        )
+
         try:
             await self._send_with_flood_wait(
-                self.inline.bot.send_photo,
+                self.inline.bot.send_message,
                 int(f"-100{self._asset_channel}"),
-                photo=GREETING_MEDIA_URL,
-                caption=self.strings["greeting_first"],
+                self.strings["greeting_first"],
                 parse_mode="HTML",
                 message_thread_id=self._logger_topic.id,
+                link_preview_options=lp,
             )
         except Exception:
             try:
