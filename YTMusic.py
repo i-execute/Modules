@@ -25,7 +25,6 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     ChosenInlineResult,
-    Update,
 )
 
 from telethon.tl.types import Message
@@ -382,7 +381,6 @@ class YTMusic(loader.Module):
         )
         self._tmp:          str | None       = None
         self._me_id:        int | None       = None
-        self._patched:      bool             = False
         self._upload_lock:  asyncio.Lock | None = None
         self._real_cache:   dict[str, tuple] = {}
         self._stub_cache:   dict[str, str]   = {}
@@ -400,51 +398,8 @@ class YTMusic(loader.Module):
             shutil.rmtree(self._tmp, ignore_errors=True)
         os.makedirs(self._tmp, exist_ok=True)
         self.inline_bot = self.inline.bot
-        await self._unpatch()
-        self._patch()
 
-    def _patch(self):
-        if self._patched:
-            return
-        try:
-            dp = self.inline._dp
-            if getattr(dp.feed_update, "_ytmusic_patched", False):
-                self._patched = True
-                return
-            orig = dp.feed_update
-            dp._ytmusic_orig = orig
-            mod = self
-
-            async def patched(bot_inst, update: Update, **kw):
-                if (
-                    hasattr(update, "chosen_inline_result")
-                    and update.chosen_inline_result is not None
-                ):
-                    chosen = update.chosen_inline_result
-                    _log("CHOSEN_RAW", f"result_id={chosen.result_id!r} imid={chosen.inline_message_id!r}")
-                    asyncio.ensure_future(mod._on_chosen(chosen))
-                return await orig(bot_inst, update, **kw)
-
-            patched._ytmusic_patched = True
-            dp.feed_update = patched
-            self._patched  = True
-            _log("PATCH", "OK")
-        except Exception as e:
-            _log("PATCH", f"Failed: {e}\n{traceback.format_exc()}")
-
-    async def _unpatch(self):
-        if not self._patched:
-            return
-        try:
-            dp = self.inline._dp
-            if hasattr(dp, "_ytmusic_orig"):
-                dp.feed_update = dp._ytmusic_orig
-                del dp._ytmusic_orig
-            self._patched = False
-            _log("PATCH", "Unpatched")
-        except Exception as e:
-            _log("PATCH", f"Unpatch failed: {e}")
-
+    @loader.need_update("chosen_inline_result")
     async def _on_chosen(self, chosen: ChosenInlineResult):
         rid  = chosen.result_id
         imid = chosen.inline_message_id
@@ -1007,7 +962,6 @@ class YTMusic(loader.Module):
             pass
 
     async def on_unload(self):
-        await self._unpatch()
         self._real_cache.clear()
         self._stub_cache.clear()
         self._search_cache.clear()
