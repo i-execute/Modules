@@ -400,9 +400,9 @@ class YTMusic(loader.Module):
         self.inline_bot = self.inline.bot
 
     @loader.need_update("chosen_inline_result")
-    async def _on_chosen(self, chosen: ChosenInlineResult):
-        rid  = chosen.result_id
-        imid = chosen.inline_message_id
+    async def _on_chosen(self, chosen_inline_result: ChosenInlineResult):
+        rid  = chosen_inline_result.result_id
+        imid = chosen_inline_result.inline_message_id
         _log("CHOSEN", f"rid={rid!r} imid={imid!r}")
         if not rid.startswith("yt_") or not imid:
             return
