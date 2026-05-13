@@ -32,7 +32,7 @@ HEADERS = {
     "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
 }
 
-BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/NFTChecker/Inline_query.png"
+BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/NFTChecker/Inline_query.png"
 
 NFT_LINK_RE = re.compile(
     r"(?:https?://)?(?:t\.me/nft/|fragment\.com/gift/)"

@@ -69,8 +69,8 @@ THUMB_KEYS    = ["maxresdefault", "sddefault", "hqdefault", "mqdefault", "defaul
 MAX_FILE_SIZE = 50 * 1024 * 1024
 REQUEST_OK    = 200
 
-INLINE_QUERY_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/YTMusic/Inline_query.png"
-DOWNLOADING_STUB    = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/YTMusic/Downloading.mp3"
+INLINE_QUERY_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/YTMusic/Inline_query.png"
+DOWNLOADING_STUB    = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/YTMusic/Downloading.mp3"
 
 YT_URL_RE = re.compile(
     r"(?:https?://)?(?:www\.|m\.)??"

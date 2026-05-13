@@ -30,8 +30,8 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-INLINE_QUERY_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/VKMusic/Inline_query.png"
-DOWNLOADING_STUB = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/VKMusic/Downloading.mp3"
+INLINE_QUERY_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/VKMusic/Inline_query.png"
+DOWNLOADING_STUB = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/VKMusic/Downloading.mp3"
 
 VK_KATE_APP_ID = 2685278
 VK_REDIRECT = "https://oauth.vk.com/blank.html"

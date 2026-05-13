@@ -13,7 +13,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-SAYONARA_URL = "https://raw.githubusercontent.com/FireJester/Modules/main/Assets/Deleter/Sayonara.mp4"
+SAYONARA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/Sayonara.mp4"
 
 
 @loader.tds

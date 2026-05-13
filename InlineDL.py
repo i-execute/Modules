@@ -16,9 +16,9 @@ from .. import loader
 
 logger = logging.getLogger(__name__)
 
-BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/InlineDL/Inline_query.png"
-THUMB_IG = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/InlineDL/Instagram.png"
-THUMB_TT = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/InlineDL/TikTok.png"
+BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/Inline_query.png"
+THUMB_IG = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/Instagram.png"
+THUMB_TT = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/TikTok.png"
 
 INSTAGRAM_RE = re.compile(
     r"https?://(?:www\.)?instagram\.com/"

@@ -11,7 +11,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Assets/Logger/Greetings.jpeg"
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Logger/Greetings.jpeg"
 
 @loader.tds
 class Logger(loader.Module):
