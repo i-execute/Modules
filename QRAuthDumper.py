@@ -374,7 +374,7 @@ class QRAuthDumper(loader.Module):
             api_id,
             api_hash,
             device_model="QRAuthDumper",
-            system_version="By @FireJester",
+            system_version="By @i_execute",
             app_version=f"v{'.'.join(map(str, __version__))}",
         )
 

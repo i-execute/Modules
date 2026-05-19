@@ -58,8 +58,8 @@ RESTRICT_MUTED = {
 }
 
 E_OK    = '<tg-emoji emoji-id=5429319011286423791>😎</tg-emoji>'
-E_DEAD1 = '<tg-emoji emoji-id=5429465319347362227>😵</tg-emoji>'
 E_ANGRY = '<tg-emoji emoji-id=5429638101586711317>😠</tg-emoji>'
+E_DEAD1 = '<tg-emoji emoji-id=5429465319347362227>😵</tg-emoji>'
 E_DEAD2 = '<tg-emoji emoji-id=5429112861446147403>😵</tg-emoji>'
 E_DEAD3 = '<tg-emoji emoji-id=5429369507216924126>😵</tg-emoji>'
 
