@@ -1,5 +1,6 @@
 __version__ = (2, 1, 1)
-# meta developer: I_execute.t.me
+# meta developer: I_execute.t.me 
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/NewYear/MetaBanner.jpeg
 
 from .. import loader, utils
 from datetime import datetime, timezone, timedelta
