@@ -1,5 +1,6 @@
 __version__ = (2, 2, 0)
 # meta developer: I_execute.t.me
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/RaidProtection/MetaBanner.jpeg
 
 import asyncio
 import contextlib
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class RaidProtection(loader.Module):
-    """Raid protection for private messages - blocks and clears new unknown chats"""
+    """Raid protection for dm - blocks and clears new unknown chats"""
 
     strings = {
         "name": "RaidProtection",

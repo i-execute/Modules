@@ -1,5 +1,6 @@
 __version__ = (2, 0, 0)
 # meta developer: I_execute.t.me 
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/MetaBanner.jpeg
 
 import os
 import io
