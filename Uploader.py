@@ -11,7 +11,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
+MAX_FILE_SIZE = 512 * 1024 * 1024  
 
 
 def _escape(text):
@@ -302,15 +302,12 @@ class Uploader(loader.Module):
         return ""
 
     def _get_file_size(self, media):
-        """Get file size from Telegram metadata without downloading."""
-        # Document/video/audio/etc
         doc = getattr(media, "document", None)
         if doc and hasattr(doc, "size"):
             return doc.size
-        # Direct document object
         if hasattr(media, "size") and isinstance(getattr(media, "size"), int):
             return media.size
-        # Photo — берём размер наибольшего варианта
+
         photo = getattr(media, "photo", None)
         if photo:
             sizes = getattr(photo, "sizes", []) or []
@@ -344,7 +341,6 @@ class Uploader(loader.Module):
             await utils.answer(message, self._s("unsupported"))
             return
 
-        # Проверка размера до скачивания
         file_size_meta = self._get_file_size(media)
         if file_size_meta is not None and file_size_meta > MAX_FILE_SIZE:
             await utils.answer(

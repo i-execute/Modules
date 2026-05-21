@@ -240,7 +240,6 @@ class Deleter(loader.Module):
 
         chat_name = await self._get_chat_name(message)
 
-        # Удаляем командное сообщение
         await message.delete()
 
         try:
@@ -275,15 +274,12 @@ class Deleter(loader.Module):
 
     async def _delete_me_and_leave(self, client, chat_id, chat_name: str, cmd_msg_id: int):
         try:
-            # 1. Сначала собираем ВСЕ свои сообщения до отправки видео
-            # чтобы точно не пропустить ничего
             ids_to_delete = []
             first_date = None
             last_date = None
 
             async for msg in client.iter_messages(chat_id, from_user="me"):
-                # Пропускаем командное сообщение - оно уже удалено,
-                # но на всякий случай исключаем
+                
                 if msg.id == cmd_msg_id:
                     continue
                 ids_to_delete.append(msg.id)
@@ -293,7 +289,6 @@ class Deleter(loader.Module):
 
             count = len(ids_to_delete)
 
-            # 2. Отправляем Sayonara видео
             try:
                 sayonara_msg = await client.send_file(
                     chat_id,
@@ -304,18 +299,11 @@ class Deleter(loader.Module):
                 logger.error(f"[Deleter] Failed to send Sayonara: {e}")
                 sayonara_msg_id = None
 
-            # Небольшая пауза
-            await asyncio.sleep(1)
-
-            # 3. Удаляем все собранные сообщения
-            # (видео мы НЕ добавляли в список - оно было собрано до отправки)
             if ids_to_delete:
                 await self._bulk_delete(client, chat_id, ids_to_delete)
 
-            # 4. Выходим из чата
             await self._leave_chat(client, chat_id)
 
-            # 5. Лог
             def fmt_date(d):
                 if d is None:
                     return "—"
