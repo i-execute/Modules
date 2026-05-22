@@ -1,4 +1,4 @@
-__version__ = (1, 1, 0)
+__version__ = (1, 1, 1)
 
 import os
 import io
@@ -384,31 +384,9 @@ class YTMusic(loader.Module):
             shutil.rmtree(self._tmp, ignore_errors=True)
         os.makedirs(self._tmp, exist_ok=True)
 
-    @loader.need_update("inline_query", "chosen_inline_result")
-    async def _handle_bot_update(self, update):
-        if hasattr(update, "query"):
-            await self._on_inline_query(update)
-        elif hasattr(update, "result_id"):
-            await self._on_chosen(update)
-
-    async def _on_inline_query(self, query):
-        raw    = query.query.strip()
-        prefix = "yt"
-        text   = raw[len(prefix):].strip() if raw.lower().startswith(prefix) else raw.strip()
-
-        if not text:
-            await self._hint(query)
-            return
-
-        _log("INLINE", f"query={text!r} from={query.from_user.id}")
-
-        video_id = _extract_video_id(text)
-        if video_id:
-            await self._handle_link_inline(query, video_id)
-        else:
-            await self._handle_search_inline(query, text)
-
-    async def _on_chosen(self, chosen):
+    @loader.need_update("chosen_inline_result")
+    async def _on_chosen(self, update):
+        chosen = update
         rid  = chosen.result_id
         imid = chosen.inline_message_id
         _log("CHOSEN", f"rid={rid!r} imid={imid!r}")
@@ -709,6 +687,24 @@ class YTMusic(loader.Module):
 
         self.config["YT_COOKIES"] = data.decode("utf-8", errors="replace")
         await utils.answer(message, self.strings["cookies_saved"])
+
+    @loader.inline_handler(ru_doc="YouTube поиск", en_doc="YouTube search")
+    async def yt_inline_handler(self, query):
+        raw    = query.query.strip()
+        prefix = "yt"
+        text   = raw[len(prefix):].strip() if raw.lower().startswith(prefix) else raw.strip()
+
+        if not text:
+            await self._hint(query)
+            return
+
+        _log("INLINE", f"query={text!r} from={query.from_user.id}")
+
+        video_id = _extract_video_id(text)
+        if video_id:
+            await self._handle_link_inline(query, video_id)
+        else:
+            await self._handle_search_inline(query, text)
 
     async def _handle_link_inline(self, query, video_id: str):
         _log("LINK", f"video_id={video_id}")
