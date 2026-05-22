@@ -1,5 +1,6 @@
 __version__ = (2, 0, 2)
 # meta developer: I_execute.t.me
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/QRAuthDumper/MetaBanner.jpeg
 # requires: qrcode[pil] Pillow
 
 import io
