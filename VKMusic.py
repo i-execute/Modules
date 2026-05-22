@@ -1,5 +1,6 @@
 __version__ = (1, 1, 0)
-# meta developer: I_execute.t.me
+# meta developer: I_execute.t.me 
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/VKMusic/MetaBanner.jpeg
 # requires: aiohttp, mutagen, pycryptodome, m3u8, Pillow
 
 import os
