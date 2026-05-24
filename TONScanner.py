@@ -538,7 +538,7 @@ class TONScanner(loader.Module):
                         ),
                         thumbnail_url=BANNER,
                         thumbnail_width=640,
-                        thumbnail_height=360,
+                        thumbnail_height=640,
                     )
                 ],
                 cache_time=0,

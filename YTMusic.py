@@ -1,4 +1,6 @@
 __version__ = (1, 1, 2)
+# meta developer: I_execute.t.me
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/YTMusic/MetaBanner.jpeg
 
 import os
 import io

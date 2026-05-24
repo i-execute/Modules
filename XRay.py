@@ -1,5 +1,6 @@
 __version__ = (3, 5, 6)
 # meta developer: I_execute.t.me
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/MetaBanner.jpeg
 
 import os
 import asyncio
