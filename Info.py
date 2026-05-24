@@ -405,7 +405,6 @@ class Info(loader.Module):
             img_url = await _upload_to_x0(jpeg_data, "avatar.jpg", "image/jpeg")
         except Exception:
             pass
-        # Удаляем сообщение моментально, параллельно с остальным
         delete_task = asyncio.ensure_future(message.delete())
         if img_url:
             try:
@@ -454,7 +453,6 @@ class Info(loader.Module):
             video_url = await _upload_to_x0(raw, "avatar.mp4", "video/mp4")
         except Exception:
             pass
-        # Удаляем сообщение моментально, параллельно с остальным
         delete_task = asyncio.ensure_future(message.delete())
         if video_url:
             try:
@@ -500,7 +498,7 @@ class Info(loader.Module):
         en_doc="User info (+ for avatar)",
     )
     async def who(self, message: Message):
-        """Get user info, reply or @username, add + for avatar"""
+        """User info (+ for avatar)"""
         args = utils.get_args_raw(message) or ""
         with_photo = "+" in args
         clean_args = args.replace("+", "").strip()
@@ -546,7 +544,7 @@ class Info(loader.Module):
         en_doc="Group/channel info (+ for avatar)",
     )
     async def where(self, message: Message):
-        """Get group or channel info, add + for avatar"""
+        """Group/channel info (+ for avatar)"""
         args = utils.get_args_raw(message) or ""
         with_photo = "+" in args
         is_premium = await self._check_premium(message.client)

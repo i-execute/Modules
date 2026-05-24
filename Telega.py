@@ -1,6 +1,7 @@
 __version__ = (2, 0, 0)
 # meta developer: I_execute.t.me forked from @dev_angel_7553
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Telega/MetaBanner.jpeg
+
 import io
 import json
 import asyncio
