@@ -21,13 +21,13 @@ def _escape(text):
 
 
 @loader.tds
-class Test(loader.Module):
+class NetTester(loader.Module):
     """Network monitoring & speed tests"""
 
     strings = {
-        "name": "Test",
+        "name": "NetTester",
         "help": (
-            "<b>Test - Network Monitor</b>\n\n"
+            "<b>NetTester - Network Monitor</b>\n\n"
             "<b>Commands:</b>\n"
             "<code>{prefix}test speed</code> - internet speed test (Cloudflare)\n"
             "<code>{prefix}test net</code> - network usage statistics\n"
@@ -98,7 +98,7 @@ class Test(loader.Module):
 
     strings_ru = {
         "help": (
-            "<b>Test - Сетевой монитор</b>\n\n"
+            "<b>NetTester - Сетевой монитор</b>\n\n"
             "<b>Команды:</b>\n"
             "<code>{prefix}test speed</code> - тест скорости интернета (Cloudflare)\n"
             "<code>{prefix}test net</code> - статистика использования сети\n"

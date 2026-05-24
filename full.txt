@@ -11,6 +11,7 @@ Logger
 Manager
 Market
 MTProxy
+NetTester
 NewYear
 NFTChecker
 Note
@@ -21,8 +22,7 @@ Session
 StarsX
 Statistics
 Stories
-Telega
-Test
+Telega 
 TGWatcher
 Token
 TONScanner
