@@ -2,39 +2,25 @@ __version__ = (1, 1, 2)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/YTMusic/MetaBanner.jpeg
 
-import os
-import io
-import re
-import time
-import logging
-import tempfile
-import shutil
 import asyncio
-import typing
+import io
+import logging
+import os
+import re
+import shutil
+import tempfile
+import time
 import traceback
+import typing
 
 import aiohttp
 from PIL import Image
 
-from herokutl.tl.types import Message
-from herokutl.tl.functions.messages import SetInlineBotResultsRequest, EditInlineBotMessageRequest
+from herokutl.tl.functions.messages import EditInlineBotMessageRequest
 from herokutl.tl.types import (
-    InputBotInlineResultDocument,
-    InputBotInlineResultPhoto,
-    InputBotInlineResult,
-    InputBotInlineMessageMediaAuto,
-    InputBotInlineMessageText,
-    InputMediaDocument,
-    InputMediaPhoto,
-    InputDocument,
-    InputPhoto,
     DocumentAttributeAudio,
-    InputWebDocument,
-    ReplyInlineMarkup,
-    KeyboardButtonCallback,
-    KeyboardButtonRow,
-    TextWithEntities,
-    MessageEntityBold,
+    InputDocument,
+    InputMediaDocument,
 )
 
 from .. import loader, utils
@@ -54,7 +40,7 @@ except ImportError:
     MUTAGEN_OK = False
 
 INNERTUBE_API_URL = "https://www.youtube.com/youtubei/v1/search"
-INNERTUBE_KEY     = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+INNERTUBE_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
 INNERTUBE_CONTEXT = {
     "client": {
         "clientName": "WEB",
@@ -73,15 +59,15 @@ HEADERS_WEB = {
     "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
 }
 
-THUMB_KEYS    = ["maxresdefault", "sddefault", "hqdefault", "mqdefault", "default"]
+THUMB_KEYS = ["maxresdefault", "sddefault", "hqdefault", "mqdefault", "default"]
 MAX_FILE_SIZE = 50 * 1024 * 1024
-REQUEST_OK    = 200
+REQUEST_OK = 200
 
 INLINE_QUERY_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/YTMusic/Inline_query.png"
-DOWNLOADING_STUB    = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/YTMusic/Downloading.mp3"
+DOWNLOADING_STUB = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/YTMusic/Downloading.mp3"
 
 YT_URL_RE = re.compile(
-    r"(?:https?://)?(?:www\.|m\.)??"
+    r"(?:https?://)?(?:www\.|m\.)?"
     r"(?:"
     r"youtu\.be/([a-zA-Z0-9_-]{11})"
     r"|youtube\.com/watch\?(?:[^&]*&)*?v=([a-zA-Z0-9_-]{11})"
@@ -97,7 +83,7 @@ YT_URL_RE = re.compile(
 )
 
 LOG_ENTRIES = []
-MAX_LOG     = 300
+MAX_LOG = 300
 
 
 def _log(tag: str, msg: str):
@@ -117,7 +103,7 @@ def sanitize_fn(n: str) -> str:
     return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", n).strip(". ")[:180] or "track"
 
 
-def normalize_cover(raw: bytes, max_size: int | None = None) -> bytes | None:
+def normalize_cover(raw: bytes, max_size: typing.Optional[int] = None) -> typing.Optional[bytes]:
     if not raw or len(raw) < 100:
         return None
     try:
@@ -136,7 +122,7 @@ def normalize_cover(raw: bytes, max_size: int | None = None) -> bytes | None:
         return None
 
 
-async def _download_image(url: str) -> bytes | None:
+async def _download_image(url: str) -> typing.Optional[bytes]:
     if not url:
         return None
     try:
@@ -173,14 +159,11 @@ async def _best_thumb_for_inline(video_id: str) -> str:
         )
     for key, ok in zip(THUMB_KEYS, results):
         if ok is True:
-            _log("THUMB", f"{video_id} best={key}")
             return candidates[key]
-    fallback = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
-    _log("THUMB", f"{video_id} fallback")
-    return fallback
+    return f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
 
 
-def _extract_video_id(text: str) -> str | None:
+def _extract_video_id(text: str) -> typing.Optional[str]:
     m = YT_URL_RE.search(text)
     if not m:
         return None
@@ -190,7 +173,7 @@ def _extract_video_id(text: str) -> str | None:
     return None
 
 
-async def _search_innertube(query: str, limit: int = 5) -> list[dict]:
+async def _search_innertube(query: str, limit: int = 5) -> list:
     payload = {
         "query": query,
         "context": INNERTUBE_CONTEXT,
@@ -204,7 +187,6 @@ async def _search_innertube(query: str, limit: int = 5) -> list[dict]:
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as r:
                 if r.status != REQUEST_OK:
-                    _log("INNERTUBE", f"HTTP {r.status}")
                     return []
                 data = await r.json()
     except Exception as e:
@@ -230,15 +212,14 @@ async def _search_innertube(query: str, limit: int = 5) -> list[dict]:
                 video_id = vr.get("videoId")
                 if not video_id:
                     continue
-                title   = vr.get("title", {}).get("runs", [{}])[0].get("text", "Unknown")
+                title = vr.get("title", {}).get("runs", [{}])[0].get("text", "Unknown")
                 channel = vr.get("ownerText", {}).get("runs", [{}])[0].get("text", "")
                 dur_str = vr.get("lengthText", {}).get("simpleText", "?:??")
                 results.append({
                     "video_id": video_id,
-                    "title":    title,
-                    "channel":  channel,
-                    "dur_str":  dur_str,
-                    "yt_url":   f"https://youtu.be/{video_id}",
+                    "title": title,
+                    "channel": channel,
+                    "dur_str": dur_str,
                 })
                 if len(results) >= limit:
                     break
@@ -247,11 +228,10 @@ async def _search_innertube(query: str, limit: int = 5) -> list[dict]:
     except Exception as e:
         _log("INNERTUBE", f"Parse failed: {e}")
 
-    _log("INNERTUBE", f"Found {len(results)} for {query!r}")
     return results
 
 
-async def _search_ytdlp(query: str, limit: int = 5) -> list[dict]:
+async def _search_ytdlp(query: str, limit: int = 5) -> list:
     if not YT_DLP_OK:
         return []
     try:
@@ -262,33 +242,33 @@ async def _search_ytdlp(query: str, limit: int = 5) -> list[dict]:
             "extract_flat": True,
             "skip_download": True,
         }
+
         def _run():
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(f"ytsearch{limit}:{query}", download=False)
                 return info.get("entries", []) if info else []
+
         entries = await loop.run_in_executor(None, _run)
         results = []
         for e in entries[:limit]:
             vid = e.get("id") or ""
             if not vid:
                 continue
-            dur_s   = int(e.get("duration") or 0)
+            dur_s = int(e.get("duration") or 0)
             dur_str = f"{dur_s // 60}:{dur_s % 60:02d}" if dur_s else "?:??"
             results.append({
                 "video_id": vid,
-                "title":    e.get("title", "Unknown"),
-                "channel":  e.get("channel") or e.get("uploader", ""),
-                "dur_str":  dur_str,
-                "yt_url":   f"https://youtu.be/{vid}",
+                "title": e.get("title", "Unknown"),
+                "channel": e.get("channel") or e.get("uploader", ""),
+                "dur_str": dur_str,
             })
-        _log("YTDLP_SEARCH", f"Found {len(results)} for {query!r}")
         return results
     except Exception as e:
         _log("YTDLP_SEARCH", f"Failed: {e}")
         return []
 
 
-async def _get_video_info_ytdlp(video_id: str, cookies: str | None = None) -> dict | None:
+async def _get_video_info_ytdlp(video_id: str, cookies: typing.Optional[str] = None) -> typing.Optional[dict]:
     if not YT_DLP_OK:
         return None
     try:
@@ -310,21 +290,20 @@ async def _get_video_info_ytdlp(video_id: str, cookies: str | None = None) -> di
         info = await loop.run_in_executor(None, _run)
         if not info:
             return None
-        dur_s   = int(info.get("duration") or 0)
+        dur_s = int(info.get("duration") or 0)
         dur_str = f"{dur_s // 60}:{dur_s % 60:02d}" if dur_s else "?:??"
         return {
             "video_id": video_id,
-            "title":    info.get("title", "Unknown") or "Unknown",
-            "channel":  info.get("uploader") or info.get("channel") or "YouTube",
-            "dur_str":  dur_str,
-            "yt_url":   f"https://youtu.be/{video_id}",
+            "title": info.get("title", "Unknown") or "Unknown",
+            "channel": info.get("uploader") or info.get("channel") or "YouTube",
+            "dur_str": dur_str,
         }
     except Exception as e:
         _log("INFO_YTDLP", f"Failed for {video_id}: {e}")
         return None
 
 
-def _embed_id3(filepath: str, title: str, artist: str, cover_data: bytes | None):
+def _embed_id3(filepath: str, title: str, artist: str, cover_data: typing.Optional[bytes]):
     if not MUTAGEN_OK:
         return
     try:
@@ -341,47 +320,36 @@ def _embed_id3(filepath: str, title: str, artist: str, cover_data: bytes | None)
         pass
 
 
-def _make_inline_kb(video_id: str, label: str) -> ReplyInlineMarkup:
-    return ReplyInlineMarkup(rows=[
-        KeyboardButtonRow(buttons=[
-            KeyboardButtonCallback(
-                text=label,
-                data=f"ytm_dl_{video_id[:32]}".encode(),
-            )
-        ])
-    ])
-
-
 @loader.tds
 class YTMusic(loader.Module):
     """YouTube Music - search and download audio from YouTube"""
 
     strings = {
         "name": "YTMusic",
-        "cookies_saved":    "<b>Cookies saved!</b>",
-        "cookies_cleared":  "<b>Cookies cleared</b>",
+        "cookies_saved": "<b>Cookies saved!</b>",
+        "cookies_cleared": "<b>Cookies cleared</b>",
         "cookies_no_reply": "<b>Reply to a .txt file with cookies</b>",
         "cookies_bad_file": "<b>File must be .txt</b>",
-        "not_found":        "Nothing found",
-        "not_found_desc":   "Try a different query",
-        "hint_title":       "YTMusic",
-        "hint_desc":        "Type a track name or paste a YouTube link",
-        "downloading":      "Downloading...",
-        "link_not_found":   "Video not found",
+        "not_found": "Nothing found",
+        "not_found_desc": "Try a different query",
+        "hint_title": "YTMusic",
+        "hint_desc": "Type a track name or paste a YouTube link",
+        "downloading": "Downloading...",
+        "link_not_found": "Video not found",
         "link_not_found_desc": "Could not get video info by link",
     }
 
     strings_ru = {
-        "cookies_saved":    "<b>Куки сохранены!</b>",
-        "cookies_cleared":  "<b>Куки удалены</b>",
+        "cookies_saved": "<b>Куки сохранены!</b>",
+        "cookies_cleared": "<b>Куки удалены</b>",
         "cookies_no_reply": "<b>Ответь на .txt файл с куками</b>",
         "cookies_bad_file": "<b>Файл должен быть .txt</b>",
-        "not_found":        "Ничего не найдено",
-        "not_found_desc":   "Попробуй другой запрос",
-        "hint_title":       "YTMusic",
-        "hint_desc":        "Введи название трека или вставь ссылку на YouTube",
-        "downloading":      "Загрузка...",
-        "link_not_found":   "Видео не найдено",
+        "not_found": "Ничего не найдено",
+        "not_found_desc": "Попробуй другой запрос",
+        "hint_title": "YTMusic",
+        "hint_desc": "Введи название трека или вставь ссылку на YouTube",
+        "downloading": "Загрузка...",
+        "link_not_found": "Видео не найдено",
         "link_not_found_desc": "Не удалось получить информацию о видео по ссылке",
     }
 
@@ -419,7 +387,8 @@ class YTMusic(loader.Module):
 
     @loader.need_update("chosen_inline_result")
     async def _on_chosen(self, update):
-        # update is UpdateBotInlineSend -- fields: result_id (str), msg_id (InputBotInlineMessageID), user_id (int)
+        # update is UpdateBotInlineSend
+        # Fields: result_id (str), msg_id (InputBotInlineMessageID), user_id (int)
         rid = update.result_id
         msg_id = update.msg_id
         _log("CHOSEN", f"rid={rid!r} msg_id={msg_id!r}")
@@ -452,7 +421,6 @@ class YTMusic(loader.Module):
     async def _do_replace(self, msg_id, data: tuple):
         file_id, title, artist, duration = data
         _log("REPLACE", f"msg_id={msg_id!r} file_id={file_id!r}")
-
         for attempt in range(3):
             try:
                 await self.inline.bot.client(
@@ -469,7 +437,7 @@ class YTMusic(loader.Module):
                 _log("REPLACE", f"Attempt {attempt + 1} failed: {e}")
                 await asyncio.sleep(1)
 
-    def _cookies_file(self) -> str | None:
+    def _cookies_file(self) -> typing.Optional[str]:
         cookies_txt = self.config["YT_COOKIES"]
         if not cookies_txt:
             return None
@@ -503,8 +471,6 @@ class YTMusic(loader.Module):
             artist = info.get("uploader") or info.get("channel") or "YouTube"
             dur_s = int(info.get("duration") or 0)
             thumbnail_url = info.get("thumbnail", "")
-
-            _log("DL", f"title={title!r} artist={artist!r} thumb={thumbnail_url[:80]}")
 
             safe_name = sanitize_fn(f"{artist} - {title}")
             out_tmpl = os.path.join(ddir, f"{safe_name}.%(ext)s")
@@ -565,9 +531,7 @@ class YTMusic(loader.Module):
             if not os.path.exists(final_mp3) or os.path.getsize(final_mp3) == 0:
                 return {"error": "empty file"}
 
-            size = os.path.getsize(final_mp3)
-            if size > MAX_FILE_SIZE:
-                _log("DL", f"Too large: {size // (1024 * 1024)} MB")
+            if os.path.getsize(final_mp3) > MAX_FILE_SIZE:
                 return {"error": "too_large"}
 
             raw_cover = await _download_image(thumbnail_url) if thumbnail_url else None
@@ -634,8 +598,8 @@ class YTMusic(loader.Module):
         title: str,
         artist: str,
         dur_s: int,
-        thumb_data: bytes | None,
-    ) -> typing.Any | None:
+        thumb_data: typing.Optional[bytes],
+    ) -> typing.Optional[InputDocument]:
         async with self._upload_lock:
             audio_buf = io.BytesIO(file_bytes)
             audio_buf.name = filename
@@ -656,10 +620,9 @@ class YTMusic(loader.Module):
                 _log("UPLOAD", f"send_audio failed: {e}")
                 return None
             if sent and sent.media:
-                doc = sent.media.document if hasattr(sent.media, "document") else None
+                doc = getattr(sent.media, "document", None)
                 if doc:
-                    from herokutl.tl.types import InputDocument
-                    file_id = InputDocument(
+                    fid = InputDocument(
                         id=doc.id,
                         access_hash=doc.access_hash,
                         file_reference=doc.file_reference,
@@ -672,10 +635,10 @@ class YTMusic(loader.Module):
                             break
                         except Exception:
                             await asyncio.sleep(1.0 * (attempt + 1))
-                    return file_id
+                    return fid
             return None
 
-    async def _get_stub(self, video_id: str, title: str, artist: str) -> typing.Any | None:
+    async def _get_stub(self, video_id: str, title: str, artist: str) -> typing.Optional[InputDocument]:
         if video_id in self._stub_cache:
             return self._stub_cache[video_id]
 
@@ -697,8 +660,6 @@ class YTMusic(loader.Module):
         raw = await _download_image(hq_url)
         thumb_data = normalize_cover(raw, max_size=320) if raw else None
 
-        kb = _make_inline_kb(video_id, self.strings["downloading"])
-
         stub_buf = io.BytesIO(stub_bytes)
         stub_buf.name = "Downloading.mp3"
         thumb_buf = None
@@ -713,12 +674,10 @@ class YTMusic(loader.Module):
                 title=title,
                 performer=artist,
                 thumbnail=thumb_buf,
-                reply_markup=kb,
             )
             if sent and sent.media:
-                doc = sent.media.document if hasattr(sent.media, "document") else None
+                doc = getattr(sent.media, "document", None)
                 if doc:
-                    from herokutl.tl.types import InputDocument
                     fid = InputDocument(
                         id=doc.id,
                         access_hash=doc.access_hash,
@@ -736,7 +695,7 @@ class YTMusic(loader.Module):
         return None
 
     @loader.command(ru_doc="Добавить куки для yt-dlp (реплай на .txt файл)")
-    async def ytcookies(self, message: Message):
+    async def ytcookies(self, message):
         """Reply to a .txt file with YouTube cookies"""
         reply = await message.get_reply_message()
 
@@ -764,6 +723,12 @@ class YTMusic(loader.Module):
     @loader.inline_handler(ru_doc="YouTube поиск", en_doc="YouTube search")
     async def yt_inline_handler(self, query):
         """YouTube search"""
+        # query is InlineQuery from types.py
+        # query.query -- text string
+        # query.from_user.id -- user id
+        # query.id -- query id
+        # query.answer([...]) -- answer
+        # query.builder.article/document/photo -- build results
         raw = query.query.strip()
         prefix = "yt"
         text = raw[len(prefix):].strip() if raw.lower().startswith(prefix) else raw.strip()
@@ -772,7 +737,7 @@ class YTMusic(loader.Module):
             await self._hint(query)
             return
 
-        _log("INLINE", f"query={text!r} from={query.query.user_id}")
+        _log("INLINE", f"query={text!r} from={query.from_user.id}")
 
         video_id = _extract_video_id(text)
         if video_id:
@@ -784,48 +749,43 @@ class YTMusic(loader.Module):
         _log("LINK", f"video_id={video_id}")
 
         if video_id in self._real_cache:
-            fid = self._real_cache[video_id][0]
+            stub_fid = self._real_cache[video_id][0]
             try:
-                await self.inline.bot.client(SetInlineBotResultsRequest(
-                    query_id=query.query.query_id,
-                    results=[
-                        InputBotInlineResultDocument(
+                await query.answer(
+                    [
+                        await query.builder.document(
+                            stub_fid,
+                            title=self._real_cache[video_id][1],
+                            description=self._real_cache[video_id][2],
+                            mime_type="audio/mpeg",
                             id=f"yt_{video_id}",
-                            type="audio",
-                            document=fid,
-                            send_message=InputBotInlineMessageMediaAuto(
-                                message="",
-                            ),
                         )
                     ],
                     cache_time=0,
                     private=True,
-                ))
-            except Exception:
-                pass
+                )
+            except Exception as e:
+                _log("LINK", f"answer failed (cached): {e}")
             return
 
         cookies = self._cookies_file()
         track = await _get_video_info_ytdlp(video_id, cookies)
 
         if not track:
-            await self.inline.bot.client(SetInlineBotResultsRequest(
-                query_id=query.query.query_id,
-                results=[
-                    InputBotInlineResult(
-                        id=f"notfound_{int(time.time())}",
-                        type="article",
+            await query.answer(
+                [
+                    await query.builder.article(
                         title=self.strings["link_not_found"],
                         description=self.strings["link_not_found_desc"],
-                        send_message=InputBotInlineMessageText(
-                            message=f"<b>YTMusic:</b> {self.strings['link_not_found_desc']}",
-                            no_webpage=True,
-                        ),
+                        text=f"<b>YTMusic:</b> {self.strings['link_not_found_desc']}",
+                        parse_mode="HTML",
+                        link_preview=False,
+                        id=f"notfound_{int(time.time())}",
                     )
                 ],
                 cache_time=0,
                 private=True,
-            ))
+            )
             return
 
         title = track["title"]
@@ -838,46 +798,41 @@ class YTMusic(loader.Module):
 
         stub_fid = await self._get_stub(video_id, title, channel)
 
-        kb = _make_inline_kb(video_id, self.strings["downloading"])
-
         if stub_fid:
-            results = [InputBotInlineResultDocument(
-                id=f"yt_{video_id}",
-                type="audio",
-                document=stub_fid,
-                send_message=InputBotInlineMessageMediaAuto(
-                    message="",
-                    reply_markup=kb,
-                ),
-            )]
-        else:
-            results = [InputBotInlineResult(
-                id=f"yt_{video_id}",
-                type="article",
-                title=title,
-                description=channel,
-                send_message=InputBotInlineMessageText(
-                    message=f"<b>YTMusic:</b> {escape_html(title)}",
-                    no_webpage=True,
-                ),
-                thumb=InputWebDocument(
-                    url=thumb,
-                    size=0,
-                    mime_type="image/jpeg",
-                    attributes=[],
-                ),
-            )]
+            try:
+                await query.answer(
+                    [
+                        await query.builder.document(
+                            stub_fid,
+                            title=title,
+                            description=channel,
+                            mime_type="audio/mpeg",
+                            id=f"yt_{video_id}",
+                        )
+                    ],
+                    cache_time=0,
+                    private=True,
+                )
+                _log("LINK", f"Answered with stub video_id={video_id}")
+                return
+            except Exception as e:
+                _log("LINK", f"answer with stub failed: {e}")
 
-        try:
-            await self.inline.bot.client(SetInlineBotResultsRequest(
-                query_id=query.query.query_id,
-                results=results,
-                cache_time=0,
-                private=True,
-            ))
-            _log("LINK", f"Answered OK video_id={video_id}")
-        except Exception as e:
-            _log("LINK", f"SetInlineBotResults FAILED: {e}")
+        await query.answer(
+            [
+                await query.builder.article(
+                    title=title,
+                    description=channel,
+                    text=f"<b>YTMusic:</b> {escape_html(title)}",
+                    parse_mode="HTML",
+                    link_preview=False,
+                    thumb=self.inline._web_document(thumb, width=480, height=360),
+                    id=f"yt_{video_id}",
+                )
+            ],
+            cache_time=0,
+            private=True,
+        )
 
     async def _handle_search_inline(self, query, text: str):
         limit = max(1, min(10, int(self.config["SEARCH_LIMIT"])))
@@ -885,7 +840,6 @@ class YTMusic(loader.Module):
 
         if cache_key in self._search_cache:
             tracks = self._search_cache[cache_key]
-            _log("CACHE", f"Hit: {len(tracks)} tracks")
         else:
             tracks = await _search_innertube(text, limit=limit)
             if not tracks:
@@ -893,23 +847,20 @@ class YTMusic(loader.Module):
             self._search_cache[cache_key] = tracks
 
         if not tracks:
-            await self.inline.bot.client(SetInlineBotResultsRequest(
-                query_id=query.query.query_id,
-                results=[
-                    InputBotInlineResult(
-                        id=f"notfound_{int(time.time())}",
-                        type="article",
+            await query.answer(
+                [
+                    await query.builder.article(
                         title=self.strings["not_found"],
                         description=self.strings["not_found_desc"],
-                        send_message=InputBotInlineMessageText(
-                            message=f"<b>YTMusic:</b> {self.strings['not_found_desc']}",
-                            no_webpage=True,
-                        ),
+                        text=f"<b>YTMusic:</b> {self.strings['not_found_desc']}",
+                        parse_mode="HTML",
+                        link_preview=False,
+                        id=f"notfound_{int(time.time())}",
                     )
                 ],
                 cache_time=0,
                 private=True,
-            ))
+            )
             return
 
         thumb_tasks = [_best_thumb_for_inline(t["video_id"]) for t in tracks]
@@ -927,7 +878,6 @@ class YTMusic(loader.Module):
             vid = t["video_id"]
             title = t["title"]
             channel = t["channel"]
-            dur_str = t["dur_str"]
 
             thumb = (
                 thumb_results[i]
@@ -940,83 +890,62 @@ class YTMusic(loader.Module):
                 else None
             )
 
-            _log("RESULT", f"[{i}] {title!r} stub_fid={stub_fid!r} thumb={str(thumb)[:60]}")
-
-            kb = _make_inline_kb(vid, self.strings["downloading"])
-
             if vid in self._real_cache:
-                inline_results.append(InputBotInlineResultDocument(
-                    id=f"yt_{vid}",
-                    type="audio",
-                    document=self._real_cache[vid][0],
-                    send_message=InputBotInlineMessageMediaAuto(
-                        message="",
-                    ),
-                ))
+                inline_results.append(
+                    await query.builder.document(
+                        self._real_cache[vid][0],
+                        title=title,
+                        description=channel,
+                        mime_type="audio/mpeg",
+                        id=f"yt_{vid}",
+                    )
+                )
             elif stub_fid:
-                inline_results.append(InputBotInlineResultDocument(
-                    id=f"yt_{vid}",
-                    type="audio",
-                    document=stub_fid,
-                    send_message=InputBotInlineMessageMediaAuto(
-                        message="",
-                        reply_markup=kb,
-                    ),
-                ))
+                inline_results.append(
+                    await query.builder.document(
+                        stub_fid,
+                        title=title,
+                        description=channel,
+                        mime_type="audio/mpeg",
+                        id=f"yt_{vid}",
+                    )
+                )
             else:
-                inline_results.append(InputBotInlineResult(
-                    id=f"yt_{vid}",
-                    type="article",
-                    title=title,
-                    description=f"{channel} | {dur_str}",
-                    send_message=InputBotInlineMessageText(
-                        message=f"<b>YTMusic:</b> {escape_html(title)}",
-                        no_webpage=True,
-                    ),
-                    thumb=InputWebDocument(
-                        url=thumb,
-                        size=0,
-                        mime_type="image/jpeg",
-                        attributes=[],
-                    ),
-                ))
+                inline_results.append(
+                    await query.builder.article(
+                        title=title,
+                        description=channel,
+                        text=f"<b>YTMusic:</b> {escape_html(title)}",
+                        parse_mode="HTML",
+                        link_preview=False,
+                        thumb=self.inline._web_document(thumb, width=480, height=360),
+                        id=f"yt_{vid}",
+                    )
+                )
 
         try:
-            await self.inline.bot.client(SetInlineBotResultsRequest(
-                query_id=query.query.query_id,
-                results=inline_results,
-                cache_time=0,
-                private=True,
-            ))
+            await query.answer(inline_results, cache_time=0, private=True)
             _log("INLINE", f"Answered {len(inline_results)} results OK")
         except Exception as e:
-            _log("INLINE", f"SetInlineBotResults FAILED: {e}\n{traceback.format_exc()}")
+            _log("INLINE", f"answer failed: {e}\n{traceback.format_exc()}")
 
     async def _hint(self, query):
         try:
-            await self.inline.bot.client(SetInlineBotResultsRequest(
-                query_id=query.query.query_id,
-                results=[
-                    InputBotInlineResult(
-                        id=f"hint_{int(time.time())}",
-                        type="article",
+            await query.answer(
+                [
+                    await query.builder.article(
                         title=self.strings["hint_title"],
                         description=self.strings["hint_desc"],
-                        send_message=InputBotInlineMessageText(
-                            message=f"<b>YTMusic:</b> {self.strings['hint_desc']}",
-                            no_webpage=True,
-                        ),
-                        thumb=InputWebDocument(
-                            url=INLINE_QUERY_BANNER,
-                            size=0,
-                            mime_type="image/jpeg",
-                            attributes=[],
-                        ),
+                        text=f"<b>YTMusic:</b> {self.strings['hint_desc']}",
+                        parse_mode="HTML",
+                        link_preview=False,
+                        thumb=self.inline._web_document(INLINE_QUERY_BANNER, width=640, height=640),
+                        id=f"hint_{int(time.time())}",
                     )
                 ],
                 cache_time=0,
                 private=True,
-            ))
+            )
         except Exception:
             pass
 
