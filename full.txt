@@ -10,6 +10,7 @@ InlineDL
 Logger
 Manager
 Market
+MessageEditor
 MTProxy
 NetTester
 NewYear
