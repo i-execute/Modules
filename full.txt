@@ -16,6 +16,7 @@ NetTester
 NewYear
 NFTChecker
 Note
+OnlineKeeper
 QRAuthDumper
 RaidProtection
 Robber
