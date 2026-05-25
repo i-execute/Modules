@@ -388,8 +388,8 @@ class YTMusic(loader.Module):
     @loader.need_update("chosen_inline_result")
     async def _on_chosen(self, update):
         # update is UpdateBotInlineSend
-        # Fields: result_id (str), msg_id (InputBotInlineMessageID), user_id (int)
-        rid = update.result_id
+        # Fields: id (str), msg_id (InputBotInlineMessageID), user_id (int), query (str)
+        rid = update.id
         msg_id = update.msg_id
         _log("CHOSEN", f"rid={rid!r} msg_id={msg_id!r}")
         if not rid or not rid.startswith("yt_") or not msg_id:
