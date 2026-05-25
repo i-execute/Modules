@@ -10,12 +10,32 @@ import logging
 import tempfile
 import shutil
 import asyncio
+import typing
 import traceback
 
 import aiohttp
 from PIL import Image
 
 from herokutl.tl.types import Message
+from herokutl.tl.functions.messages import SetInlineBotResultsRequest, EditInlineBotMessageRequest
+from herokutl.tl.types import (
+    InputBotInlineResultDocument,
+    InputBotInlineResultPhoto,
+    InputBotInlineResult,
+    InputBotInlineMessageMediaAuto,
+    InputBotInlineMessageText,
+    InputMediaDocument,
+    InputMediaPhoto,
+    InputDocument,
+    InputPhoto,
+    DocumentAttributeAudio,
+    InputWebDocument,
+    ReplyInlineMarkup,
+    KeyboardButtonCallback,
+    KeyboardButtonRow,
+    TextWithEntities,
+    MessageEntityBold,
+)
 
 from .. import loader, utils
 
@@ -321,6 +341,17 @@ def _embed_id3(filepath: str, title: str, artist: str, cover_data: bytes | None)
         pass
 
 
+def _make_inline_kb(video_id: str, label: str) -> ReplyInlineMarkup:
+    return ReplyInlineMarkup(rows=[
+        KeyboardButtonRow(buttons=[
+            KeyboardButtonCallback(
+                text=label,
+                data=f"ytm_dl_{video_id[:32]}".encode(),
+            )
+        ])
+    ])
+
+
 @loader.tds
 class YTMusic(loader.Module):
     """YouTube Music - search and download audio from YouTube"""
@@ -388,18 +419,19 @@ class YTMusic(loader.Module):
 
     @loader.need_update("chosen_inline_result")
     async def _on_chosen(self, update):
+        # update is UpdateBotInlineSend -- fields: result_id (str), msg_id (InputBotInlineMessageID), user_id (int)
         rid = update.result_id
-        imid = update.inline_message_id
-        _log("CHOSEN", f"rid={rid!r} imid={imid!r}")
-        if not rid or not rid.startswith("yt_") or not imid:
+        msg_id = update.msg_id
+        _log("CHOSEN", f"rid={rid!r} msg_id={msg_id!r}")
+        if not rid or not rid.startswith("yt_") or not msg_id:
             return
         video_id = rid[3:]
         if video_id in self._real_cache:
-            await self._do_replace(imid, self._real_cache[video_id])
+            await self._do_replace(msg_id, self._real_cache[video_id])
             return
-        asyncio.ensure_future(self._bg_dl_replace(video_id, imid))
+        asyncio.ensure_future(self._bg_dl_replace(video_id, msg_id))
 
-    async def _bg_dl_replace(self, video_id: str, imid: str):
+    async def _bg_dl_replace(self, video_id: str, msg_id):
         _log("BG", f"Start dl video_id={video_id}")
         try:
             result = await self._dl_and_upload(video_id)
@@ -413,33 +445,23 @@ class YTMusic(loader.Module):
                 result["duration"],
             )
             self._real_cache[video_id] = data
-            await self._do_replace(imid, data)
+            await self._do_replace(msg_id, data)
         except Exception as e:
             _log("BG", f"Exception: {e}\n{traceback.format_exc()}")
 
-    async def _do_replace(self, imid: str, data: tuple):
+    async def _do_replace(self, msg_id, data: tuple):
         file_id, title, artist, duration = data
-        _log("REPLACE", f"imid={imid!r} file_id={file_id!r}")
-
-        media_dict = {
-            "type": "audio",
-            "media": file_id,
-            "title": title,
-            "performer": artist,
-            "duration": duration,
-        }
+        _log("REPLACE", f"msg_id={msg_id!r} file_id={file_id!r}")
 
         for attempt in range(3):
             try:
-                from aiogram.types import InputMediaAudio
-                await self.inline.bot.edit_message_media(
-                    inline_message_id=imid,
-                    media=InputMediaAudio(
-                        media=file_id,
-                        title=title,
-                        performer=artist,
-                        duration=duration,
-                    ),
+                await self.inline.bot.client(
+                    EditInlineBotMessageRequest(
+                        id=msg_id,
+                        media=InputMediaDocument(
+                            id=file_id,
+                        ),
+                    )
                 )
                 _log("REPLACE", f"OK attempt {attempt + 1}")
                 return
@@ -613,40 +635,47 @@ class YTMusic(loader.Module):
         artist: str,
         dur_s: int,
         thumb_data: bytes | None,
-    ) -> str | None:
+    ) -> typing.Any | None:
         async with self._upload_lock:
-            from aiogram.types import BufferedInputFile
-            audio_inp = BufferedInputFile(file_bytes, filename=filename)
-            thumb_inp = (
-                BufferedInputFile(thumb_data, filename="cover.jpg")
-                if thumb_data else None
-            )
+            audio_buf = io.BytesIO(file_bytes)
+            audio_buf.name = filename
+            thumb_buf = None
+            if thumb_data:
+                thumb_buf = io.BytesIO(thumb_data)
+                thumb_buf.name = "cover.jpg"
             try:
                 sent = await self.inline.bot.send_audio(
-                    chat_id=self._me_id,
-                    audio=audio_inp,
+                    self._me_id,
+                    audio_buf,
                     title=title,
                     performer=artist,
                     duration=dur_s,
-                    thumbnail=thumb_inp,
+                    thumbnail=thumb_buf,
                 )
             except Exception as e:
                 _log("UPLOAD", f"send_audio failed: {e}")
                 return None
-            if sent and sent.audio:
-                fid = sent.audio.file_id
-                msg_id = sent.message_id
-                await asyncio.sleep(0.5)
-                for attempt in range(5):
-                    try:
-                        await self.inline.bot.delete_message(chat_id=self._me_id, message_id=msg_id)
-                        break
-                    except Exception:
-                        await asyncio.sleep(1.0 * (attempt + 1))
-                return fid
+            if sent and sent.media:
+                doc = sent.media.document if hasattr(sent.media, "document") else None
+                if doc:
+                    from herokutl.tl.types import InputDocument
+                    file_id = InputDocument(
+                        id=doc.id,
+                        access_hash=doc.access_hash,
+                        file_reference=doc.file_reference,
+                    )
+                    msg_id = sent.id
+                    await asyncio.sleep(0.5)
+                    for attempt in range(5):
+                        try:
+                            await self.inline.bot.delete_message(self._me_id, msg_id)
+                            break
+                        except Exception:
+                            await asyncio.sleep(1.0 * (attempt + 1))
+                    return file_id
             return None
 
-    async def _get_stub(self, video_id: str, title: str, artist: str) -> str | None:
+    async def _get_stub(self, video_id: str, title: str, artist: str) -> typing.Any | None:
         if video_id in self._stub_cache:
             return self._stub_cache[video_id]
 
@@ -668,37 +697,40 @@ class YTMusic(loader.Module):
         raw = await _download_image(hq_url)
         thumb_data = normalize_cover(raw, max_size=320) if raw else None
 
-        from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+        kb = _make_inline_kb(video_id, self.strings["downloading"])
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(
-                text=self.strings["downloading"],
-                callback_data=f"ytm_dl_{video_id[:32]}",
-            )
-        ]])
+        stub_buf = io.BytesIO(stub_bytes)
+        stub_buf.name = "Downloading.mp3"
+        thumb_buf = None
+        if thumb_data:
+            thumb_buf = io.BytesIO(thumb_data)
+            thumb_buf.name = "cover.jpg"
 
         try:
             sent = await self.inline.bot.send_audio(
-                chat_id=self._me_id,
-                audio=BufferedInputFile(stub_bytes, filename="Downloading.mp3"),
+                self._me_id,
+                stub_buf,
                 title=title,
                 performer=artist,
-                thumbnail=(
-                    BufferedInputFile(thumb_data, filename="cover.jpg") if thumb_data else None
-                ),
+                thumbnail=thumb_buf,
                 reply_markup=kb,
             )
-            if sent and sent.audio:
-                fid = sent.audio.file_id
-                self._stub_cache[video_id] = fid
-                _log("STUB", f"Created: file_id={fid!r}")
-                try:
-                    await self.inline.bot.delete_message(
-                        chat_id=self._me_id, message_id=sent.message_id
+            if sent and sent.media:
+                doc = sent.media.document if hasattr(sent.media, "document") else None
+                if doc:
+                    from herokutl.tl.types import InputDocument
+                    fid = InputDocument(
+                        id=doc.id,
+                        access_hash=doc.access_hash,
+                        file_reference=doc.file_reference,
                     )
-                except Exception:
-                    pass
-                return fid
+                    self._stub_cache[video_id] = fid
+                    _log("STUB", f"Created: doc_id={doc.id}")
+                    try:
+                        await self.inline.bot.delete_message(self._me_id, sent.id)
+                    except Exception:
+                        pass
+                    return fid
         except Exception as e:
             _log("STUB", f"send_audio failed: {e}\n{traceback.format_exc()}")
         return None
@@ -740,7 +772,7 @@ class YTMusic(loader.Module):
             await self._hint(query)
             return
 
-        _log("INLINE", f"query={text!r} from={query.from_user.id}")
+        _log("INLINE", f"query={text!r} from={query.query.user_id}")
 
         video_id = _extract_video_id(text)
         if video_id:
@@ -754,16 +786,21 @@ class YTMusic(loader.Module):
         if video_id in self._real_cache:
             fid = self._real_cache[video_id][0]
             try:
-                from aiogram.types import InlineQueryResultCachedAudio
-                await self.inline.bot.answer_inline_query(
-                    inline_query_id=query.id,
-                    results=[InlineQueryResultCachedAudio(
-                        id=f"yt_{video_id}",
-                        audio_file_id=fid,
-                    )],
+                await self.inline.bot.client(SetInlineBotResultsRequest(
+                    query_id=query.query.query_id,
+                    results=[
+                        InputBotInlineResultDocument(
+                            id=f"yt_{video_id}",
+                            type="audio",
+                            document=fid,
+                            send_message=InputBotInlineMessageMediaAuto(
+                                message="",
+                            ),
+                        )
+                    ],
                     cache_time=0,
-                    is_personal=True,
-                )
+                    private=True,
+                ))
             except Exception:
                 pass
             return
@@ -772,24 +809,23 @@ class YTMusic(loader.Module):
         track = await _get_video_info_ytdlp(video_id, cookies)
 
         if not track:
-            from aiogram.types import (
-                InlineQueryResultArticle,
-                InputTextMessageContent,
-            )
-            await self.inline.bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=[InlineQueryResultArticle(
-                    id=f"notfound_{int(time.time())}",
-                    title=self.strings["link_not_found"],
-                    description=self.strings["link_not_found_desc"],
-                    input_message_content=InputTextMessageContent(
-                        message_text=f"<b>YTMusic:</b> {self.strings['link_not_found_desc']}",
-                        parse_mode="HTML",
-                    ),
-                )],
+            await self.inline.bot.client(SetInlineBotResultsRequest(
+                query_id=query.query.query_id,
+                results=[
+                    InputBotInlineResult(
+                        id=f"notfound_{int(time.time())}",
+                        type="article",
+                        title=self.strings["link_not_found"],
+                        description=self.strings["link_not_found_desc"],
+                        send_message=InputBotInlineMessageText(
+                            message=f"<b>YTMusic:</b> {self.strings['link_not_found_desc']}",
+                            no_webpage=True,
+                        ),
+                    )
+                ],
                 cache_time=0,
-                is_personal=True,
-            )
+                private=True,
+            ))
             return
 
         title = track["title"]
@@ -802,52 +838,46 @@ class YTMusic(loader.Module):
 
         stub_fid = await self._get_stub(video_id, title, channel)
 
-        from aiogram.types import (
-            InlineQueryResultCachedAudio,
-            InlineQueryResultArticle,
-            InputTextMessageContent,
-            InlineKeyboardMarkup,
-            InlineKeyboardButton,
-        )
-
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(
-                text=self.strings["downloading"],
-                callback_data=f"ytm_dl_{video_id[:32]}",
-            )
-        ]])
+        kb = _make_inline_kb(video_id, self.strings["downloading"])
 
         if stub_fid:
-            results = [InlineQueryResultCachedAudio(
+            results = [InputBotInlineResultDocument(
                 id=f"yt_{video_id}",
-                audio_file_id=stub_fid,
-                reply_markup=kb,
+                type="audio",
+                document=stub_fid,
+                send_message=InputBotInlineMessageMediaAuto(
+                    message="",
+                    reply_markup=kb,
+                ),
             )]
         else:
-            results = [InlineQueryResultArticle(
+            results = [InputBotInlineResult(
                 id=f"yt_{video_id}",
+                type="article",
                 title=title,
                 description=channel,
-                input_message_content=InputTextMessageContent(
-                    message_text=f"<b>YTMusic:</b> {escape_html(title)}",
-                    parse_mode="HTML",
+                send_message=InputBotInlineMessageText(
+                    message=f"<b>YTMusic:</b> {escape_html(title)}",
+                    no_webpage=True,
                 ),
-                reply_markup=kb,
-                thumbnail_url=thumb,
-                thumbnail_width=480,
-                thumbnail_height=360,
+                thumb=InputWebDocument(
+                    url=thumb,
+                    size=0,
+                    mime_type="image/jpeg",
+                    attributes=[],
+                ),
             )]
 
         try:
-            await self.inline.bot.answer_inline_query(
-                inline_query_id=query.id,
+            await self.inline.bot.client(SetInlineBotResultsRequest(
+                query_id=query.query.query_id,
                 results=results,
                 cache_time=0,
-                is_personal=True,
-            )
+                private=True,
+            ))
             _log("LINK", f"Answered OK video_id={video_id}")
         except Exception as e:
-            _log("LINK", f"answer_inline_query FAILED: {e}")
+            _log("LINK", f"SetInlineBotResults FAILED: {e}")
 
     async def _handle_search_inline(self, query, text: str):
         limit = max(1, min(10, int(self.config["SEARCH_LIMIT"])))
@@ -863,24 +893,23 @@ class YTMusic(loader.Module):
             self._search_cache[cache_key] = tracks
 
         if not tracks:
-            from aiogram.types import (
-                InlineQueryResultArticle,
-                InputTextMessageContent,
-            )
-            await self.inline.bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=[InlineQueryResultArticle(
-                    id=f"notfound_{int(time.time())}",
-                    title=self.strings["not_found"],
-                    description=self.strings["not_found_desc"],
-                    input_message_content=InputTextMessageContent(
-                        message_text=f"<b>YTMusic:</b> {self.strings['not_found_desc']}",
-                        parse_mode="HTML",
-                    ),
-                )],
+            await self.inline.bot.client(SetInlineBotResultsRequest(
+                query_id=query.query.query_id,
+                results=[
+                    InputBotInlineResult(
+                        id=f"notfound_{int(time.time())}",
+                        type="article",
+                        title=self.strings["not_found"],
+                        description=self.strings["not_found_desc"],
+                        send_message=InputBotInlineMessageText(
+                            message=f"<b>YTMusic:</b> {self.strings['not_found_desc']}",
+                            no_webpage=True,
+                        ),
+                    )
+                ],
                 cache_time=0,
-                is_personal=True,
-            )
+                private=True,
+            ))
             return
 
         thumb_tasks = [_best_thumb_for_inline(t["video_id"]) for t in tracks]
@@ -892,14 +921,6 @@ class YTMusic(loader.Module):
 
         stub_tasks = [self._get_stub(t["video_id"], t["title"], t["channel"]) for t in tracks]
         stub_results = await asyncio.gather(*stub_tasks, return_exceptions=True)
-
-        from aiogram.types import (
-            InlineQueryResultCachedAudio,
-            InlineQueryResultArticle,
-            InputTextMessageContent,
-            InlineKeyboardMarkup,
-            InlineKeyboardButton,
-        )
 
         inline_results = []
         for i, t in enumerate(tracks):
@@ -921,73 +942,81 @@ class YTMusic(loader.Module):
 
             _log("RESULT", f"[{i}] {title!r} stub_fid={stub_fid!r} thumb={str(thumb)[:60]}")
 
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(
-                    text=self.strings["downloading"],
-                    callback_data=f"ytm_dl_{vid[:32]}",
-                )
-            ]])
+            kb = _make_inline_kb(vid, self.strings["downloading"])
 
             if vid in self._real_cache:
-                inline_results.append(InlineQueryResultCachedAudio(
+                inline_results.append(InputBotInlineResultDocument(
                     id=f"yt_{vid}",
-                    audio_file_id=self._real_cache[vid][0],
+                    type="audio",
+                    document=self._real_cache[vid][0],
+                    send_message=InputBotInlineMessageMediaAuto(
+                        message="",
+                    ),
                 ))
             elif stub_fid:
-                inline_results.append(InlineQueryResultCachedAudio(
+                inline_results.append(InputBotInlineResultDocument(
                     id=f"yt_{vid}",
-                    audio_file_id=stub_fid,
-                    reply_markup=kb,
+                    type="audio",
+                    document=stub_fid,
+                    send_message=InputBotInlineMessageMediaAuto(
+                        message="",
+                        reply_markup=kb,
+                    ),
                 ))
             else:
-                inline_results.append(InlineQueryResultArticle(
+                inline_results.append(InputBotInlineResult(
                     id=f"yt_{vid}",
+                    type="article",
                     title=title,
                     description=f"{channel} | {dur_str}",
-                    input_message_content=InputTextMessageContent(
-                        message_text=f"<b>YTMusic:</b> {escape_html(title)}",
-                        parse_mode="HTML",
+                    send_message=InputBotInlineMessageText(
+                        message=f"<b>YTMusic:</b> {escape_html(title)}",
+                        no_webpage=True,
                     ),
-                    reply_markup=kb,
-                    thumbnail_url=thumb,
-                    thumbnail_width=480,
-                    thumbnail_height=360,
+                    thumb=InputWebDocument(
+                        url=thumb,
+                        size=0,
+                        mime_type="image/jpeg",
+                        attributes=[],
+                    ),
                 ))
 
         try:
-            await self.inline.bot.answer_inline_query(
-                inline_query_id=query.id,
+            await self.inline.bot.client(SetInlineBotResultsRequest(
+                query_id=query.query.query_id,
                 results=inline_results,
                 cache_time=0,
-                is_personal=True,
-            )
+                private=True,
+            ))
             _log("INLINE", f"Answered {len(inline_results)} results OK")
         except Exception as e:
-            _log("INLINE", f"answer_inline_query FAILED: {e}\n{traceback.format_exc()}")
+            _log("INLINE", f"SetInlineBotResults FAILED: {e}\n{traceback.format_exc()}")
 
     async def _hint(self, query):
-        from aiogram.types import (
-            InlineQueryResultArticle,
-            InputTextMessageContent,
-        )
         try:
-            await self.inline.bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=[InlineQueryResultArticle(
-                    id=f"hint_{int(time.time())}",
-                    title=self.strings["hint_title"],
-                    description=self.strings["hint_desc"],
-                    input_message_content=InputTextMessageContent(
-                        message_text=f"<b>YTMusic:</b> {self.strings['hint_desc']}",
-                        parse_mode="HTML",
-                    ),
-                    thumbnail_url=INLINE_QUERY_BANNER,
-                    thumbnail_width=640,
-                    thumbnail_height=360,
-                )],
+            await self.inline.bot.client(SetInlineBotResultsRequest(
+                query_id=query.query.query_id,
+                results=[
+                    InputBotInlineResult(
+                        id=f"hint_{int(time.time())}",
+                        type="article",
+                        title=self.strings["hint_title"],
+                        description=self.strings["hint_desc"],
+                        send_message=InputBotInlineMessageText(
+                            message=f"<b>YTMusic:</b> {self.strings['hint_desc']}",
+                            no_webpage=True,
+                        ),
+                        thumb=InputWebDocument(
+                            url=INLINE_QUERY_BANNER,
+                            size=0,
+                            mime_type="image/jpeg",
+                            attributes=[],
+                        ),
+                    )
+                ],
                 cache_time=0,
-                is_personal=True,
-            )
+                private=True,
+            ))
         except Exception:
             pass
 
