@@ -6,6 +6,10 @@ import re
 import time
 import logging
 
+from telethon.tl.types import (
+    DocumentAttributeVideo,
+)
+
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
@@ -137,17 +141,18 @@ class InlineDL(loader.Module):
         try:
             await query.answer(
                 [
-                    await query.builder.document(
-                        kk_url,
-                        title=title,
-                        description=self.strings["ready_desc"],
-                        type="video",
-                        mime_type="video/mp4",
-                        text=f'<a href="{escape_html(kk_url)}">{title}</a>',
-                        parse_mode="HTML",
-                        link_preview=False,
-                        id=f"v_{int(time.time())}",
-                    )
+                    {
+                        "id": f"v_{int(time.time())}",
+                        "type": "video",
+                        "video_url": kk_url,
+                        "mime_type": "video/mp4",
+                        "thumb_url": thumb,
+                        "title": title,
+                        "description": self.strings["ready_desc"],
+                        "video_width": 1080,
+                        "video_height": 1920,
+                        "message": "",
+                    }
                 ],
                 cache_time=0,
                 private=True,
