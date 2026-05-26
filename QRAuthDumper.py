@@ -1,7 +1,6 @@
-__version__ = (2, 0, 2)
+__version__ = (2, 0, 3)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/QRAuthDumper/MetaBanner.jpeg
-# requires: qrcode[pil] Pillow
 
 import io
 import logging
@@ -10,6 +9,7 @@ import hashlib
 import base64
 import struct
 import ipaddress
+import sys
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -21,6 +21,46 @@ from .. import loader, utils
 logger = logging.getLogger(__name__)
 
 QR_REFRESH = 15
+
+DEPS = ["qrcode[pil]", "Pillow"]
+
+
+def _install_deps():
+    import importlib
+    import subprocess
+    
+    pip = __import__('os').path.join(__import__('os').path.dirname(sys.executable), "pip")
+    if not __import__('os').path.exists(pip):
+        pip = "pip"
+    
+    in_venv = sys.prefix != sys.base_prefix
+    
+    imp_map = {
+        "qrcode[pil]": "qrcode",
+        "Pillow": "PIL",
+    }
+    
+    lines = [f"venv: {'yes' if in_venv else 'no'} ({sys.prefix})"]
+    
+    for pkg in DEPS:
+        try:
+            subprocess.run(
+                [pip, "install", "-U", pkg, "--break-system-packages", "-q"],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            try:
+                imp_name = imp_map.get(pkg, pkg)
+                mod = importlib.import_module(imp_name)
+                ver = getattr(mod, "__version__", "?")
+                lines.append(f"{pkg}: OK ({ver})")
+            except ImportError:
+                lines.append(f"{pkg}: FAIL (import error)")
+        except Exception as e:
+            lines.append(f"{pkg}: FAIL ({e})")
+    
+    return lines
 
 
 def _escape(text):
@@ -137,6 +177,7 @@ class QRAuthDumper(loader.Module):
         ),
         "provide_password": "<b>Provide password.</b>",
         "no_active_process": "<b>No active QR auth process.</b>",
+        "installing_deps": "<b>Installing dependencies...</b>\n{status}",
     }
 
     strings_ru = {
@@ -242,6 +283,7 @@ class QRAuthDumper(loader.Module):
         ),
         "provide_password": "<b>Укажите пароль.</b>",
         "no_active_process": "<b>Нет активного процесса QR авторизации.</b>",
+        "installing_deps": "<b>Установка зависимостей...</b>\n{status}",
     }
 
     def __init__(self):
@@ -274,6 +316,7 @@ class QRAuthDumper(loader.Module):
         self._owner_id = None
         self._active_sessions = {}
         self._pending_2fa = {}
+        self._tasks = set()
 
     async def client_ready(self, client, db):
         self._client = client
@@ -281,6 +324,12 @@ class QRAuthDumper(loader.Module):
         me = await client.get_me()
         self._owner_id = me.id
         logger.info("[QRAuth] Module loaded, owner id=%d", self._owner_id)
+        
+        try:
+            status_lines = _install_deps()
+            logger.info("[QRAuth] Dependencies check:\n" + "\n".join(status_lines))
+        except Exception as e:
+            logger.error("[QRAuth] Dependency installation error: %s", e)
 
     def _get_topic_id(self, message: Message):
         reply_to = getattr(message, "reply_to", None)
@@ -702,9 +751,11 @@ class QRAuthDumper(loader.Module):
         except Exception:
             pass
 
-        asyncio.create_task(
+        task = asyncio.create_task(
             self._dumpqr_task(uid, peer, topic_id, api_id, api_hash)
         )
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def _dumpqr_task(self, uid, peer, topic_id, api_id, api_hash):
         line = self.strings["line"]
@@ -763,3 +814,13 @@ class QRAuthDumper(loader.Module):
         finally:
             if uid not in self._pending_2fa:
                 self._active_sessions.pop(uid, None)
+
+    async def on_unload(self):
+        for task in list(self._tasks):
+            if not task.done():
+                task.cancel()
+        
+        for uid in list(self._pending_2fa.keys()):
+            await self._cleanup_session(uid)
+        
+        logger.info("[QRAuth] Module unloaded, cleaned up tasks and sessions")

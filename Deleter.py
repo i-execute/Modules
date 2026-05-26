@@ -1,4 +1,4 @@
-__version__ = (2, 1, 1)
+__version__ = (2, 1, 2)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/MetaBanner.jpeg
 
@@ -42,7 +42,7 @@ class Deleter(loader.Module):
         "no_user": "<b>Error:</b> User not found",
         "no_perms": "<b>Error:</b> Not enough permissions to delete some messages",
         "error": "<b>Error:</b>\n<blockquote>{error}</blockquote>",
-        "done_me": "<b>All your messages in chat</b>\n<blockquote>{chat}</blockquote>\n<b>have been deleted.</b>",
+        "done_me": "<b>All your {count} messages in chat</b>\n<blockquote>{chat}</blockquote>\n<b>have been deleted.</b>",
         "done_leave": (
             "<b>Left chat:</b>\n<blockquote>{chat}</blockquote>\n"
             "<b>Deleted messages:</b> <code>{count}</code>\n"
@@ -71,7 +71,7 @@ class Deleter(loader.Module):
         "no_user": "<b>Ошибка:</b> Пользователь не найден",
         "no_perms": "<b>Ошибка:</b> Недостаточно прав для удаления некоторых сообщений",
         "error": "<b>Ошибка:</b>\n<blockquote>{error}</blockquote>",
-        "done_me": "<b>Все ваши сообщения в чате</b>\n<blockquote>{chat}</blockquote>\n<b>удалены.</b>",
+        "done_me": "<b>Все ваши {count} сообщения в чате</b>\n<blockquote>{chat}</blockquote>\n<b>удалены.</b>",
         "done_leave": (
             "<b>Вышел из чата:</b>\n<blockquote>{chat}</blockquote>\n"
             "<b>Удалено сообщений:</b> <code>{count}</code>\n"
@@ -258,15 +258,18 @@ class Deleter(loader.Module):
             async for msg in client.iter_messages(chat_id, from_user="me"):
                 ids.append(msg.id)
 
+            total_count = len(ids)
+
             if not ids:
                 await self._send_log(
-                    self.strings["done_me"].format(chat=chat_name)
+                    self.strings["done_me"].format(chat=chat_name, count=0)
                 )
                 return
 
-            await self._bulk_delete(client, chat_id, ids)
+            deleted, failed = await self._bulk_delete(client, chat_id, ids)
+            
             await self._send_log(
-                self.strings["done_me"].format(chat=chat_name)
+                self.strings["done_me"].format(chat=chat_name, count=total_count)
             )
 
         except Exception as e:
@@ -280,7 +283,6 @@ class Deleter(loader.Module):
             last_date = None
 
             async for msg in client.iter_messages(chat_id, from_user="me"):
-                
                 if msg.id == cmd_msg_id:
                     continue
                 ids_to_delete.append(msg.id)
@@ -301,7 +303,7 @@ class Deleter(loader.Module):
                 sayonara_msg_id = None
 
             if ids_to_delete:
-                await self._bulk_delete(client, chat_id, ids_to_delete)
+                deleted, failed = await self._bulk_delete(client, chat_id, ids_to_delete)
 
             await self._leave_chat(client, chat_id)
 
