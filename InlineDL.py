@@ -177,7 +177,6 @@ class InlineDL(loader.Module):
                 thumb=self._make_web_document(BANNER, mime_type="image/png"),
                 send_message=InputBotInlineMessageText(
                     message=self.strings["hint_msg"],
-                    parse_mode="HTML",
                     no_webpage=True,
                 ),
             )
@@ -200,7 +199,6 @@ class InlineDL(loader.Module):
                 thumb=self._make_web_document(BANNER, mime_type="image/png"),
                 send_message=InputBotInlineMessageText(
                     message=self.strings["invalid_msg"],
-                    parse_mode="HTML",
                     no_webpage=True,
                 ),
             )
@@ -223,7 +221,6 @@ class InlineDL(loader.Module):
                 thumb=self._make_web_document(thumb, mime_type="image/png"),
                 send_message=InputBotInlineMessageText(
                     message=f"<b>InlineDL:</b> {escape_html(str(err))}",
-                    parse_mode="HTML",
                     no_webpage=True,
                 ),
             )
