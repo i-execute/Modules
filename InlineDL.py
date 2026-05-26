@@ -9,6 +9,7 @@ import logging
 from telethon.tl.types import (
     InputBotInlineResult,
     InputBotInlineMessageMediaAuto,
+    InputBotInlineMessageText,
     InputWebDocument,
     DocumentAttributeVideo,
 )
@@ -123,26 +124,12 @@ class InlineDL(loader.Module):
             text = text[2:].strip()
 
         if not text:
-            await self._answer_article(
-                query,
-                title=self.strings["hint_title"],
-                description=self.strings["hint_desc"],
-                message=self.strings["hint_msg"],
-                thumb=BANNER,
-                result_id=f"h_{int(time.time())}",
-            )
+            await self._answer_hint(query)
             return
 
         platform, matched = detect_platform(text)
         if not platform or not matched:
-            await self._answer_article(
-                query,
-                title=self.strings["invalid_title"],
-                description=self.strings["invalid_desc"],
-                message=self.strings["invalid_msg"],
-                thumb=BANNER,
-                result_id=f"inv_{int(time.time())}",
-            )
+            await self._answer_invalid(query)
             return
 
         kk_url = make_kk_url(platform, matched)
@@ -178,42 +165,76 @@ class InlineDL(loader.Module):
             )
         except Exception as e:
             logger.exception("[InlineDL] Failed to answer inline query")
-            await self._answer_article(
-                query,
-                title=self.strings["err_title"],
-                description=str(e)[:100],
-                message=f"<b>InlineDL:</b> {escape_html(str(e))}",
-                thumb=thumb,
-                result_id=f"e_{int(time.time())}",
+            await self._answer_error(query, str(e), thumb)
+
+    async def _answer_hint(self, query):
+        try:
+            result = InputBotInlineResult(
+                id=f"h_{int(time.time())}",
+                type="article",
+                title=self.strings["hint_title"],
+                description=self.strings["hint_desc"],
+                thumb=self._make_web_document(BANNER, mime_type="image/png"),
+                send_message=InputBotInlineMessageText(
+                    message=self.strings["hint_msg"],
+                    parse_mode="HTML",
+                    no_webpage=True,
+                ),
             )
 
-    async def _answer_article(
-        self,
-        query,
-        title,
-        description,
-        message,
-        thumb,
-        result_id,
-    ):
-        try:
             await query.answer(
-                [
-                    await query.builder.article(
-                        title=title,
-                        description=description,
-                        text=message,
-                        parse_mode="HTML",
-                        link_preview=False,
-                        thumb=self.inline._web_document(thumb, width=640, height=640),
-                        id=result_id,
-                    )
-                ],
+                results=[result],
                 cache_time=0,
                 private=True,
             )
         except Exception as e:
-            logger.error(f"[InlineDL] Article answer error: {e}", exc_info=True)
+            logger.error(f"[InlineDL] Hint error: {e}", exc_info=True)
+
+    async def _answer_invalid(self, query):
+        try:
+            result = InputBotInlineResult(
+                id=f"inv_{int(time.time())}",
+                type="article",
+                title=self.strings["invalid_title"],
+                description=self.strings["invalid_desc"],
+                thumb=self._make_web_document(BANNER, mime_type="image/png"),
+                send_message=InputBotInlineMessageText(
+                    message=self.strings["invalid_msg"],
+                    parse_mode="HTML",
+                    no_webpage=True,
+                ),
+            )
+
+            await query.answer(
+                results=[result],
+                cache_time=0,
+                private=True,
+            )
+        except Exception as e:
+            logger.error(f"[InlineDL] Invalid error: {e}", exc_info=True)
+
+    async def _answer_error(self, query, err, thumb):
+        try:
+            result = InputBotInlineResult(
+                id=f"e_{int(time.time())}",
+                type="article",
+                title=self.strings["err_title"],
+                description=str(err)[:100],
+                thumb=self._make_web_document(thumb, mime_type="image/png"),
+                send_message=InputBotInlineMessageText(
+                    message=f"<b>InlineDL:</b> {escape_html(str(err))}",
+                    parse_mode="HTML",
+                    no_webpage=True,
+                ),
+            )
+
+            await query.answer(
+                results=[result],
+                cache_time=0,
+                private=True,
+            )
+        except Exception as e:
+            logger.error(f"[InlineDL] Error display error: {e}", exc_info=True)
 
     async def on_unload(self):
         pass
