@@ -1,4 +1,5 @@
 AdminTool
+AutoAvka
 Buttons
 ChatRecovery
 DeleteMusic
