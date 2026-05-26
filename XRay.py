@@ -41,23 +41,41 @@ def _escape(text):
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _in_docker():
-    if os.path.exists("/.dockerenv"):
+import os
+
+
+def in_docker():
+    if os.path.isfile("/.dockerenv"):
         return True
+
     try:
-        with open("/proc/1/cgroup", "r") as f:
-            content = f.read()
-            if "docker" in content or "containerd" in content:
-                return True
+        with open("/proc/1/cgroup", "rt") as f:
+            data = f.read()
+
+        docker_markers = (
+            "docker",
+            "kubepods",
+            "containerd",
+            "podman",
+            "lxc",
+        )
+
+        if any(marker in data for marker in docker_markers):
+            return True
+
     except Exception:
         pass
+
     try:
-        with open("/proc/self/mountinfo", "r") as f:
-            content = f.read()
-            if "docker" in content or "overlay" in content:
-                return True
+        with open("/proc/1/environ", "rb") as f:
+            env = f.read()
+
+        if b"container=" in env:
+            return True
+
     except Exception:
         pass
+
     return False
 
 
