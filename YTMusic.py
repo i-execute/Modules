@@ -16,6 +16,7 @@ import typing
 import aiohttp
 from PIL import Image
 
+from herokutl import Button
 from herokutl.tl.functions.messages import EditInlineBotMessageRequest
 from herokutl.tl.types import (
     DocumentAttributeAudio,
@@ -808,6 +809,7 @@ class YTMusic(loader.Module):
                             description=channel,
                             mime_type="audio/mpeg",
                             id=f"yt_{video_id}",
+                            buttons=Button.inline(self.strings["downloading"], data=f"ytm_{video_id[:32]}"),
                         )
                     ],
                     cache_time=0,
@@ -908,6 +910,7 @@ class YTMusic(loader.Module):
                         description=channel,
                         mime_type="audio/mpeg",
                         id=f"yt_{vid}",
+                        buttons=Button.inline(self.strings["downloading"], data=f"ytm_{vid[:32]}"),
                     )
                 )
             else:
