@@ -7,6 +7,9 @@ import time
 import logging
 
 from telethon.tl.types import (
+    InputBotInlineResult,
+    InputBotInlineMessageMediaAuto,
+    InputWebDocument,
     DocumentAttributeVideo,
 )
 
@@ -101,6 +104,14 @@ class InlineDL(loader.Module):
         self._client = client
         self._db = db
 
+    def _make_web_document(self, url, mime_type="video/mp4", attributes=None):
+        return InputWebDocument(
+            url=url,
+            size=0,
+            mime_type=mime_type,
+            attributes=attributes or [],
+        )
+
     @loader.inline_handler(
         ru_doc="Скачать видео/фото из Instagram и TikTok",
         en_doc="Download video/photo from Instagram and TikTok",
@@ -139,21 +150,29 @@ class InlineDL(loader.Module):
         thumb = THUMB_IG if platform == "instagram" else THUMB_TT
 
         try:
+            result = InputBotInlineResult(
+                id=f"v_{int(time.time())}",
+                type="video",
+                title=title,
+                description=self.strings["ready_desc"],
+                url=kk_url,
+                thumb=self._make_web_document(thumb, mime_type="image/png"),
+                content=self._make_web_document(
+                    kk_url,
+                    mime_type="video/mp4",
+                    attributes=[
+                        DocumentAttributeVideo(
+                            duration=0,
+                            w=1080,
+                            h=1920,
+                        )
+                    ],
+                ),
+                send_message=InputBotInlineMessageMediaAuto(message=""),
+            )
+
             await query.answer(
-                [
-                    {
-                        "id": f"v_{int(time.time())}",
-                        "type": "video",
-                        "video_url": kk_url,
-                        "mime_type": "video/mp4",
-                        "thumb_url": thumb,
-                        "title": title,
-                        "description": self.strings["ready_desc"],
-                        "video_width": 1080,
-                        "video_height": 1920,
-                        "message": "",
-                    }
-                ],
+                results=[result],
                 cache_time=0,
                 private=True,
             )
