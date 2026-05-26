@@ -41,9 +41,6 @@ def _escape(text):
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-import os
-
-
 def _in_docker():
     if os.path.isfile("/.dockerenv"):
         return True
@@ -77,7 +74,6 @@ def _in_docker():
         pass
 
     return False
-
 
 @loader.tds
 class XRay(loader.Module):
