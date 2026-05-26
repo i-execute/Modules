@@ -1,35 +1,121 @@
-__version__ = (1, 1, 0)
+__version__ = (2, 0, 0)
 # meta developer: I_execute.t.me 
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/VKMusic/MetaBanner.jpeg
-# requires: aiohttp, mutagen, pycryptodome, m3u8, Pillow
 
 import os
 import io
 import re
+import sys
 import time
 import logging
 import tempfile
 import shutil
 import asyncio
 import traceback
+import typing
 
-from aiogram.types import (
-    InlineQuery,
-    InlineQueryResultCachedAudio,
-    InlineQueryResultArticle,
-    InputTextMessageContent,
-    BufferedInputFile,
-    InputMediaAudio,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    ChosenInlineResult,
+from telethon.tl.types import (
+    DocumentAttributeAudio,
+    InputDocument,
+    InputMediaDocument,
 )
-
-from telethon.tl.types import Message
+from telethon.tl.functions.messages import EditInlineBotMessageRequest
 
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
+
+DEPS = ["aiohttp", "Pillow", "mutagen", "pycryptodome", "m3u8"]
+
+def _install_deps():
+    import importlib
+    import subprocess
+    
+    pip = os.path.join(os.path.dirname(sys.executable), "pip")
+    if not os.path.exists(pip):
+        pip = "pip"
+    
+    in_venv = sys.prefix != sys.base_prefix
+    
+    imp_map = {
+        "Pillow": "PIL",
+        "pycryptodome": "Crypto",
+        "m3u8": "m3u8",
+        "aiohttp": "aiohttp",
+        "mutagen": "mutagen",
+    }
+    
+    ver_attr = {
+        "mutagen": "version.version_string",
+    }
+    
+    lines = [f"venv: {'yes' if in_venv else 'no'} ({sys.prefix})"]
+    
+    for pkg in DEPS:
+        try:
+            subprocess.run(
+                [pip, "install", "-U", pkg, "--break-system-packages", "-q"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            try:
+                imp_name = imp_map.get(pkg, pkg)
+                mod = importlib.import_module(imp_name)
+                
+                if imp_name in ver_attr:
+                    parts = ver_attr[imp_name].split(".")
+                    obj = mod
+                    for part in parts:
+                        obj = getattr(obj, part, None)
+                        if obj is None:
+                            break
+                    ver = str(obj) if obj else getattr(mod, "__version__", "?")
+                else:
+                    ver = getattr(mod, "__version__", "?")
+                
+                lines.append(f"{pkg}: OK ({ver})")
+            except ImportError:
+                lines.append(f"{pkg}: FAIL (import error)")
+        except Exception as e:
+            lines.append(f"{pkg}: FAIL ({e})")
+    
+    return lines
+
+_dep_log = _install_deps()
+
+try:
+    import aiohttp
+    from PIL import Image
+    AIOHTTP_OK = True
+    PIL_OK = True
+except ImportError:
+    aiohttp = None
+    Image = None
+    AIOHTTP_OK = False
+    PIL_OK = False
+
+try:
+    import m3u8 as m3u8_lib
+    from Crypto.Cipher import AES
+    from Crypto.Util.Padding import unpad
+    M3U8_OK = True
+except ImportError:
+    m3u8_lib = None
+    AES = None
+    unpad = None
+    M3U8_OK = False
+
+try:
+    from mutagen.id3 import ID3, TIT2, TPE1, APIC, ID3NoHeaderError
+    MUTAGEN_OK = True
+except ImportError:
+    ID3 = None
+    TIT2 = None
+    TPE1 = None
+    APIC = None
+    ID3NoHeaderError = None
+    MUTAGEN_OK = False
 
 INLINE_QUERY_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/VKMusic/Inline_query.png"
 DOWNLOADING_STUB = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/VKMusic/Downloading.mp3"
@@ -72,7 +158,6 @@ REQUEST_OK = 200
 MAX_FILE_SIZE = 50 * 1024 * 1024
 MAX_CONCURRENT = 15
 SEG_TIMEOUT = 30
-CACHE_TTL = 600
 
 STUB_URLS = ["audio_api_unavailable.mp3", "audio_api_unavailable"]
 STUB_TITLES = [
@@ -83,65 +168,63 @@ STUB_TITLES = [
 LOG_ENTRIES = []
 MAX_LOG = 300
 
+
 def _log(tag: str, msg: str):
     ts = time.strftime("%H:%M:%S")
-    entry = f"[{ts}] [{tag}] {msg}"
+    entry = f"[{ts}][VKMusic][{tag}] {msg}"
     LOG_ENTRIES.append(entry)
     if len(LOG_ENTRIES) > MAX_LOG:
         LOG_ENTRIES.pop(0)
     logger.info(entry)
 
-import aiohttp
-from PIL import Image
 
-try:
-    import m3u8 as m3u8_lib
-    from Crypto.Cipher import AES
-    from Crypto.Util.Padding import unpad
-except ImportError:
-    m3u8_lib = None
-
-try:
-    from mutagen.id3 import ID3, TIT2, TPE1, APIC, ID3NoHeaderError
-except ImportError:
-    ID3 = None
-
-def escape_html(t):
+def escape_html(t: str) -> str:
     return (t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-def sanitize_fn(n):
+
+def sanitize_fn(n: str) -> str:
     return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", n).strip(". ")[:180] or "track"
 
-def _is_stub_url(url):
+
+def _is_stub_url(url: str) -> bool:
     if not url:
         return True
     return any(s in url for s in STUB_URLS)
 
-def _is_stub_title(title):
+
+def _is_stub_title(title: str) -> bool:
     if not title:
         return False
     return any(s.lower() in title.lower() for s in STUB_TITLES)
 
-def _build_vk_auth_url():
+
+def _build_vk_auth_url() -> str:
     return (
         f"https://oauth.vk.com/authorize?client_id={VK_KATE_APP_ID}"
         f"&display=page&redirect_uri={VK_REDIRECT}"
         f"&scope=audio,offline&response_type=token&v={VK_API_VERSION}"
     )
 
-def extract_vk_token(text):
+
+def extract_vk_token(text: str) -> typing.Optional[str]:
     if not text:
         return None
     m = VK_TOKEN_RE.search(text)
     return m.group(1) if m else None
 
-def normalize_cover(raw_data, max_size=None, force_jpeg=False):
-    if not raw_data or len(raw_data) < 100:
+
+def normalize_cover(
+    raw_data: bytes,
+    max_size: typing.Optional[int] = None,
+    force_jpeg: bool = False,
+) -> typing.Optional[bytes]:
+    if not PIL_OK or not raw_data or len(raw_data) < 100:
         return None
     try:
         img = Image.open(io.BytesIO(raw_data))
         w, h = img.size
         needs_resize = max_size is not None and (w > max_size or h > max_size)
+        
         if force_jpeg:
             img = img.convert("RGB")
             if needs_resize:
@@ -151,22 +234,26 @@ def normalize_cover(raw_data, max_size=None, force_jpeg=False):
             img.save(buf, format="JPEG", quality=95)
             result = buf.getvalue()
             return result if len(result) >= 100 else None
+        
         is_png = raw_data[:8] == b'\x89PNG\r\n\x1a\n'
         if is_png and not needs_resize:
             return raw_data
+        
         img = img.convert("RGB")
         if needs_resize:
             ratio = min(max_size / w, max_size / h)
             img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        
         buf = io.BytesIO()
-        img.save(buf, format="PNG")
+        img.save(buf, format="JPEG", quality=95)
         result = buf.getvalue()
         return result if len(result) >= 100 else None
     except Exception:
         return None
 
-async def _download_image(url: str) -> bytes | None:
-    if not url:
+
+async def _download_image(url: str) -> typing.Optional[bytes]:
+    if not AIOHTTP_OK or not url:
         return None
     try:
         async with aiohttp.ClientSession() as s:
@@ -176,7 +263,6 @@ async def _download_image(url: str) -> bytes | None:
                 allow_redirects=True,
             ) as r:
                 if r.status != REQUEST_OK:
-                    _log("DL_IMG", f"HTTP {r.status} for {url[:80]}")
                     return None
                 data = await r.read()
                 return data if len(data) > 500 else None
@@ -184,8 +270,9 @@ async def _download_image(url: str) -> bytes | None:
         _log("DL_IMG", f"Error {url[:80]}: {e}")
         return None
 
+
 async def _try_bigger_signed(signed_url: str) -> str:
-    if not signed_url or "size=" not in signed_url:
+    if not AIOHTTP_OK or not signed_url or "size=" not in signed_url:
         return signed_url
 
     sizes = [f"{s}x{s}" for s in range(1200, 200, -100)]
@@ -205,15 +292,17 @@ async def _try_bigger_signed(signed_url: str) -> str:
         return sz, None
 
     async with aiohttp.ClientSession() as s:
-        tasks = [_check(s, sz) for sz in sizes]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(
+            *[_check(s, sz) for sz in sizes],
+            return_exceptions=True,
+        )
 
     for sz, url in results:
         if isinstance(url, str) and url:
-            _log("TRY_BIGGER", f"Best size={sz}: {url[:80]}")
+            _log("BIGGER", f"size={sz}: {url[:80]}")
             return url
 
-    _log("TRY_BIGGER", f"All sizes failed, using original: {signed_url[:80]}")
+    _log("BIGGER", f"All failed, original: {signed_url[:80]}")
     return signed_url
 
 
@@ -239,6 +328,9 @@ async def _get_release_id_via_execute(
     owner_id: int,
     audio_id: int,
 ) -> str:
+    if not AIOHTTP_OK:
+        return ""
+    
     code = (
         f'var a=API.audio.getById({{audios:"{owner_id}_{audio_id}"}});'
         f'if(a.length>0){{return a[0].release_audio_id;}}return null;'
@@ -268,6 +360,9 @@ async def _get_release_id_via_execute(
 
 
 async def _fetch_signed_cover_from_release(release_id: str) -> str:
+    if not AIOHTTP_OK:
+        return ""
+    
     url = f"https://vk.com/audio{release_id}"
     try:
         async with aiohttp.ClientSession() as s:
@@ -282,14 +377,14 @@ async def _fetch_signed_cover_from_release(release_id: str) -> str:
                 allow_redirects=True,
             ) as r:
                 if r.status != REQUEST_OK:
-                    _log("FETCH_RELEASE", f"HTTP {r.status} for {url}")
+                    _log("FETCH_REL", f"HTTP {r.status}")
                     return ""
                 html = await r.text(errors="replace")
         result = _extract_signed_og_image(html)
-        _log("FETCH_RELEASE", f"release={release_id} -> {result[:80] if result else 'NONE'}")
+        _log("FETCH_REL", f"release={release_id} -> {result[:80] if result else 'NONE'}")
         return result
     except Exception as e:
-        _log("FETCH_RELEASE", f"exception: {e}")
+        _log("FETCH_REL", f"exception: {e}")
         return ""
 
 
@@ -300,31 +395,75 @@ async def resolve_vk_cover(
 ) -> tuple[str, str]:
     release_id = await _get_release_id_via_execute(token, owner_id, audio_id)
     if not release_id:
-        _log("COVER", "No release_id, cannot get cover")
+        _log("COVER", "No release_id")
         return "", ""
 
     signed_url = await _fetch_signed_cover_from_release(release_id)
     if not signed_url:
-        _log("COVER", "No signed og:image found")
+        _log("COVER", "No signed og:image")
         return "", ""
 
     stub_url = re.sub(r"size=\d+x\d+", "size=360x360", signed_url)
-    async with aiohttp.ClientSession() as s:
-        try:
-            async with s.head(
-                stub_url,
-                timeout=aiohttp.ClientTimeout(total=6),
-                allow_redirects=True,
-            ) as r:
-                if r.status != REQUEST_OK:
-                    stub_url = signed_url
-        except Exception:
-            stub_url = signed_url
+    
+    if AIOHTTP_OK:
+        async with aiohttp.ClientSession() as s:
+            try:
+                async with s.head(
+                    stub_url,
+                    timeout=aiohttp.ClientTimeout(total=6),
+                    allow_redirects=True,
+                ) as r:
+                    if r.status != REQUEST_OK:
+                        stub_url = signed_url
+            except Exception:
+                stub_url = signed_url
 
     big_url = await _try_bigger_signed(signed_url)
-
     _log("COVER", f"stub={stub_url[:80]} big={big_url[:80]}")
     return stub_url, big_url
+
+
+def _embed_id3(filepath: str, title: str, artist: str, cover_data: typing.Optional[bytes]):
+    if not MUTAGEN_OK:
+        return
+    try:
+        try:
+            tags = ID3(filepath)
+        except ID3NoHeaderError:
+            tags = ID3()
+        tags.add(TIT2(encoding=3, text=[title or "Unknown"]))
+        tags.add(TPE1(encoding=3, text=[artist or "Unknown"]))
+        if cover_data and len(cover_data) > 500:
+            is_png = cover_data[:8] == b'\x89PNG\r\n\x1a\n'
+            mime = "image/png" if is_png else "image/jpeg"
+            tags.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=cover_data))
+        tags.save(filepath)
+    except Exception:
+        pass
+
+
+async def _embed_cover_ffmpeg(mp3_path: str, cover_path: str, out_path: str) -> bool:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", mp3_path, "-i", cover_path,
+            "-map", "0:a", "-map", "1:0",
+            "-c:a", "copy", "-c:v", "copy",
+            "-id3v2_version", "3",
+            "-metadata:s:v", "title=Cover",
+            "-metadata:s:v", "comment=Cover (front)",
+            "-disposition:v", "attached_pic", out_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=60)
+        return (
+            proc.returncode == 0
+            and os.path.exists(out_path)
+            and os.path.getsize(out_path) > 0
+        )
+    except Exception:
+        return False
 
 
 class VKAPIClient:
@@ -344,6 +483,8 @@ class VKAPIClient:
         self._user_id = None
 
     async def _get_session(self):
+        if not AIOHTTP_OK:
+            return None
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30)
@@ -355,10 +496,16 @@ class VKAPIClient:
             await self._session.close()
             self._session = None
 
-    async def _api(self, method, **params):
+    async def _api(self, method: str, **params):
+        if not AIOHTTP_OK:
+            return None
+        
         params["access_token"] = self._token
         params["v"] = VK_API_VERSION
         s = await self._get_session()
+        if not s:
+            return None
+        
         async with s.post(
             f"{VK_API_BASE}/{method}",
             data=params,
@@ -371,7 +518,7 @@ class VKAPIClient:
             return None
         return data.get("response")
 
-    async def auth(self, token):
+    async def auth(self, token: str) -> bool:
         if not token:
             self.reset()
             return False
@@ -387,7 +534,7 @@ class VKAPIClient:
         self.reset()
         return False
 
-    async def search_audio(self, query, count=5):
+    async def search_audio(self, query: str, count: int = 5) -> list:
         try:
             r = await self._api("audio.search", q=query, count=count, sort=2)
             if r:
@@ -407,20 +554,16 @@ class VKAPIClient:
             pass
         return []
 
-    async def get_audio_by_id(self, owner_id: int, audio_id: int):
-        """Получить один трек по owner_id_audio_id."""
+    async def get_audio_by_id(self, owner_id: int, audio_id: int) -> typing.Optional[dict]:
         try:
-            r = await self._api(
-                "audio.getById",
-                audios=f"{owner_id}_{audio_id}",
-            )
+            r = await self._api("audio.getById", audios=f"{owner_id}_{audio_id}")
             if r and isinstance(r, list) and r:
                 return self._parse(r[0])
         except Exception:
             pass
         return None
 
-    def _parse(self, a):
+    def _parse(self, a: dict) -> typing.Optional[dict]:
         if not a:
             return None
         url = a.get("url", "")
@@ -439,14 +582,17 @@ class VKAPIClient:
 
 
 class VKDownloader:
-    async def dl(self, url, out):
+    async def dl(self, url: str, out: str) -> bool:
         return (
             await self._m3u8(url, out)
             if ".m3u8" in url
             else await self._direct(url, out)
         )
 
-    async def _direct(self, url, out):
+    async def _direct(self, url: str, out: str) -> bool:
+        if not AIOHTTP_OK:
+            return False
+        
         try:
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=120)
@@ -465,9 +611,10 @@ class VKDownloader:
         except Exception:
             return False
 
-    async def _m3u8(self, url, out):
-        if not m3u8_lib:
+    async def _m3u8(self, url: str, out: str) -> bool:
+        if not M3U8_OK or not AIOHTTP_OK:
             return False
+        
         try:
             conn = aiohttp.TCPConnector(limit=MAX_CONCURRENT, ssl=False)
             async with aiohttp.ClientSession(
@@ -482,9 +629,7 @@ class VKDownloader:
                 if pl.playlists:
                     best = max(
                         pl.playlists,
-                        key=lambda p: (
-                            p.stream_info.bandwidth if p.stream_info else 0
-                        ),
+                        key=lambda p: (p.stream_info.bandwidth if p.stream_info else 0),
                     )
                     su = best.uri
                     if not su.startswith("http"):
@@ -506,9 +651,7 @@ class VKDownloader:
                 async def gk(ku):
                     if ku in keys:
                         return keys[ku]
-                    async with s.get(
-                        ku, timeout=aiohttp.ClientTimeout(total=15)
-                    ) as kr:
+                    async with s.get(ku, timeout=aiohttp.ClientTimeout(total=15)) as kr:
                         if kr.status == REQUEST_OK:
                             kd = await kr.read()
                             keys[ku] = kd
@@ -532,11 +675,7 @@ class VKDownloader:
                         except Exception:
                             chunks[i] = b""
                             return
-                        if (
-                            seg.key
-                            and seg.key.method == "AES-128"
-                            and seg.key.uri
-                        ):
+                        if seg.key and seg.key.method == "AES-128" and seg.key.uri:
                             ku = seg.key.uri
                             if not ku.startswith("http"):
                                 ku = f"{base}/{ku}"
@@ -545,9 +684,7 @@ class VKDownloader:
                                 data = self._aes(data, key)
                         chunks[i] = data
 
-                await asyncio.gather(
-                    *[ds(i, seg) for i, seg in enumerate(segs)]
-                )
+                await asyncio.gather(*[ds(i, seg) for i, seg in enumerate(segs)])
                 result = b"".join(c for c in chunks if c)
                 if not result:
                     return False
@@ -558,7 +695,10 @@ class VKDownloader:
             return False
 
     @staticmethod
-    def _aes(data, key):
+    def _aes(data: bytes, key: bytes) -> bytes:
+        if not M3U8_OK:
+            return data
+        
         try:
             if len(data) < 16:
                 return data
@@ -574,7 +714,7 @@ class VKDownloader:
         except Exception:
             return data
 
-    async def to_mp3(self, inp, out):
+    async def to_mp3(self, inp: str, out: str) -> bool:
         try:
             p = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-hide_banner", "-loglevel", "error",
@@ -604,60 +744,14 @@ class VKDownloader:
             return False
 
 
-def _embed_cover_id3(filepath, title, artist, cover_data):
-    if not ID3:
-        return
-    try:
-        try:
-            tags = ID3(filepath)
-        except ID3NoHeaderError:
-            tags = ID3()
-        tags.add(TIT2(encoding=3, text=[title or "Unknown"]))
-        tags.add(TPE1(encoding=3, text=[artist or "Unknown"]))
-        if cover_data and len(cover_data) > 500:
-            is_png = cover_data[:8] == b'\x89PNG\r\n\x1a\n'
-            mime = "image/png" if is_png else "image/jpeg"
-            tags.add(
-                APIC(
-                    encoding=3, mime=mime, type=3,
-                    desc="Cover", data=cover_data,
-                )
-            )
-        tags.save(filepath)
-    except Exception:
-        pass
-
-
-async def _embed_cover_ffmpeg(mp3_path, cover_path, out_path):
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-i", mp3_path, "-i", cover_path,
-            "-map", "0:a", "-map", "1:0",
-            "-c:a", "copy", "-c:v", "copy",
-            "-id3v2_version", "3",
-            "-metadata:s:v", "title=Cover",
-            "-metadata:s:v", "comment=Cover (front)",
-            "-disposition:v", "attached_pic", out_path,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await asyncio.wait_for(proc.communicate(), timeout=30)
-        return (
-            proc.returncode == 0
-            and os.path.exists(out_path)
-            and os.path.getsize(out_path) > 0
-        )
-    except Exception:
-        return False
-
-
 @loader.tds
 class VKMusic(loader.Module):
-    """VK Music — поиск и скачивание аудио из ВКонтакте"""
+    """VK Music - search and download audio from VKontakte"""
 
     strings = {
         "name": "VKMusic",
+        "deps_installing": "<b>Installing dependencies...</b>\n\n<code>{}</code>",
+        "deps_installed": "<b>Dependencies installed!</b>\n\n<code>{}</code>",
         "auth_instruction": (
             "<b>VKMusic - Authorization</b>\n\n"
             "<blockquote>"
@@ -674,14 +768,22 @@ class VKMusic(loader.Module):
         ),
         "token_fail": "<b>Token is invalid!</b>",
         "token_bad_format": "<b>Wrong format!</b> Provide the full URL or token.",
-        "not_authorized_inline": "Not authorized",
-        "not_authorized_inline_desc": "Use .vkauth to authorize",
-        "link_not_found": "Track not found by link",
-        "link_stub": "Track unavailable (VK stub)",
+        "not_authorized": "Not authorized",
+        "not_authorized_desc": "Use .vkauth to authorize",
+        "link_not_found": "Track not found",
+        "link_not_found_desc": "Could not get track info by link",
+        "link_stub": "Track unavailable",
+        "link_stub_desc": "This track is a VK stub",
+        "not_found": "Nothing found",
+        "not_found_desc": "Try a different query",
+        "hint_title": "VKMusic",
+        "hint_desc": "Type a track name or paste a VK audio link",
+        "downloading": "Downloading...",
     }
 
     strings_ru = {
-        "name": "VKMusic",
+        "deps_installing": "<b>Установка зависимостей...</b>\n\n<code>{}</code>",
+        "deps_installed": "<b>Зависимости установлены!</b>\n\n<code>{}</code>",
         "auth_instruction": (
             "<b>VKMusic - Авторизация</b>\n\n"
             "<blockquote>"
@@ -698,10 +800,17 @@ class VKMusic(loader.Module):
         ),
         "token_fail": "<b>Токен недействителен!</b>",
         "token_bad_format": "<b>Неверный формат!</b> Укажите полный URL или токен.",
-        "not_authorized_inline": "Не авторизован",
-        "not_authorized_inline_desc": "Используйте .vkauth",
-        "link_not_found": "Трек по ссылке не найден",
-        "link_stub": "Трек недоступен (VK заглушка)",
+        "not_authorized": "Не авторизован",
+        "not_authorized_desc": "Используйте .vkauth",
+        "link_not_found": "Трек не найден",
+        "link_not_found_desc": "Не удалось получить информацию о треке по ссылке",
+        "link_stub": "Трек недоступен",
+        "link_stub_desc": "Это заглушка VK",
+        "not_found": "Ничего не найдено",
+        "not_found_desc": "Попробуйте другой запрос",
+        "hint_title": "VKMusic",
+        "hint_desc": "Введите название трека или вставьте ссылку VK",
+        "downloading": "Загрузка...",
     }
 
     def __init__(self):
@@ -717,9 +826,8 @@ class VKMusic(loader.Module):
                 validator=loader.validators.Integer(minimum=1, maximum=10),
             ),
         )
-        self.inline_bot = None
-        self.inline_bot_username = None
         self._tmp = None
+        self._me_id = None
         self._vk = None
         self._vk_dl = None
         self._upload_lock = None
@@ -727,6 +835,7 @@ class VKMusic(loader.Module):
         self._stub_cache = {}
         self._search_cache = {}
         self._cover_cache = {}
+        self._link_cache = {}
 
     async def client_ready(self, client, db):
         self._client = client
@@ -740,41 +849,36 @@ class VKMusic(loader.Module):
         os.makedirs(self._tmp, exist_ok=True)
         self._vk = VKAPIClient()
         self._vk_dl = VKDownloader()
-        if hasattr(self, "inline") and hasattr(self.inline, "bot"):
-            self.inline_bot = self.inline.bot
-            try:
-                bi = await self.inline_bot.get_me()
-                self.inline_bot_username = bi.username
-            except Exception:
-                pass
         await self._ensure_vk()
 
+    @loader.command(ru_doc="Показать статус зависимостей")
+    async def vkdeps(self, message):
+        """Show dependencies status"""
+        status = "\n".join(_dep_log)
+        await utils.answer(
+            message,
+            self.strings["deps_installed"].format(status),
+        )
+
     @loader.need_update("chosen_inline_result")
-    async def _on_chosen_inline_result(self, chosen: ChosenInlineResult):
-        rid = chosen.result_id
-        imid = chosen.inline_message_id
-        user_id = chosen.from_user.id
-        _log("CHOSEN", f"result_id={rid!r} imid={imid!r} user={user_id}")
-        if not rid.startswith("vk_"):
-            return
-        if not imid:
-            _log("CHOSEN", "inline_message_id is None")
+    async def _on_chosen(self, update):
+        rid = update.id
+        msg_id = update.msg_id
+        _log("CHOSEN", f"rid={rid!r} msg_id={msg_id!r}")
+        if not rid or not rid.startswith("vk_") or not msg_id:
             return
         track_key = rid[3:]
         if track_key in self._real_cache:
-            _log("CHOSEN", "Cache hit, replacing immediately")
-            await self._do_replace(imid, self._real_cache[track_key])
+            await self._do_replace(msg_id, self._real_cache[track_key])
             return
-        asyncio.ensure_future(
-            self._bg_download_and_replace(track_key, user_id, imid)
-        )
+        asyncio.ensure_future(self._bg_dl_replace(track_key, msg_id))
 
-    async def _bg_download_and_replace(self, track_key, user_id, imid):
-        _log("BG", f"Start download track_key={track_key}")
+    async def _bg_dl_replace(self, track_key: str, msg_id):
+        _log("BG", f"Start dl track_key={track_key}")
         try:
-            result = await self._vk_dl_and_upload(track_key, user_id)
-            if "error" in result or "file_id" not in result:
-                _log("BG", f"Download failed: {result.get('error')}")
+            result = await self._dl_and_upload(track_key)
+            if "error" in result:
+                _log("BG", f"Error: {result['error']}")
                 return
             data = (
                 result["file_id"],
@@ -783,42 +887,35 @@ class VKMusic(loader.Module):
                 result["duration"],
             )
             self._real_cache[track_key] = data
-            _log("BG", f"Done: file_id={data[0]!r}")
-            await self._do_replace(imid, data)
+            await self._do_replace(msg_id, data)
         except Exception as e:
             _log("BG", f"Exception: {e}\n{traceback.format_exc()}")
 
-    async def _do_replace(self, imid, data):
+    async def _do_replace(self, msg_id, data: tuple):
         file_id, title, artist, duration = data
-        _log("REPLACE", f"imid={imid!r} file_id={file_id!r}")
-        for attempt, kwargs in enumerate([
-            dict(
-                media=InputMediaAudio(
-                    media=file_id,
-                    title=title,
-                    performer=artist,
-                    duration=duration,
-                ),
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[]),
-            ),
-            dict(
-                media=InputMediaAudio(
-                    media=file_id,
-                    title=title,
-                    performer=artist,
-                    duration=duration,
-                ),
-            ),
-            dict(media=InputMediaAudio(media=file_id)),
-        ]):
+        _log("REPLACE", f"msg_id={msg_id!r} file_id={file_id!r}")
+        for attempt in range(3):
             try:
-                await self.inline_bot.edit_message_media(
-                    inline_message_id=imid, **kwargs
+                await self.inline.bot.client(
+                    EditInlineBotMessageRequest(
+                        id=msg_id,
+                        media=InputMediaDocument(id=file_id),
+                    )
                 )
-                _log("REPLACE", f"SUCCESS attempt {attempt + 1}")
+                _log("REPLACE", f"OK attempt {attempt + 1}")
                 return
             except Exception as e:
                 _log("REPLACE", f"Attempt {attempt + 1} failed: {e}")
+                await asyncio.sleep(1)
+
+    async def _ensure_vk(self) -> bool:
+        token = self.config["VK_TOKEN"]
+        if not token:
+            self._vk.reset()
+            return False
+        if self._vk.ok and self._vk._token == token:
+            return True
+        return await self._vk.auth(token)
 
     async def _get_covers_for_track(self, track: dict) -> tuple[str, str]:
         track_key = f"{track['owner_id']}_{track['id']}"
@@ -833,29 +930,30 @@ class VKMusic(loader.Module):
         self._cover_cache[track_key] = (stub_url, big_url)
         return stub_url, big_url
 
-    async def _get_stub_file_id(
+    async def _get_stub(
         self,
         track_key: str,
         title: str,
         artist: str,
         stub_cover_url: str,
-    ) -> str | None:
+    ) -> typing.Optional[InputDocument]:
         if track_key in self._stub_cache:
             return self._stub_cache[track_key]
 
         _log("STUB", f"Creating stub for {track_key} ({artist} - {title})")
 
         stub_bytes = b""
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(
-                    DOWNLOADING_STUB,
-                    timeout=aiohttp.ClientTimeout(total=20),
-                ) as r:
-                    if r.status == REQUEST_OK:
-                        stub_bytes = await r.read()
-        except Exception as e:
-            _log("STUB", f"Stub audio download failed: {e}")
+        if AIOHTTP_OK:
+            try:
+                async with aiohttp.ClientSession() as s:
+                    async with s.get(
+                        DOWNLOADING_STUB,
+                        timeout=aiohttp.ClientTimeout(total=20),
+                    ) as r:
+                        if r.status == REQUEST_OK:
+                            stub_bytes = await r.read()
+            except Exception as e:
+                _log("STUB", f"Stub audio dl failed: {e}")
 
         if not stub_bytes:
             return None
@@ -866,42 +964,41 @@ class VKMusic(loader.Module):
             if raw:
                 thumb_data = normalize_cover(raw, max_size=320, force_jpeg=True)
 
+        stub_buf = io.BytesIO(stub_bytes)
+        stub_buf.name = "Downloading.mp3"
+        thumb_buf = None
+        if thumb_data:
+            thumb_buf = io.BytesIO(thumb_data)
+            thumb_buf.name = "cover.jpg"
+
         try:
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(
-                    text="Downloading...",
-                    callback_data=f"vkm_dl_{track_key[:32]}",
-                )
-            ]])
-            sent = await self.inline_bot.send_audio(
-                chat_id=self._me_id,
-                audio=BufferedInputFile(stub_bytes, filename="Downloading.mp3"),
+            sent = await self.inline.bot.send_audio(
+                self._me_id,
+                stub_buf,
                 title=title,
                 performer=artist,
-                thumbnail=(
-                    BufferedInputFile(thumb_data, filename="cover.jpg")
-                    if thumb_data else None
-                ),
-                reply_markup=kb,
+                thumbnail=thumb_buf,
             )
-            if sent and sent.audio:
-                fid = sent.audio.file_id
-                self._stub_cache[track_key] = fid
-                _log("STUB", f"Stub created: file_id={fid!r}")
-                try:
-                    await self.inline_bot.delete_message(
-                        chat_id=self._me_id,
-                        message_id=sent.message_id,
+            if sent and sent.media:
+                doc = getattr(sent.media, "document", None)
+                if doc:
+                    fid = InputDocument(
+                        id=doc.id,
+                        access_hash=doc.access_hash,
+                        file_reference=doc.file_reference,
                     )
-                except Exception:
-                    pass
-                return fid
+                    self._stub_cache[track_key] = fid
+                    _log("STUB", f"Created: doc_id={doc.id}")
+                    try:
+                        await self.inline.bot.delete_message(self._me_id, sent.id)
+                    except Exception:
+                        pass
+                    return fid
         except Exception as e:
             _log("STUB", f"send_audio failed: {e}\n{traceback.format_exc()}")
         return None
 
-    async def _vk_dl_and_upload(self, track_key: str, user_id: int) -> dict:
-        """Скачать трек VK и загрузить в Telegram. Ищет в _search_cache и _link_cache."""
+    async def _dl_and_upload(self, track_key: str) -> dict:
         track_info = None
 
         for cache_val in self._search_cache.values():
@@ -936,9 +1033,7 @@ class VKMusic(loader.Module):
                 raw_big = await _download_image(big_cover_url)
                 if raw_big:
                     cover_data = normalize_cover(raw_big, force_jpeg=True)
-                    thumb_data = normalize_cover(
-                        raw_big, max_size=320, force_jpeg=True
-                    )
+                    thumb_data = normalize_cover(raw_big, max_size=320, force_jpeg=True)
 
             ext = "ts" if ".m3u8" in url else "mp3"
             raw = os.path.join(ddir, f"raw.{ext}")
@@ -949,8 +1044,8 @@ class VKMusic(loader.Module):
             if os.path.getsize(raw) > MAX_FILE_SIZE:
                 return {"error": "File > 50 MB"}
 
-            name = sanitize_fn(f"{artist} - {title}")
-            mp3 = os.path.join(ddir, f"{name}.mp3")
+            safe_name = sanitize_fn(f"{artist} - {title}")
+            mp3 = os.path.join(ddir, f"{safe_name}.mp3")
             if ext != "mp3":
                 if await self._vk_dl.to_mp3(raw, mp3) and os.path.exists(mp3):
                     try:
@@ -972,7 +1067,7 @@ class VKMusic(loader.Module):
                 cover_path = os.path.join(ddir, "cover.jpg")
                 with open(cover_path, "wb") as cf:
                     cf.write(cover_data)
-                covered_mp3 = os.path.join(ddir, f"{name}_cover.mp3")
+                covered_mp3 = os.path.join(ddir, f"{safe_name}_cover.mp3")
                 if await _embed_cover_ffmpeg(mp3, cover_path, covered_mp3):
                     try:
                         os.remove(mp3)
@@ -980,100 +1075,78 @@ class VKMusic(loader.Module):
                         pass
                     mp3 = covered_mp3
                 else:
-                    _embed_cover_id3(mp3, title, artist, cover_data)
+                    _embed_id3(mp3, title, artist, cover_data)
             elif mp3.endswith(".mp3"):
-                _embed_cover_id3(mp3, title, artist, None)
+                _embed_id3(mp3, title, artist, None)
 
             with open(mp3, "rb") as f:
                 audio_bytes = f.read()
 
-            file_id = await self._upload_audio_to_tg(
+            file_id = await self._upload_to_tg(
                 audio_bytes,
                 os.path.basename(mp3),
                 title,
                 artist,
                 dur,
                 thumb_data,
-                user_id,
             )
             if file_id:
-                return {
-                    "file_id": file_id,
-                    "title": title,
-                    "artist": artist,
-                    "duration": dur,
-                }
+                return {"file_id": file_id, "title": title, "artist": artist, "duration": dur}
             return {"error": "Telegram upload failed"}
         except Exception as e:
-            return {"error": str(e)[:80]}
+            return {"error": str(e)[:120]}
         finally:
-            if os.path.exists(ddir):
-                shutil.rmtree(ddir, ignore_errors=True)
+            shutil.rmtree(ddir, ignore_errors=True)
 
-    async def _upload_audio_to_tg(
+    async def _upload_to_tg(
         self,
         file_bytes: bytes,
         filename: str,
         title: str,
         artist: str,
         dur_s: int,
-        thumb_data: bytes | None,
-        user_id: int,
-    ) -> str | None:
+        thumb_data: typing.Optional[bytes],
+    ) -> typing.Optional[InputDocument]:
         async with self._upload_lock:
-            audio_inp = BufferedInputFile(file_bytes, filename=filename)
-            thumb_inp = None
+            audio_buf = io.BytesIO(file_bytes)
+            audio_buf.name = filename
+            thumb_buf = None
             if thumb_data:
-                is_jpeg = thumb_data[:3] == b'\xff\xd8\xff'
-                thumb_ext = "cover.jpg" if is_jpeg else "cover.png"
-                thumb_inp = BufferedInputFile(thumb_data, filename=thumb_ext)
+                thumb_buf = io.BytesIO(thumb_data)
+                thumb_buf.name = "cover.jpg"
             try:
-                sent = await self.inline_bot.send_audio(
-                    chat_id=user_id,
-                    audio=audio_inp,
+                sent = await self.inline.bot.send_audio(
+                    self._me_id,
+                    audio_buf,
                     title=title,
                     performer=artist,
                     duration=dur_s,
-                    thumbnail=thumb_inp,
+                    thumbnail=thumb_buf,
                 )
             except Exception as e:
                 _log("UPLOAD", f"send_audio failed: {e}")
                 return None
-            if sent and sent.audio:
-                file_id = sent.audio.file_id
-                msg_id = sent.message_id
-                await asyncio.sleep(0.5)
-                for attempt in range(5):
-                    try:
-                        await self.inline_bot.delete_message(
-                            chat_id=user_id, message_id=msg_id
-                        )
-                        break
-                    except Exception:
-                        await asyncio.sleep(1.0 * (attempt + 1))
-                return file_id
+            if sent and sent.media:
+                doc = getattr(sent.media, "document", None)
+                if doc:
+                    fid = InputDocument(
+                        id=doc.id,
+                        access_hash=doc.access_hash,
+                        file_reference=doc.file_reference,
+                    )
+                    msg_id = sent.id
+                    await asyncio.sleep(0.5)
+                    for attempt in range(5):
+                        try:
+                            await self.inline.bot.delete_message(self._me_id, msg_id)
+                            break
+                        except Exception:
+                            await asyncio.sleep(1.0 * (attempt + 1))
+                    return fid
             return None
 
-    async def _ensure_vk(self):
-        token = self.config["VK_TOKEN"]
-        if not token:
-            self._vk.reset()
-            return False
-        if self._vk.ok and self._vk._token == token:
-            return True
-        return await self._vk.auth(token)
-
-    def _get_limit(self):
-        try:
-            return max(1, min(10, int(self.config["SEARCH_LIMIT"])))
-        except Exception:
-            return 5
-
-    @loader.command(
-        ru_doc="Авторизация VK Music",
-        en_doc="VK Music authorization",
-    )
-    async def vkauth(self, message: Message):
+    @loader.command(ru_doc="Авторизация VK Music")
+    async def vkauth(self, message):
         """VK Music authorization"""
         prefix = self.get_prefix()
         args = utils.get_args_raw(message).strip()
@@ -1102,9 +1175,7 @@ class VKMusic(loader.Module):
             self.config["VK_TOKEN"] = token
             await self._client.send_message(
                 message.chat_id,
-                self.strings["token_ok"].format(
-                    user_id=self._vk._user_id or "?"
-                ),
+                self.strings["token_ok"].format(user_id=self._vk._user_id or "?"),
                 parse_mode="html",
             )
         else:
@@ -1114,45 +1185,43 @@ class VKMusic(loader.Module):
                 parse_mode="html",
             )
 
-    @loader.inline_handler(
-        ru_doc="VK Music - поиск",
-        en_doc="VK Music - search",
-    )
-    async def vk_inline_handler(self, query: InlineQuery):
-        """VK Music - search"""
+    @loader.inline_handler(ru_doc="VK Music поиск", en_doc="VK Music search")
+    async def vk_inline_handler(self, query):
+        """VK Music search"""
         raw = query.query.strip()
-        text = raw[2:].strip() if raw.lower().startswith("vk") else raw.strip()
-        _log("INLINE", f"query={text!r} from={query.from_user.id}")
+        prefix = "vk"
+        text = raw[len(prefix):].strip() if raw.lower().startswith(prefix) else raw.strip()
 
         if not text:
-            await self._inline_hint(query)
+            await self._hint(query)
             return
 
+        _log("INLINE", f"query={text!r} from={query.from_user.id}")
+
         if not await self._ensure_vk():
-            try:
-                await self.inline_bot.answer_inline_query(
-                    inline_query_id=query.id,
-                    results=[InlineQueryResultArticle(
-                        id="noauth",
-                        title=self.strings["not_authorized_inline"],
-                        description=self.strings["not_authorized_inline_desc"],
-                        input_message_content=InputTextMessageContent(
-                            message_text=self.strings["not_authorized_inline"],
-                        ),
-                    )],
-                    cache_time=0,
-                    is_personal=True,
-                )
-            except Exception:
-                pass
+            await query.answer(
+                [
+                    await query.builder.article(
+                        title=self.strings["not_authorized"],
+                        description=self.strings["not_authorized_desc"],
+                        text=f"<b>VKMusic:</b> {self.strings['not_authorized_desc']}",
+                        parse_mode="HTML",
+                        link_preview=False,
+                        id=f"noauth_{int(time.time())}",
+                    )
+                ],
+                cache_time=0,
+                private=True,
+            )
             return
+
         link_match = VK_AUDIO_LINK_RE.search(text)
         if link_match:
             await self._handle_link_inline(query, link_match)
         else:
             await self._handle_search_inline(query, text)
 
-    async def _handle_link_inline(self, query: InlineQuery, match: re.Match):
+    async def _handle_link_inline(self, query, match: re.Match):
         owner_id = int(match.group(1))
         audio_id = int(match.group(2))
         track_key = f"{owner_id}_{audio_id}"
@@ -1160,40 +1229,61 @@ class VKMusic(loader.Module):
         _log("LINK", f"owner_id={owner_id} audio_id={audio_id}")
 
         if track_key in self._real_cache:
-            fid, title, artist, _ = self._real_cache[track_key]
+            stub_fid = self._real_cache[track_key][0]
             try:
-                await self.inline_bot.answer_inline_query(
-                    inline_query_id=query.id,
-                    results=[InlineQueryResultCachedAudio(
-                        id=f"vk_{track_key}",
-                        audio_file_id=fid,
-                    )],
+                await query.answer(
+                    [
+                        await query.builder.document(
+                            stub_fid,
+                            title=self._real_cache[track_key][1],
+                            description=self._real_cache[track_key][2],
+                            mime_type="audio/mpeg",
+                            id=f"vk_{track_key}",
+                        )
+                    ],
                     cache_time=0,
-                    is_personal=True,
+                    private=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                _log("LINK", f"answer failed (cached): {e}")
             return
 
         track = await self._vk.get_audio_by_id(owner_id, audio_id)
+
         if not track:
-            await self._inline_msg(
-                query,
-                self.strings["link_not_found"],
-                self.strings["link_not_found"],
+            await query.answer(
+                [
+                    await query.builder.article(
+                        title=self.strings["link_not_found"],
+                        description=self.strings["link_not_found_desc"],
+                        text=f"<b>VKMusic:</b> {self.strings['link_not_found_desc']}",
+                        parse_mode="HTML",
+                        link_preview=False,
+                        id=f"notfound_{int(time.time())}",
+                    )
+                ],
+                cache_time=0,
+                private=True,
             )
             return
 
         if _is_stub_url(track.get("url", "")) or _is_stub_title(track.get("title", "")):
-            await self._inline_msg(
-                query,
-                self.strings["link_stub"],
-                self.strings["link_stub"],
+            await query.answer(
+                [
+                    await query.builder.article(
+                        title=self.strings["link_stub"],
+                        description=self.strings["link_stub_desc"],
+                        text=f"<b>VKMusic:</b> {self.strings['link_stub_desc']}",
+                        parse_mode="HTML",
+                        link_preview=False,
+                        id=f"stub_{int(time.time())}",
+                    )
+                ],
+                cache_time=0,
+                private=True,
             )
             return
 
-        if not hasattr(self, "_link_cache"):
-            self._link_cache = {}
         self._link_cache[track_key] = track
 
         title = track["title"]
@@ -1201,210 +1291,153 @@ class VKMusic(loader.Module):
         cov = await self._get_covers_for_track(track)
         stub_url = cov[0] if cov else ""
 
-        stub_fid = await self._get_stub_file_id(track_key, title, artist, stub_url)
+        stub_fid = await self._get_stub(track_key, title, artist, stub_url)
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(
-                text="Downloading...",
-                callback_data=f"vkm_dl_{track_key[:32]}",
-            )
-        ]])
-
-        results = []
         if stub_fid:
-            results.append(InlineQueryResultCachedAudio(
-                id=f"vk_{track_key}",
-                audio_file_id=stub_fid,
-                reply_markup=kb,
-            ))
-        else:
-            kw = dict(
-                id=f"vk_{track_key}",
-                title=f"{artist} - {title}",
-                description="Tap to download",
-                input_message_content=InputTextMessageContent(
-                    message_text=(
-                        f"<b>VKMusic:</b> Downloading "
-                        f"<b>{escape_html(artist)} - {escape_html(title)}</b>..."
-                    ),
+            try:
+                await query.answer(
+                    [
+                        await query.builder.document(
+                            stub_fid,
+                            title=title,
+                            description=artist,
+                            mime_type="audio/mpeg",
+                            id=f"vk_{track_key}",
+                            buttons=self.inline.generate_markup(
+                                {"text": self.strings["downloading"], "data": f"vkm_{track_key[:32]}"}
+                            ),
+                        )
+                    ],
+                    cache_time=0,
+                    private=True,
+                )
+                _log("LINK", f"Answered with stub track_key={track_key}")
+                return
+            except Exception as e:
+                _log("LINK", f"answer with stub failed: {e}")
+
+        thumb = stub_url if stub_url else None
+        await query.answer(
+            [
+                await query.builder.article(
+                    title=title,
+                    description=artist,
+                    text=f"<b>VKMusic:</b> {escape_html(title)}",
                     parse_mode="HTML",
-                ),
-                reply_markup=kb,
-            )
-            if stub_url:
-                kw["thumbnail_url"] = stub_url
-                kw["thumbnail_width"] = 200
-                kw["thumbnail_height"] = 200
-            results.append(InlineQueryResultArticle(**kw))
+                    link_preview=False,
+                    thumb=self.inline._web_document(thumb, width=200, height=200) if thumb else None,
+                    id=f"vk_{track_key}",
+                )
+            ],
+            cache_time=0,
+            private=True,
+        )
 
-        try:
-            await self.inline_bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=results,
-                cache_time=0,
-                is_personal=True,
-            )
-        except Exception as e:
-            _log("LINK_INLINE", f"answer_inline_query failed: {e}")
+    async def _handle_search_inline(self, query, text: str):
+        limit = max(1, min(10, int(self.config["SEARCH_LIMIT"])))
+        cache_key = text.lower()[:80]
 
-    async def _handle_search_inline(self, query: InlineQuery, text: str):
-        limit = self._get_limit()
-        cache_key = f"search_{text.lower().replace(' ', '_')[:60]}"
-
-        if cache_key not in self._search_cache:
+        if cache_key in self._search_cache:
+            tracks = self._search_cache[cache_key]
+        else:
             tracks = await self._vk.search_audio(text, count=limit)
             if not tracks:
-                await self._inline_msg(
-                    query, "Not found", f"No results for: {text}"
+                await query.answer(
+                    [
+                        await query.builder.article(
+                            title=self.strings["not_found"],
+                            description=self.strings["not_found_desc"],
+                            text=f"<b>VKMusic:</b> {self.strings['not_found_desc']}",
+                            parse_mode="HTML",
+                            link_preview=False,
+                            id=f"notfound_{int(time.time())}",
+                        )
+                    ],
+                    cache_time=0,
+                    private=True,
                 )
                 return
             self._search_cache[cache_key] = tracks
 
-        tracks = self._search_cache[cache_key]
-
-        cover_tasks = [
-            asyncio.ensure_future(self._get_covers_for_track(t))
-            for t in tracks
-        ]
+        cover_tasks = [self._get_covers_for_track(t) for t in tracks]
         cover_results = await asyncio.gather(*cover_tasks, return_exceptions=True)
 
         stub_tasks = []
-        for i, track in enumerate(tracks):
-            track_key = f"{track['owner_id']}_{track['id']}"
+        for i, t in enumerate(tracks):
+            track_key = f"{t['owner_id']}_{t['id']}"
             cov = cover_results[i]
-            stub_url = (
-                cov[0]
-                if not isinstance(cov, Exception) and cov
-                else ""
-            )
-            stub_tasks.append(
-                asyncio.ensure_future(
-                    self._get_stub_file_id(
-                        track_key,
-                        track["title"],
-                        track["artist"],
-                        stub_url,
-                    )
-                )
-            )
+            stub_url = cov[0] if not isinstance(cov, Exception) and cov else ""
+            stub_tasks.append(self._get_stub(track_key, t["title"], t["artist"], stub_url))
         stub_results = await asyncio.gather(*stub_tasks, return_exceptions=True)
 
-        results = []
-        for i, track in enumerate(tracks):
-            track_key = f"{track['owner_id']}_{track['id']}"
-            title = track["title"]
-            artist = track["artist"]
+        inline_results = []
+        for i, t in enumerate(tracks):
+            vid = f"{t['owner_id']}_{t['id']}"
+            title = t["title"]
+            artist = t["artist"]
+
             cov = cover_results[i]
-            stub_url = (
-                cov[0]
-                if not isinstance(cov, Exception) and cov
-                else ""
-            )
-            stub_fid = (
-                stub_results[i]
-                if not isinstance(stub_results[i], Exception)
-                else None
-            )
-            _log(
-                "INLINE_SEARCH",
-                f"Track {i}: key={track_key} stub_fid={stub_fid!r}",
-            )
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(
-                    text="Downloading...",
-                    callback_data=f"vkm_dl_{track_key[:32]}",
-                )
-            ]])
+            thumb = cov[0] if not isinstance(cov, Exception) and cov else ""
+            stub_fid = stub_results[i] if not isinstance(stub_results[i], Exception) else None
 
-            if track_key in self._real_cache:
-                fid = self._real_cache[track_key][0]
-                results.append(InlineQueryResultCachedAudio(
-                    id=f"vk_{track_key}",
-                    audio_file_id=fid,
-                ))
+            if vid in self._real_cache:
+                inline_results.append(
+                    await query.builder.document(
+                        self._real_cache[vid][0],
+                        title=title,
+                        description=artist,
+                        mime_type="audio/mpeg",
+                        id=f"vk_{vid}",
+                    )
+                )
             elif stub_fid:
-                results.append(InlineQueryResultCachedAudio(
-                    id=f"vk_{track_key}",
-                    audio_file_id=stub_fid,
-                    reply_markup=kb,
-                ))
-            else:
-                kw = dict(
-                    id=f"vk_{track_key}",
-                    title=f"{artist} - {title}",
-                    description="Tap to download",
-                    input_message_content=InputTextMessageContent(
-                        message_text=(
-                            f"<b>VKMusic:</b> Downloading "
-                            f"<b>{escape_html(artist)} - {escape_html(title)}</b>..."
+                inline_results.append(
+                    await query.builder.document(
+                        stub_fid,
+                        title=title,
+                        description=artist,
+                        mime_type="audio/mpeg",
+                        id=f"vk_{vid}",
+                        buttons=self.inline.generate_markup(
+                            {"text": self.strings["downloading"], "data": f"vkm_{vid[:32]}"}
                         ),
-                        parse_mode="HTML",
-                    ),
-                    reply_markup=kb,
+                    )
                 )
-                if stub_url:
-                    kw["thumbnail_url"] = stub_url
-                    kw["thumbnail_width"] = 200
-                    kw["thumbnail_height"] = 200
-                results.append(InlineQueryResultArticle(**kw))
-
-        if not results:
-            await self._inline_hint(query)
-            return
+            else:
+                inline_results.append(
+                    await query.builder.article(
+                        title=title,
+                        description=artist,
+                        text=f"<b>VKMusic:</b> {escape_html(title)}",
+                        parse_mode="HTML",
+                        link_preview=False,
+                        thumb=self.inline._web_document(thumb, width=200, height=200) if thumb else None,
+                        id=f"vk_{vid}",
+                    )
+                )
 
         try:
-            await self.inline_bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=results,
-                cache_time=0,
-                is_personal=True,
-            )
-            _log("INLINE_SEARCH", f"Answered {len(results)} results OK")
+            await query.answer(inline_results, cache_time=0, private=True)
+            _log("INLINE", f"Answered {len(inline_results)} results OK")
         except Exception as e:
-            _log(
-                "INLINE_SEARCH",
-                f"answer_inline_query FAILED: {e}\n{traceback.format_exc()}",
-            )
+            _log("INLINE", f"answer failed: {e}\n{traceback.format_exc()}")
 
-    async def _inline_hint(self, query: InlineQuery):
+    async def _hint(self, query):
         try:
-            await self.inline_bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=[InlineQueryResultArticle(
-                    id="hint",
-                    title="VKMusic",
-                    description="Type a song name or paste a VK audio link",
-                    input_message_content=InputTextMessageContent(
-                        message_text=(
-                            "<b>VKMusic:</b> Type a song name or paste a VK audio link"
-                        ),
+            await query.answer(
+                [
+                    await query.builder.article(
+                        title=self.strings["hint_title"],
+                        description=self.strings["hint_desc"],
+                        text=f"<b>VKMusic:</b> {self.strings['hint_desc']}",
                         parse_mode="HTML",
-                    ),
-                    thumbnail_url=INLINE_QUERY_BANNER,
-                    thumbnail_width=640,
-                    thumbnail_height=360,
-                )],
+                        link_preview=False,
+                        thumb=self.inline._web_document(INLINE_QUERY_BANNER, width=640, height=360),
+                        id=f"hint_{int(time.time())}",
+                    )
+                ],
                 cache_time=0,
-                is_personal=True,
-            )
-        except Exception:
-            pass
-
-    async def _inline_msg(self, query: InlineQuery, title: str, desc: str):
-        try:
-            await self.inline_bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=[InlineQueryResultArticle(
-                    id="msg",
-                    title=title,
-                    description=desc,
-                    input_message_content=InputTextMessageContent(
-                        message_text=f"<b>VKMusic:</b> {escape_html(desc)}",
-                        parse_mode="HTML",
-                    ),
-                )],
-                cache_time=0,
-                is_personal=True,
+                private=True,
             )
         except Exception:
             pass
@@ -1414,8 +1447,7 @@ class VKMusic(loader.Module):
         self._stub_cache.clear()
         self._search_cache.clear()
         self._cover_cache.clear()
-        if hasattr(self, "_link_cache"):
-            self._link_cache.clear()
+        self._link_cache.clear()
         if self._vk:
             await self._vk.close()
         if self._tmp and os.path.exists(self._tmp):

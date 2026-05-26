@@ -8,36 +8,112 @@ import logging
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 import traceback
 import typing
 
-import aiohttp
-from PIL import Image
-
-from herokutl import Button
-from herokutl.tl.functions.messages import EditInlineBotMessageRequest
-from herokutl.tl.types import (
+from telethon.tl.types import (
     DocumentAttributeAudio,
     InputDocument,
     InputMediaDocument,
 )
+from telethon.tl.functions.messages import EditInlineBotMessageRequest
 
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
+DEPS = ["yt-dlp", "aiohttp", "Pillow", "mutagen"]
+
+def _install_deps():
+    import importlib
+    import subprocess
+    
+    pip = os.path.join(os.path.dirname(sys.executable), "pip")
+    if not os.path.exists(pip):
+        pip = "pip"
+    
+    in_venv = sys.prefix != sys.base_prefix
+    
+    imp_map = {
+        "yt-dlp": "yt_dlp",
+        "Pillow": "PIL",
+        "aiohttp": "aiohttp",
+        "mutagen": "mutagen",
+    }
+    
+    ver_attr = {
+        "yt_dlp": "version.__version__",
+        "mutagen": "version.version_string",
+    }
+    
+    lines = [f"venv: {'yes' if in_venv else 'no'} ({sys.prefix})"]
+    
+    for pkg in DEPS:
+        try:
+            subprocess.run(
+                [pip, "install", "-U", pkg, "--break-system-packages", "-q"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            try:
+                imp_name = imp_map.get(pkg, pkg)
+                mod = importlib.import_module(imp_name)
+                
+                if imp_name in ver_attr:
+                    parts = ver_attr[imp_name].split(".")
+                    obj = mod
+                    for part in parts:
+                        obj = getattr(obj, part, None)
+                        if obj is None:
+                            break
+                    ver = str(obj) if obj else getattr(mod, "__version__", "?")
+                else:
+                    ver = getattr(mod, "__version__", "?")
+                
+                lines.append(f"{pkg}: OK ({ver})")
+            except ImportError:
+                lines.append(f"{pkg}: FAIL (import error)")
+        except Exception as e:
+            lines.append(f"{pkg}: FAIL ({e})")
+    
+    return lines
+
+_dep_log = _install_deps()
+
 try:
     import yt_dlp
     YT_DLP_OK = True
 except ImportError:
+    yt_dlp = None
     YT_DLP_OK = False
+
+try:
+    import aiohttp
+    AIOHTTP_OK = True
+except ImportError:
+    aiohttp = None
+    AIOHTTP_OK = False
+
+try:
+    from PIL import Image
+    PIL_OK = True
+except ImportError:
+    Image = None
+    PIL_OK = False
 
 try:
     from mutagen.id3 import ID3, TIT2, TPE1, APIC, ID3NoHeaderError
     MUTAGEN_OK = True
 except ImportError:
+    ID3 = None
+    TIT2 = None
+    TPE1 = None
+    APIC = None
+    ID3NoHeaderError = None
     MUTAGEN_OK = False
 
 INNERTUBE_API_URL = "https://www.youtube.com/youtubei/v1/search"
@@ -105,7 +181,7 @@ def sanitize_fn(n: str) -> str:
 
 
 def normalize_cover(raw: bytes, max_size: typing.Optional[int] = None) -> typing.Optional[bytes]:
-    if not raw or len(raw) < 100:
+    if not PIL_OK or not raw or len(raw) < 100:
         return None
     try:
         img = Image.open(io.BytesIO(raw))
@@ -124,7 +200,7 @@ def normalize_cover(raw: bytes, max_size: typing.Optional[int] = None) -> typing
 
 
 async def _download_image(url: str) -> typing.Optional[bytes]:
-    if not url:
+    if not AIOHTTP_OK or not url:
         return None
     try:
         async with aiohttp.ClientSession() as s:
@@ -138,7 +214,9 @@ async def _download_image(url: str) -> typing.Optional[bytes]:
         return None
 
 
-async def _check_thumb(session: aiohttp.ClientSession, url: str) -> bool:
+async def _check_thumb(session, url: str) -> bool:
+    if not AIOHTTP_OK:
+        return False
     try:
         async with session.head(url, timeout=aiohttp.ClientTimeout(total=5), allow_redirects=True) as r:
             if r.status == REQUEST_OK:
@@ -152,6 +230,9 @@ async def _check_thumb(session: aiohttp.ClientSession, url: str) -> bool:
 
 
 async def _best_thumb_for_inline(video_id: str) -> str:
+    if not AIOHTTP_OK:
+        return f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
+    
     candidates = {k: f"https://img.youtube.com/vi/{video_id}/{k}.jpg" for k in THUMB_KEYS}
     async with aiohttp.ClientSession(headers=HEADERS_WEB) as s:
         results = await asyncio.gather(
@@ -175,6 +256,9 @@ def _extract_video_id(text: str) -> typing.Optional[str]:
 
 
 async def _search_innertube(query: str, limit: int = 5) -> list:
+    if not AIOHTTP_OK:
+        return []
+    
     payload = {
         "query": query,
         "context": INNERTUBE_CONTEXT,
@@ -327,6 +411,7 @@ class YTMusic(loader.Module):
 
     strings = {
         "name": "YTMusic",
+        "deps_installed": "<b>Dependencies installed!</b>\n\n<code>{}</code>",
         "cookies_saved": "<b>Cookies saved!</b>",
         "cookies_cleared": "<b>Cookies cleared</b>",
         "cookies_no_reply": "<b>Reply to a .txt file with cookies</b>",
@@ -341,6 +426,7 @@ class YTMusic(loader.Module):
     }
 
     strings_ru = {
+        "deps_installed": "<b>Зависимости установлены!</b>\n\n<code>{}</code>",
         "cookies_saved": "<b>Куки сохранены!</b>",
         "cookies_cleared": "<b>Куки удалены</b>",
         "cookies_no_reply": "<b>Ответь на .txt файл с куками</b>",
@@ -386,10 +472,17 @@ class YTMusic(loader.Module):
             shutil.rmtree(self._tmp, ignore_errors=True)
         os.makedirs(self._tmp, exist_ok=True)
 
+    @loader.command(ru_doc="Показать статус зависимостей")
+    async def ytdeps(self, message):
+        """Show dependencies status"""
+        status = "\n".join(_dep_log)
+        await utils.answer(
+            message,
+            self.strings["deps_installed"].format(status),
+        )
+
     @loader.need_update("chosen_inline_result")
     async def _on_chosen(self, update):
-        # update is UpdateBotInlineSend
-        # Fields: id (str), msg_id (InputBotInlineMessageID), user_id (int), query (str)
         rid = update.id
         msg_id = update.msg_id
         _log("CHOSEN", f"rid={rid!r} msg_id={msg_id!r}")
@@ -427,9 +520,7 @@ class YTMusic(loader.Module):
                 await self.inline.bot.client(
                     EditInlineBotMessageRequest(
                         id=msg_id,
-                        media=InputMediaDocument(
-                            id=file_id,
-                        ),
+                        media=InputMediaDocument(id=file_id),
                     )
                 )
                 _log("REPLACE", f"OK attempt {attempt + 1}")
@@ -646,13 +737,14 @@ class YTMusic(loader.Module):
         _log("STUB", f"Creating stub for {video_id} ({artist} - {title})")
 
         stub_bytes = b""
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(DOWNLOADING_STUB, timeout=aiohttp.ClientTimeout(total=20)) as r:
-                    if r.status == REQUEST_OK:
-                        stub_bytes = await r.read()
-        except Exception as e:
-            _log("STUB", f"Stub audio dl failed: {e}")
+        if AIOHTTP_OK:
+            try:
+                async with aiohttp.ClientSession() as s:
+                    async with s.get(DOWNLOADING_STUB, timeout=aiohttp.ClientTimeout(total=20)) as r:
+                        if r.status == REQUEST_OK:
+                            stub_bytes = await r.read()
+            except Exception as e:
+                _log("STUB", f"Stub audio dl failed: {e}")
 
         if not stub_bytes:
             return None
@@ -724,12 +816,6 @@ class YTMusic(loader.Module):
     @loader.inline_handler(ru_doc="YouTube поиск", en_doc="YouTube search")
     async def yt_inline_handler(self, query):
         """YouTube search"""
-        # query is InlineQuery from types.py
-        # query.query -- text string
-        # query.from_user.id -- user id
-        # query.id -- query id
-        # query.answer([...]) -- answer
-        # query.builder.article/document/photo -- build results
         raw = query.query.strip()
         prefix = "yt"
         text = raw[len(prefix):].strip() if raw.lower().startswith(prefix) else raw.strip()
@@ -809,7 +895,9 @@ class YTMusic(loader.Module):
                             description=channel,
                             mime_type="audio/mpeg",
                             id=f"yt_{video_id}",
-                            buttons=Button.inline(self.strings["downloading"], data=f"ytm_{video_id[:32]}"),
+                            buttons=self.inline.generate_markup(
+                                {"text": self.strings["downloading"], "data": f"ytm_{video_id[:32]}"}
+                            ),
                         )
                     ],
                     cache_time=0,
@@ -910,7 +998,9 @@ class YTMusic(loader.Module):
                         description=channel,
                         mime_type="audio/mpeg",
                         id=f"yt_{vid}",
-                        buttons=Button.inline(self.strings["downloading"], data=f"ytm_{vid[:32]}"),
+                        buttons=self.inline.generate_markup(
+                            {"text": self.strings["downloading"], "data": f"ytm_{vid[:32]}"}
+                        ),
                     )
                 )
             else:
