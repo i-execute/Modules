@@ -44,7 +44,7 @@ def _escape(text):
 import os
 
 
-def in_docker():
+def _in_docker():
     if os.path.isfile("/.dockerenv"):
         return True
 
