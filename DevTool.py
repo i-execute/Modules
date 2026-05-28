@@ -1,4 +1,4 @@
-__version__ = (1, 2, 2)
+__version__ = (1, 2, 3)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DevTool/MetaBanner.jpeg
 # requires: aiohttp
@@ -7,6 +7,10 @@ import time
 import html
 import logging
 import asyncio
+import os
+import sys
+import subprocess
+import importlib
 from html.parser import HTMLParser
 
 from telethon.tl.types import (
@@ -17,6 +21,36 @@ from telethon.tl.types import (
 from telethon.utils import html as tl_html
 
 from .. import loader, utils
+
+DEPS = ["aiohttp"]
+
+def _install_deps():
+    pip = os.path.join(os.path.dirname(sys.executable), "pip")
+    if not os.path.exists(pip):
+        pip = "pip"
+    in_venv = sys.prefix != sys.base_prefix
+    lines = [f"venv: {'yes' if in_venv else 'no'} ({sys.prefix})"]
+    for pkg in DEPS:
+        try:
+            subprocess.run(
+                [pip, "install", "-U", pkg, "--break-system-packages", "-q"],
+                capture_output=True, text=True, timeout=120,
+            )
+            mod = importlib.import_module(pkg)
+            ver = getattr(mod, "__version__", "?")
+            lines.append(f"{pkg}: OK ({ver})")
+        except Exception as e:
+            lines.append(f"{pkg}: FAIL ({e})")
+    return lines
+
+_dep_log = _install_deps()
+
+try:
+    import aiohttp
+    AIOHTTP_OK = True
+except ImportError:
+    aiohttp = None
+    AIOHTTP_OK = False
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +187,8 @@ class _DetailParser(HTMLParser):
 
 
 async def _fetch(url: str, timeout: int = 20):
-    import aiohttp
+    if not AIOHTTP_OK:
+        return None
     try:
         async with aiohttp.ClientSession() as s:
             async with s.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as r:

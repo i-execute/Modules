@@ -1,4 +1,4 @@
-__version__ = (1, 4, 2)
+__version__ = (1, 4, 3)
 # meta developer: I_execute.t.me
 # requires: aiohttp, Pillow
 
@@ -6,9 +6,10 @@ import re
 import io
 import time
 import logging
-
-import aiohttp
-from PIL import Image
+import os
+import sys
+import subprocess
+import importlib
 
 from telethon.tl.types import (
     InputBotInlineResult,
@@ -19,6 +20,45 @@ from telethon.tl.types import (
 from telethon.utils import html as tl_html
 
 from .. import loader, utils
+
+DEPS = ["aiohttp", "Pillow"]
+
+def _install_deps():
+    pip = os.path.join(os.path.dirname(sys.executable), "pip")
+    if not os.path.exists(pip):
+        pip = "pip"
+    in_venv = sys.prefix != sys.base_prefix
+    imp_map = {"Pillow": "PIL"}
+    lines = [f"venv: {'yes' if in_venv else 'no'} ({sys.prefix})"]
+    for pkg in DEPS:
+        try:
+            subprocess.run(
+                [pip, "install", "-U", pkg, "--break-system-packages", "-q"],
+                capture_output=True, text=True, timeout=120,
+            )
+            imp_name = imp_map.get(pkg, pkg)
+            mod = importlib.import_module(imp_name)
+            ver = getattr(mod, "__version__", "?")
+            lines.append(f"{pkg}: OK ({ver})")
+        except Exception as e:
+            lines.append(f"{pkg}: FAIL ({e})")
+    return lines
+
+_dep_log = _install_deps()
+
+try:
+    import aiohttp
+    AIOHTTP_OK = True
+except ImportError:
+    aiohttp = None
+    AIOHTTP_OK = False
+
+try:
+    from PIL import Image
+    PIL_OK = True
+except ImportError:
+    Image = None
+    PIL_OK = False
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +95,8 @@ def _parse_nft_url(text: str) -> tuple[str, int] | None:
 
 async def _check_fragment(slug: str, num: int) -> tuple[bool | None, str]:
     url = f"https://fragment.com/gift/{slug.lower()}-{num}"
+    if not AIOHTTP_OK:
+        return None, url
     try:
         async with aiohttp.ClientSession(headers=HEADERS) as s:
             async with s.get(
@@ -75,6 +117,8 @@ async def _check_fragment(slug: str, num: int) -> tuple[bool | None, str]:
 
 async def _download_webp(slug: str, num: int) -> bytes | None:
     url = f"https://nft.fragment.com/gift/{slug.lower()}-{num}.webp"
+    if not AIOHTTP_OK:
+        return None
     try:
         async with aiohttp.ClientSession(headers=HEADERS) as s:
             async with s.get(url, timeout=aiohttp.ClientTimeout(total=20)) as r:
@@ -88,6 +132,8 @@ async def _download_webp(slug: str, num: int) -> bytes | None:
 
 
 def _webp_to_jpeg(data: bytes) -> bytes | None:
+    if not PIL_OK:
+        return None
     try:
         img = Image.open(io.BytesIO(data)).convert("RGB")
         buf = io.BytesIO()
@@ -100,6 +146,8 @@ def _webp_to_jpeg(data: bytes) -> bytes | None:
 
 
 async def _upload_to_x0(data: bytes, filename: str) -> str:
+    if not AIOHTTP_OK:
+        return ""
     try:
         form = aiohttp.FormData()
         form.add_field("file", data, filename=filename, content_type="image/jpeg")
