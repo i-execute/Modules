@@ -1,6 +1,5 @@
-__version__ = (1, 3, 2)
+__version__ = (1, 4, 0)
 # meta developer: I_execute.t.me
-# requires: aiohttp, Pillow
 
 import re
 import io
@@ -10,11 +9,10 @@ import logging
 import aiohttp
 from PIL import Image
 
-from aiogram.types import (
-    InlineQuery,
-    InlineQueryResultArticle,
-    InputTextMessageContent,
-    LinkPreviewOptions,
+from telethon.tl.types import (
+    InputBotInlineResult,
+    InputBotInlineMessageText,
+    InputWebDocument,
 )
 
 from .. import loader, utils
@@ -231,34 +229,70 @@ class NFTChecker(loader.Module):
 
     async def client_ready(self, client, db):
         self._client = client
-        self.inline_bot = self.inline.bot
+        self._db = db
+
+    def _make_web_document(self, url, mime_type="image/png"):
+        return InputWebDocument(
+            url=url,
+            size=0,
+            mime_type=mime_type,
+            attributes=[],
+        )
+
+    def _make_article(
+        self,
+        uid: str,
+        title: str,
+        desc: str,
+        text: str,
+        thumb_url: str | None = None,
+    ) -> InputBotInlineResult:
+        return InputBotInlineResult(
+            id=uid,
+            type="article",
+            title=title,
+            description=desc,
+            thumb=self._make_web_document(thumb_url or BANNER),
+            send_message=InputBotInlineMessageText(
+                message=text,
+                no_webpage=True,
+            ),
+        )
 
     @loader.inline_handler(ru_doc="Проверка NFT подарка", en_doc="NFT gift blockchain check")
-    async def nft_inline_handler(self, query: InlineQuery):
+    async def nft_inline_handler(self, query):
         """NFT gift blockchain check"""
         raw    = query.query.strip()
         prefix = "nft"
         text   = raw[len(prefix):].strip() if raw.lower().startswith(prefix) else raw.strip()
 
         if not text:
-            await self._answer(query, [self._make_article(
-                uid=f"hint_{int(time.time())}",
-                title=self.strings["hint_title"],
-                desc=self.strings["hint_desc"],
-                text=self.strings["hint_msg"],
-                thumb_url=BANNER,
-            )])
+            await query.answer(
+                results=[self._make_article(
+                    uid=f"hint_{int(time.time())}",
+                    title=self.strings["hint_title"],
+                    desc=self.strings["hint_desc"],
+                    text=self.strings["hint_msg"],
+                    thumb_url=BANNER,
+                )],
+                cache_time=0,
+                private=True,
+            )
             return
 
         parsed = _parse_nft_url(text)
         if not parsed:
-            await self._answer(query, [self._make_article(
-                uid=f"bad_{int(time.time())}",
-                title=self.strings["bad_url_title"],
-                desc=self.strings["bad_url_desc"],
-                text=self.strings["bad_url_msg"],
-                thumb_url=BANNER,
-            )])
+            await query.answer(
+                results=[self._make_article(
+                    uid=f"bad_{int(time.time())}",
+                    title=self.strings["bad_url_title"],
+                    desc=self.strings["bad_url_desc"],
+                    text=self.strings["bad_url_msg"],
+                    thumb_url=BANNER,
+                )],
+                cache_time=0,
+                private=True,
+            )
             return
 
         slug, num = parsed
@@ -288,55 +322,14 @@ class NFTChecker(loader.Module):
             desc    = self.strings["result_unknown_desc"]
             caption = self.strings["caption_unknown"].format(**fmt)
 
-        await self._answer(query, [self._make_article(
-            uid=f"nft_{cache_key}_{int(time.time())}",
-            title=title,
-            desc=desc,
-            text=caption,
-            preview_url=preview_url if preview_url else None,
-            thumb_url=preview_url if preview_url else BANNER,
-        )])
-
-    def _make_article(
-        self,
-        uid: str,
-        title: str,
-        desc: str,
-        text: str,
-        preview_url: str | None = None,
-        thumb_url: str | None = None,
-    ) -> InlineQueryResultArticle:
-        lp = None
-        if preview_url:
-            lp = LinkPreviewOptions(
-                url=preview_url,
-                prefer_large_media=True,
-                show_above_text=True,
-                is_disabled=False,
-            )
-        kwargs = dict(
-            id=uid,
-            title=title,
-            description=desc,
-            input_message_content=InputTextMessageContent(
-                message_text=text,
-                parse_mode="HTML",
-                link_preview_options=lp,
-            ),
+        await query.answer(
+            results=[self._make_article(
+                uid=f"nft_{cache_key}_{int(time.time())}",
+                title=title,
+                desc=desc,
+                text=caption,
+                thumb_url=preview_url if preview_url else BANNER,
+            )],
+            cache_time=0,
+            private=True,
         )
-        if thumb_url:
-            kwargs["thumbnail_url"]    = thumb_url
-            kwargs["thumbnail_width"]  = 100
-            kwargs["thumbnail_height"] = 100
-        return InlineQueryResultArticle(**kwargs)
-
-    async def _answer(self, query: InlineQuery, results: list):
-        try:
-            await self.inline_bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=results,
-                cache_time=0,
-                is_personal=True,
-            )
-        except Exception as e:
-            logger.error(f"[NFTCheck] answer_inline_query failed: {e}")

@@ -1,18 +1,17 @@
-__version__ = (1, 1, 0)
-# meta developer: I_execute.t.me 
+__version__ = (1, 2, 0)
+# meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DevTool/MetaBanner.jpeg
-# requires: aiohttp
 
 import time
+import html
 import logging
 import asyncio
-import html
 from html.parser import HTMLParser
 
-from aiogram.types import (
-    InlineQuery,
-    InlineQueryResultArticle,
-    InputTextMessageContent,
+from telethon.tl.types import (
+    InputBotInlineResult,
+    InputBotInlineMessageText,
+    InputWebDocument,
 )
 
 from .. import loader, utils
@@ -24,6 +23,7 @@ TL_BASE = "https://tl.telethon.dev"
 METHODS_CACHE_TTL = 86400
 DETAIL_CACHE_TTL = 3600
 PAGE_SIZE = 10
+
 
 class _LinksParser(HTMLParser):
     def __init__(self):
@@ -53,6 +53,7 @@ class _LinksParser(HTMLParser):
     def handle_data(self, data):
         if self._in_a:
             self._buf += data
+
 
 class _DetailParser(HTMLParser):
     def __init__(self):
@@ -131,6 +132,7 @@ class _DetailParser(HTMLParser):
             return self._pres[-1].strip()
         return ""
 
+
 async def _fetch(url: str, timeout: int = 20):
     import aiohttp
     try:
@@ -142,6 +144,7 @@ async def _fetch(url: str, timeout: int = 20):
     except Exception as ex:
         logger.debug("_fetch error %s: %s", url, ex)
         return None
+
 
 async def _collect_methods_from_page(page_url: str, base_url: str):
     text = await _fetch(page_url)
@@ -162,6 +165,7 @@ async def _collect_methods_from_page(page_url: str, base_url: str):
         rel = abs_href.replace(TL_BASE, "")
         results.append({"name": text_content, "href": rel})
     return results
+
 
 async def _load_index():
     root_url = TL_BASE + "/methods/"
@@ -203,6 +207,7 @@ async def _load_index():
 
     return deduped
 
+
 async def _load_detail(href: str):
     url = TL_BASE + href
     text = await _fetch(url)
@@ -223,6 +228,7 @@ async def _load_detail(href: str):
         "url": url,
     }
 
+
 def _search(items, query: str):
     q = query.lower().strip()
     if not q:
@@ -233,6 +239,7 @@ def _search(items, query: str):
         if q in n:
             name_hits.append(item)
     return name_hits
+
 
 def _build_result_message(detail: dict, display_name: str, url: str) -> str:
     e = html.escape
@@ -303,7 +310,6 @@ class DevTool(loader.Module):
     }
 
     def __init__(self):
-        self.inline_bot = None
         self._index_cache = None
         self._index_ts = 0
         self._index_lock = None
@@ -313,8 +319,6 @@ class DevTool(loader.Module):
         self._client = client
         self._db = db
         self._index_lock = asyncio.Lock()
-        if hasattr(self, "inline") and hasattr(self.inline, "bot"):
-            self.inline_bot = self.inline.bot
         asyncio.ensure_future(self._get_index())
 
     async def _get_index(self):
@@ -338,83 +342,83 @@ class DevTool(loader.Module):
             self._detail_cache[href] = {"data": detail, "ts": time.time()}
         return detail
 
-    async def _answer(self, query, results, next_offset=""):
-        try:
-            await self.inline_bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=results,
-                cache_time=0,
-                is_personal=True,
-                next_offset=next_offset,
-            )
-        except Exception as ex:
-            logger.debug("answer_inline_query error: %s", ex)
+    def _make_web_document(self, url, mime_type="image/png"):
+        return InputWebDocument(
+            url=url,
+            size=0,
+            mime_type=mime_type,
+            attributes=[],
+        )
 
     def _make_article(self, uid, title, description, message_text):
-        return InlineQueryResultArticle(
+        return InputBotInlineResult(
             id=uid,
+            type="article",
             title=title,
             description=description,
-            input_message_content=InputTextMessageContent(
-                message_text=message_text,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
+            thumb=self._make_web_document(BANNER),
+            send_message=InputBotInlineMessageText(
+                message=message_text,
+                no_webpage=True,
             ),
-            thumbnail_url=BANNER,
-            thumbnail_width=640,
-            thumbnail_height=640,
         )
 
     @loader.inline_handler(
         ru_doc="Справочник методов Telethon",
         en_doc="Telethon methods reference",
     )
-    async def dev_inline_handler(self, query: InlineQuery):
+    async def dev_inline_handler(self, query):
         """Telethon methods reference"""
         raw = query.query.strip()
         if raw.lower().startswith("dev"):
             raw = raw[3:].strip()
 
         if not raw:
-            await self._answer(query, [
-                self._make_article(
-                    "hint_" + str(int(time.time())),
+            await query.answer(
+                results=[self._make_article(
+                    f"hint_{int(time.time())}",
                     self.strings["hint_title"],
                     self.strings["hint_desc"],
                     self.strings["hint_msg"],
-                )
-            ])
+                )],
+                cache_time=0,
+                private=True,
+            )
             return
 
         offset = int(query.offset or 0)
         index = await self._get_index()
 
         if not index:
-            await self._answer(query, [
-                self._make_article(
-                    "ld_" + str(int(time.time())),
+            await query.answer(
+                results=[self._make_article(
+                    f"ld_{int(time.time())}",
                     self.strings["loading_title"],
                     self.strings["loading_desc"],
                     self.strings["loading_msg"],
-                )
-            ])
+                )],
+                cache_time=0,
+                private=True,
+            )
             return
 
         results_all = _search(index, raw)
 
         if not results_all:
-            await self._answer(query, [
-                self._make_article(
-                    "nr_" + str(int(time.time())),
+            await query.answer(
+                results=[self._make_article(
+                    f"nr_{int(time.time())}",
                     self.strings["no_results_title"],
                     self.strings["no_results_desc"],
                     self.strings["no_results_msg"].format(query=html.escape(raw)),
-                )
-            ])
+                )],
+                cache_time=0,
+                private=True,
+            )
             return
 
         page = results_all[offset: offset + PAGE_SIZE]
-        next_off = str(offset + PAGE_SIZE) if (offset + PAGE_SIZE) < len(results_all) else ""
+        next_off = str(offset + PAGE_SIZE) if (offset + PAGE_SIZE) < len(results_all) else None
 
         hrefs = [item["href"] for item in page]
         details = await asyncio.gather(
@@ -430,18 +434,20 @@ class DevTool(loader.Module):
             if isinstance(detail, dict) and detail:
                 msg = _build_result_message(detail, display_name, url)
             else:
-                msg = (
-                    '<b><a href="' + url + '">DevTool</a> - ' + html.escape(display_name) + "</b>"
-                )
+                msg = '<b><a href="' + url + '">DevTool</a> - ' + html.escape(display_name) + "</b>"
 
             articles.append(self._make_article(
-                uid="m_" + display_name + "_" + str(offset),
+                uid=f"m_{display_name}_{offset}",
                 title=display_name,
                 description="Telethon method",
                 message_text=msg,
             ))
 
-        await self._answer(query, articles, next_offset=next_off)
+        kwargs = dict(results=articles, cache_time=0, private=True)
+        if next_off is not None:
+            kwargs["next_offset"] = next_off
+
+        await query.answer(**kwargs)
 
     async def on_unload(self):
         self._index_cache = None
