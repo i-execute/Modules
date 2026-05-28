@@ -1,4 +1,4 @@
-__version__ = (3, 1, 1)
+__version__ = (3, 2, 0)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/AdminTool/MetaBanner.jpeg
 
@@ -11,52 +11,80 @@ from telethon.tl.types import (
     Chat,
     ChannelForbidden,
     ChatForbidden,
+    ChatBannedRights,
+    InputPeerChannel,
+    InputPeerChat,
 )
+from telethon.tl.functions.channels import EditBannedRequest
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-RESTRICT_BANNED = {
-    "view_messages": False,
-    "send_messages": False,
-    "send_media": False,
-    "send_stickers": False,
-    "send_gifs": False,
-    "send_games": False,
-    "send_inline": False,
-    "send_polls": False,
-    "change_info": False,
-    "invite_users": False,
-    "pin_messages": False,
-    "send_photos": False,
-    "send_videos": False,
-    "send_roundvideos": False,
-    "send_audios": False,
-    "send_voices": False,
-    "send_docs": False,
-    "send_plain": False,
-}
+RIGHTS_BANNED = ChatBannedRights(
+    until_date=None,
+    view_messages=True,
+    send_messages=True,
+    send_media=True,
+    send_stickers=True,
+    send_gifs=True,
+    send_games=True,
+    send_inline=True,
+    send_polls=True,
+    change_info=True,
+    invite_users=True,
+    pin_messages=True,
+    send_photos=True,
+    send_videos=True,
+    send_roundvideos=True,
+    send_audios=True,
+    send_voices=True,
+    send_docs=True,
+    send_plain=True,
+)
 
-RESTRICT_MUTED = {
-    "view_messages": True,
-    "send_messages": False,
-    "send_media": False,
-    "send_stickers": False,
-    "send_gifs": False,
-    "send_games": False,
-    "send_inline": False,
-    "send_polls": False,
-    "change_info": False,
-    "invite_users": False,
-    "pin_messages": False,
-    "send_photos": False,
-    "send_videos": False,
-    "send_roundvideos": False,
-    "send_audios": False,
-    "send_voices": False,
-    "send_docs": False,
-    "send_plain": False,
-}
+RIGHTS_MUTED = ChatBannedRights(
+    until_date=None,
+    view_messages=False,
+    send_messages=True,
+    send_media=True,
+    send_stickers=True,
+    send_gifs=True,
+    send_games=True,
+    send_inline=True,
+    send_polls=True,
+    change_info=True,
+    invite_users=True,
+    pin_messages=True,
+    send_photos=True,
+    send_videos=True,
+    send_roundvideos=True,
+    send_audios=True,
+    send_voices=True,
+    send_docs=True,
+    send_plain=True,
+)
+
+RIGHTS_UNBANNED = ChatBannedRights(
+    until_date=None,
+    view_messages=False,
+    send_messages=False,
+    send_media=False,
+    send_stickers=False,
+    send_gifs=False,
+    send_games=False,
+    send_inline=False,
+    send_polls=False,
+    change_info=False,
+    invite_users=False,
+    pin_messages=False,
+    send_photos=False,
+    send_videos=False,
+    send_roundvideos=False,
+    send_audios=False,
+    send_voices=False,
+    send_docs=False,
+    send_plain=False,
+)
 
 E_OK    = '<tg-emoji emoji-id=5429319011286423791>😎</tg-emoji>'
 E_ANGRY = '<tg-emoji emoji-id=5429638101586711317>😠</tg-emoji>'
@@ -119,12 +147,33 @@ def _extract_username(user: User) -> str:
 
 
 def _has_ban_right(entity) -> bool:
-    if isinstance(entity, Chat) and getattr(entity, "creator", False):
-        return True
-    ar = getattr(entity, "admin_rights", None)
-    if not ar:
-        return False
-    return getattr(ar, "ban_users", False)
+
+    if isinstance(entity, Chat):
+        if getattr(entity, "creator", False):
+            return True
+        ar = getattr(entity, "admin_rights", None)
+        return bool(ar and getattr(ar, "ban_users", False))
+    if isinstance(entity, Channel):
+        if getattr(entity, "creator", False):
+            return True
+        ar = getattr(entity, "admin_rights", None)
+        return bool(ar and getattr(ar, "ban_users", False))
+    return False
+
+
+def _has_delete_right(entity) -> bool:
+    if isinstance(entity, Chat):
+        if getattr(entity, "creator", False):
+            return True
+        ar = getattr(entity, "admin_rights", None)
+        return bool(ar and getattr(ar, "delete_messages", False))
+    if isinstance(entity, Channel):
+        if getattr(entity, "creator", False):
+            return True
+        ar = getattr(entity, "admin_rights", None)
+        return bool(ar and getattr(ar, "delete_messages", False))
+    return False
+
 
 async def _resolve_target(client, message: Message):
     reply = await message.get_reply_message()
@@ -167,6 +216,37 @@ async def _bulk_delete(client, chat_id, msg_ids: list) -> int:
     return deleted
 
 
+async def _edit_banned(client, chat_input, user_input, rights: ChatBannedRights, until_seconds: int = 0):"
+    import datetime
+    if until_seconds:
+        rights = ChatBannedRights(
+            until_date=datetime.datetime.utcfromtimestamp(int(time.time()) + until_seconds),
+            view_messages=rights.view_messages,
+            send_messages=rights.send_messages,
+            send_media=rights.send_media,
+            send_stickers=rights.send_stickers,
+            send_gifs=rights.send_gifs,
+            send_games=rights.send_games,
+            send_inline=rights.send_inline,
+            send_polls=rights.send_polls,
+            change_info=rights.change_info,
+            invite_users=rights.invite_users,
+            pin_messages=rights.pin_messages,
+            send_photos=rights.send_photos,
+            send_videos=rights.send_videos,
+            send_roundvideos=rights.send_roundvideos,
+            send_audios=rights.send_audios,
+            send_voices=rights.send_voices,
+            send_docs=rights.send_docs,
+            send_plain=rights.send_plain,
+        )
+    await client(EditBannedRequest(
+        channel=chat_input,
+        participant=user_input,
+        banned_rights=rights,
+    ))
+
+
 @loader.tds
 class AdminTool(loader.Module):
     """Ban, mute and delete across all chats where you are admin"""
@@ -204,7 +284,8 @@ class AdminTool(loader.Module):
             "Total chats: <b>{total}</b>\n"
             "Created by me: <b>{created}</b>\n"
             "Can mute: <b>{can_mute}</b>\n"
-            "Can ban: <b>{can_ban}</b>"
+            "Can ban: <b>{can_ban}</b>\n"
+            "Can delete: <b>{can_delete}</b>"
             "</blockquote>"
         ),
         "gtest_noprem": (
@@ -213,7 +294,8 @@ class AdminTool(loader.Module):
             "Total chats: <b>{total}</b>\n"
             "Created by me: <b>{created}</b>\n"
             "Can mute: <b>{can_mute}</b>\n"
-            "Can ban: <b>{can_ban}</b>"
+            "Can ban: <b>{can_ban}</b>\n"
+            "Can delete: <b>{can_delete}</b>"
             "</blockquote>"
         ),
     }
@@ -250,7 +332,8 @@ class AdminTool(loader.Module):
             "Всего чатов: <b>{total}</b>\n"
             "Создано мной: <b>{created}</b>\n"
             "Можно мутить: <b>{can_mute}</b>\n"
-            "Можно банить: <b>{can_ban}</b>"
+            "Можно банить: <b>{can_ban}</b>\n"
+            "Можно удалять: <b>{can_delete}</b>"
             "</blockquote>"
         ),
         "gtest_noprem": (
@@ -259,7 +342,8 @@ class AdminTool(loader.Module):
             "Всего чатов: <b>{total}</b>\n"
             "Создано мной: <b>{created}</b>\n"
             "Можно мутить: <b>{can_mute}</b>\n"
-            "Можно банить: <b>{can_ban}</b>"
+            "Можно банить: <b>{can_ban}</b>\n"
+            "Можно удалять: <b>{can_delete}</b>"
             "</blockquote>"
         ),
     }
@@ -267,7 +351,8 @@ class AdminTool(loader.Module):
     def __init__(self):
         self._ban_cache = {}
         self._mute_cache = {}
-        self._watched: set = set()
+        self._delete_cache = {}
+        self._watched: dict = {}
         self._premium_status = None
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
@@ -290,86 +375,96 @@ class AdminTool(loader.Module):
         noprem_key = f"{key}_noprem"
         return self.strings.get(noprem_key, self.strings[key])
 
-    async def _collect_ban_chats(self):
-        result = []
-        skip = list(self.config["skip_ids"] or [])
-        async for dialog in self._client.iter_dialogs():
-            entity = dialog.entity
-            if isinstance(entity, (ChannelForbidden, ChatForbidden)):
-                continue
-            if isinstance(entity, Chat):
-                if entity.id in skip:
-                    continue
-                if _has_ban_right(entity):
-                    result.append(("group", dialog.input_entity))
-            elif isinstance(entity, Channel):
-                if entity.id in skip:
-                    continue
-                if _has_ban_right(entity):
-                    if getattr(entity, "megagroup", False):
-                        result.append(("group", dialog.input_entity))
-                    elif getattr(entity, "broadcast", False):
-                        result.append(("channel", dialog.input_entity))
-        return result
-        return result
+    async def _collect_chats(self):
+        """Returns (ban_chats, mute_chats, delete_chats) as lists of (input_entity, entity)"""
+        ban_chats = []
+        mute_chats = []
+        delete_chats = []
+        skip = set(self.config["skip_ids"] or [])
 
-    async def _collect_mute_chats(self):
-        result = []
-        skip = list(self.config["skip_ids"] or [])
         async for dialog in self._client.iter_dialogs():
             entity = dialog.entity
             if isinstance(entity, (ChannelForbidden, ChatForbidden)):
                 continue
+
             if isinstance(entity, Chat):
                 if entity.id in skip:
                     continue
-                if _has_ban_right(entity):
-                    result.append(dialog.input_entity)
+                inp = dialog.input_entity
+                can_ban = _has_ban_right(entity)
+                can_del = _has_delete_right(entity)
+                if can_ban:
+                    ban_chats.append(inp)
+                    mute_chats.append(inp)
+                if can_del:
+                    delete_chats.append(inp)
+
             elif isinstance(entity, Channel):
                 if entity.id in skip:
                     continue
-                if not getattr(entity, "megagroup", False):
-                    continue
-                if _has_ban_right(entity):
-                    result.append(dialog.input_entity)
-        return result
+                inp = dialog.input_entity
+                can_ban = _has_ban_right(entity)
+                can_del = _has_delete_right(entity)
+                is_mega = getattr(entity, "megagroup", False)
+                is_broad = getattr(entity, "broadcast", False)
+                if can_ban:
+                    ban_chats.append(inp)
+                    if is_mega:
+                        mute_chats.append(inp)
+                if can_del:
+                    delete_chats.append(inp)
+
+        return ban_chats, mute_chats, delete_chats
+
+    async def _refresh_cache(self):
+        ban, mute, delete = await self._collect_chats()
+        exp = time.time() + 600
+
+        def _peer_id(inp):
+            return getattr(inp, "channel_id", None) or getattr(inp, "chat_id", None)
+
+        self._ban_cache    = {"exp": exp, "chats": ban}
+        self._mute_cache   = {"exp": exp, "chats": mute,   "ids": {_peer_id(p) for p in mute}}
+        self._delete_cache = {"exp": exp, "chats": delete, "ids": {_peer_id(p) for p in delete}}
 
     async def _get_ban_chats(self):
         if not self._ban_cache or self._ban_cache.get("exp", 0) < time.time():
-            chats = await self._collect_ban_chats()
-            self._ban_cache = {"exp": time.time() + 600, "chats": chats}
+            await self._refresh_cache()
         return self._ban_cache["chats"]
 
     async def _get_mute_chats(self):
         if not self._mute_cache or self._mute_cache.get("exp", 0) < time.time():
-            chats = await self._collect_mute_chats()
-            self._mute_cache = {
-                "exp": time.time() + 600,
-                "chats": chats,
-                "ids": {getattr(p, "channel_id", None) or getattr(p, "chat_id", None) for p in chats},
-            }
+            await self._refresh_cache()
         return self._mute_cache["chats"]
+
+    async def _get_delete_chats(self):
+        if not self._delete_cache or self._delete_cache.get("exp", 0) < time.time():
+            await self._refresh_cache()
+        return self._delete_cache["chats"]
 
     async def _collect_full_stats(self):
         total = 0
         created = 0
         can_mute = 0
         can_ban = 0
-        skip = list(self.config["skip_ids"] or [])
+        can_delete = 0
+        skip = set(self.config["skip_ids"] or [])
 
         async for dialog in self._client.iter_dialogs():
             entity = dialog.entity
             if isinstance(entity, (ChannelForbidden, ChatForbidden)):
                 continue
-
             if isinstance(entity, Chat):
+                if entity.id in skip:
+                    continue
                 total += 1
                 if getattr(entity, "creator", False):
                     created += 1
                 if _has_ban_right(entity):
                     can_mute += 1
                     can_ban += 1
-
+                if _has_delete_right(entity):
+                    can_delete += 1
             elif isinstance(entity, Channel):
                 if entity.id in skip:
                     continue
@@ -380,8 +475,10 @@ class AdminTool(loader.Module):
                     can_ban += 1
                     if getattr(entity, "megagroup", False):
                         can_mute += 1
+                if _has_delete_right(entity):
+                    can_delete += 1
 
-        return total, created, can_mute, can_ban
+        return total, created, can_mute, can_ban, can_delete
 
     @loader.command(
         ru_doc="реплай / @username / ID — бан в этом чате",
@@ -406,9 +503,11 @@ class AdminTool(loader.Module):
 
         display = _build_display(target)
         try:
-            await self._client.edit_permissions(
-                message.chat_id, target, until_date=0, **RESTRICT_BANNED,
-            )
+            await self._client(EditBannedRequest(
+                channel=message.chat_id,
+                participant=target.id,
+                banned_rights=RIGHTS_BANNED,
+            ))
         except Exception:
             pass
 
@@ -436,18 +535,47 @@ class AdminTool(loader.Module):
             return await utils.answer(message, self._s("not_group", is_prem))
 
         seconds = _parse_duration(extra[0]) if extra else None
-        until_date = int(time.time()) + seconds if seconds else 0
         duration_str = _format_duration(seconds)
         display = _build_display(target)
 
+        import datetime
+        until = datetime.datetime.utcfromtimestamp(int(time.time()) + seconds) if seconds else None
+        rights = ChatBannedRights(
+            until_date=until,
+            view_messages=False,
+            send_messages=True,
+            send_media=True,
+            send_stickers=True,
+            send_gifs=True,
+            send_games=True,
+            send_inline=True,
+            send_polls=True,
+            change_info=True,
+            invite_users=True,
+            pin_messages=True,
+            send_photos=True,
+            send_videos=True,
+            send_roundvideos=True,
+            send_audios=True,
+            send_voices=True,
+            send_docs=True,
+            send_plain=True,
+        )
+
         try:
-            await self._client.edit_permissions(
-                message.chat_id, target, until_date=until_date, **RESTRICT_MUTED,
-            )
+            await self._client(EditBannedRequest(
+                channel=message.chat_id,
+                participant=target.id,
+                banned_rights=rights,
+            ))
         except Exception:
             pass
 
-        self._watched.add(target.id)
+        chat_id = message.chat_id
+        if target.id not in self._watched:
+            self._watched[target.id] = set()
+        self._watched[target.id].add(chat_id)
+
         await utils.answer(message, self._s("muted", is_prem).format(user=display, duration=duration_str))
 
     @loader.command(
@@ -473,11 +601,13 @@ class AdminTool(loader.Module):
         display = _build_display(target)
         count = 0
 
-        for _, chat_id in chats:
+        for chat_inp in chats:
             try:
-                await self._client.edit_permissions(
-                    chat_id, target, until_date=0, **RESTRICT_BANNED,
-                )
+                await self._client(EditBannedRequest(
+                    channel=chat_inp,
+                    participant=target.id,
+                    banned_rights=RIGHTS_BANNED,
+                ))
                 count += 1
             except Exception:
                 pass
@@ -507,11 +637,13 @@ class AdminTool(loader.Module):
         display = _build_display(target)
         count = 0
 
-        for _, chat_id in chats:
+        for chat_inp in chats:
             try:
-                await self._client.edit_permissions(
-                    chat_id, target, until_date=0, **{k: True for k in RESTRICT_BANNED},
-                )
+                await self._client(EditBannedRequest(
+                    channel=chat_inp,
+                    participant=target.id,
+                    banned_rights=RIGHTS_UNBANNED,
+                ))
                 count += 1
             except Exception:
                 pass
@@ -536,23 +668,52 @@ class AdminTool(loader.Module):
             return await utils.answer(message, self._s("self_action", is_prem))
 
         seconds = _parse_duration(extra[0]) if extra else None
-        until_date = int(time.time()) + seconds if seconds else 0
         duration_str = _format_duration(seconds)
+
+        import datetime
+        until = datetime.datetime.utcfromtimestamp(int(time.time()) + seconds) if seconds else None
+        rights = ChatBannedRights(
+            until_date=until,
+            view_messages=False,
+            send_messages=True,
+            send_media=True,
+            send_stickers=True,
+            send_gifs=True,
+            send_games=True,
+            send_inline=True,
+            send_polls=True,
+            change_info=True,
+            invite_users=True,
+            pin_messages=True,
+            send_photos=True,
+            send_videos=True,
+            send_roundvideos=True,
+            send_audios=True,
+            send_voices=True,
+            send_docs=True,
+            send_plain=True,
+        )
 
         chats = await self._get_mute_chats()
         display = _build_display(target)
         count = 0
 
-        for chat_id in chats:
+        for chat_inp in chats:
             try:
-                await self._client.edit_permissions(
-                    chat_id, target, until_date=until_date, **RESTRICT_MUTED,
-                )
+                await self._client(EditBannedRequest(
+                    channel=chat_inp,
+                    participant=target.id,
+                    banned_rights=rights,
+                ))
                 count += 1
+                chat_id = getattr(chat_inp, "channel_id", None) or getattr(chat_inp, "chat_id", None)
+                if chat_id:
+                    if target.id not in self._watched:
+                        self._watched[target.id] = set()
+                    self._watched[target.id].add(chat_id)
             except Exception:
                 pass
 
-        self._watched.add(target.id)
         await utils.answer(message, self._s("gmuted", is_prem).format(user=display, count=count, duration=duration_str))
 
     @loader.command(
@@ -576,16 +737,18 @@ class AdminTool(loader.Module):
         display = _build_display(target)
         count = 0
 
-        for chat_id in chats:
+        for chat_inp in chats:
             try:
-                await self._client.edit_permissions(
-                    chat_id, target, until_date=0, **{k: True for k in RESTRICT_MUTED},
-                )
+                await self._client(EditBannedRequest(
+                    channel=chat_inp,
+                    participant=target.id,
+                    banned_rights=RIGHTS_UNBANNED,
+                ))
                 count += 1
             except Exception:
                 pass
 
-        self._watched.discard(target.id)
+        self._watched.pop(target.id, None)
         await utils.answer(message, self._s("gunmuted", is_prem).format(user=display, count=count))
 
     @loader.command(
@@ -607,25 +770,29 @@ class AdminTool(loader.Module):
 
         await utils.answer(message, self.strings["processing"])
 
-        chats = await self._get_ban_chats()
+        ban_chats = await self._get_ban_chats()
+        delete_chats = await self._get_delete_chats()
         display = _build_display(target)
         count = 0
 
-        for _, chat_id in chats:
+        for chat_inp in delete_chats:
             try:
                 msg_ids = [
                     msg.id
-                    async for msg in self._client.iter_messages(chat_id, from_user=target.id)
+                    async for msg in self._client.iter_messages(chat_inp, from_user=target.id)
                 ]
                 if msg_ids:
-                    await _bulk_delete(self._client, chat_id, msg_ids)
+                    await _bulk_delete(self._client, chat_inp, msg_ids)
             except Exception:
                 pass
 
+        for chat_inp in ban_chats:
             try:
-                await self._client.edit_permissions(
-                    chat_id, target, until_date=0, **RESTRICT_BANNED,
-                )
+                await self._client(EditBannedRequest(
+                    channel=chat_inp,
+                    participant=target.id,
+                    banned_rights=RIGHTS_BANNED,
+                ))
                 count += 1
             except Exception:
                 pass
@@ -641,7 +808,7 @@ class AdminTool(loader.Module):
         is_prem = await self._check_premium()
         await utils.answer(message, self.strings["processing"])
 
-        total, created, can_mute, can_ban = await self._collect_full_stats()
+        total, created, can_mute, can_ban, can_delete = await self._collect_full_stats()
 
         await utils.answer(
             message,
@@ -650,6 +817,7 @@ class AdminTool(loader.Module):
                 created=created,
                 can_mute=can_mute,
                 can_ban=can_ban,
+                can_delete=can_delete,
             ),
         )
 
@@ -662,14 +830,24 @@ class AdminTool(loader.Module):
             return
         if not self._watched:
             return
-        if message.sender_id not in self._watched:
+
+        sender_id = message.sender_id
+        if sender_id not in self._watched:
             return
 
-        mute_chat_ids = self._mute_cache.get("ids", set())
-        if message.chat_id not in mute_chat_ids:
+        chat_id = message.chat_id
+
+        if chat_id in self._watched[sender_id]:
+            try:
+                await message.delete()
+            except Exception:
+                pass
             return
 
-        try:
-            await message.delete()
-        except Exception:
-            pass
+        delete_ids = self._delete_cache.get("ids", set())
+        if chat_id in delete_ids:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
