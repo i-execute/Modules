@@ -1,4 +1,4 @@
-__version__ = (1, 2, 0)
+__version__ = (1, 2, 1)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DevTool/MetaBanner.jpeg
 
@@ -66,6 +66,8 @@ class _DetailParser(HTMLParser):
         self._row = []
         self._in_td = False
         self._td_buf = ""
+        self._table_index = 0
+        self._in_first_table = False
 
         self._pres = []
         self._in_pre = False
@@ -76,11 +78,15 @@ class _DetailParser(HTMLParser):
         if tag == "p":
             self._in_p = True
             self._p_buf = ""
+        elif tag == "table":
+            self._table_index += 1
+            self._in_first_table = (self._table_index == 1)
         elif tag == "tr":
             self._row = []
         elif tag == "td":
-            self._in_td = True
-            self._td_buf = ""
+            if self._in_first_table:
+                self._in_td = True
+                self._td_buf = ""
         elif tag == "pre":
             self._in_pre = True
             self._pre_buf = ""
@@ -91,11 +97,14 @@ class _DetailParser(HTMLParser):
             t = self._p_buf.strip()
             if t:
                 self._paragraphs.append(t)
+        elif tag == "table":
+            self._in_first_table = False
         elif tag == "td":
-            self._in_td = False
-            self._row.append(self._td_buf.strip())
+            if self._in_td:
+                self._in_td = False
+                self._row.append(self._td_buf.strip())
         elif tag == "tr":
-            if self._row:
+            if self._row and self._in_first_table:
                 self._table_rows.append(self._row[:])
                 self._row = []
         elif tag == "pre":
@@ -122,8 +131,16 @@ class _DetailParser(HTMLParser):
     def params(self):
         rows = []
         for row in self._table_rows:
-            if len(row) >= 2 and row[0] and row[0] not in ("", "Name", "Type"):
-                rows.append(row)
+            if len(row) < 2:
+                continue
+            name = row[0]
+            typ = row[1]
+            if not name or name in ("Name", "Type"):
+                continue
+            # skip error table rows: type field contains spaces (error description) or name is numeric
+            if not typ or " " in typ or name[0].isdigit():
+                continue
+            rows.append(row)
         return rows
 
     @property

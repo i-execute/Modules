@@ -1,5 +1,6 @@
-__version__ = (1, 4, 0)
+__version__ = (1, 4, 1)
 # meta developer: I_execute.t.me
+# requires: aiohttp, Pillow
 
 import re
 import io
@@ -12,6 +13,7 @@ from PIL import Image
 from telethon.tl.types import (
     InputBotInlineResult,
     InputBotInlineMessageText,
+    InputBotInlineMessageMediaWebPage,
     InputWebDocument,
 )
 
@@ -245,18 +247,28 @@ class NFTChecker(loader.Module):
         title: str,
         desc: str,
         text: str,
+        preview_url: str | None = None,
         thumb_url: str | None = None,
     ) -> InputBotInlineResult:
+        if preview_url:
+            send_message = InputBotInlineMessageMediaWebPage(
+                message=text,
+                url=preview_url,
+                force_large_media=True,
+                invert_media=True,
+            )
+        else:
+            send_message = InputBotInlineMessageText(
+                message=text,
+                no_webpage=True,
+            )
         return InputBotInlineResult(
             id=uid,
             type="article",
             title=title,
             description=desc,
             thumb=self._make_web_document(thumb_url or BANNER),
-            send_message=InputBotInlineMessageText(
-                message=text,
-                no_webpage=True,
-            ),
+            send_message=send_message,
         )
 
     @loader.inline_handler(ru_doc="Проверка NFT подарка", en_doc="NFT gift blockchain check")
@@ -328,6 +340,7 @@ class NFTChecker(loader.Module):
                 title=title,
                 desc=desc,
                 text=caption,
+                preview_url=preview_url if preview_url else None,
                 thumb_url=preview_url if preview_url else BANNER,
             )],
             cache_time=0,
