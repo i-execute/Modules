@@ -1,6 +1,7 @@
-__version__ = (1, 2, 1)
+__version__ = (1, 2, 2)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DevTool/MetaBanner.jpeg
+# requires: aiohttp
 
 import time
 import html
@@ -13,6 +14,7 @@ from telethon.tl.types import (
     InputBotInlineMessageText,
     InputWebDocument,
 )
+from telethon.utils import html as tl_html
 
 from .. import loader, utils
 
@@ -368,6 +370,7 @@ class DevTool(loader.Module):
         )
 
     def _make_article(self, uid, title, description, message_text):
+        plain, entities = tl_html.parse(message_text)
         return InputBotInlineResult(
             id=uid,
             type="article",
@@ -375,8 +378,9 @@ class DevTool(loader.Module):
             description=description,
             thumb=self._make_web_document(BANNER),
             send_message=InputBotInlineMessageText(
-                message=message_text,
+                message=plain,
                 no_webpage=True,
+                entities=entities or None,
             ),
         )
 

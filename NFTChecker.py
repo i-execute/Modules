@@ -1,5 +1,6 @@
-__version__ = (1, 4, 1)
+__version__ = (1, 4, 2)
 # meta developer: I_execute.t.me
+# requires: aiohttp, Pillow
 
 import re
 import io
@@ -15,6 +16,7 @@ from telethon.tl.types import (
     InputBotInlineMessageMediaWebPage,
     InputWebDocument,
 )
+from telethon.utils import html as tl_html
 
 from .. import loader, utils
 
@@ -249,17 +251,20 @@ class NFTChecker(loader.Module):
         preview_url: str | None = None,
         thumb_url: str | None = None,
     ) -> InputBotInlineResult:
+        plain, entities = tl_html.parse(text)
         if preview_url:
             send_message = InputBotInlineMessageMediaWebPage(
-                message=text,
+                message=plain,
                 url=preview_url,
                 force_large_media=True,
                 invert_media=True,
+                entities=entities or None,
             )
         else:
             send_message = InputBotInlineMessageText(
-                message=text,
+                message=plain,
                 no_webpage=True,
+                entities=entities or None,
             )
         return InputBotInlineResult(
             id=uid,
