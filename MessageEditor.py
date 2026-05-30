@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 # meta developer: I_execute.t.me
 
 from telethon.tl.types import Message
@@ -23,7 +23,7 @@ class MessageEditor(loader.Module):
         "edit_failed": "Сообщение уже нельзя редактировать",
     }
 
-    async def _check_and_edit(self, message: Message, format_func):
+    async def _check_and_edit(self, message: Message, entity_type):
         if not message.is_reply:
             msg = await utils.answer(message, self.strings["no_reply"])
             await asyncio.sleep(5)
@@ -39,14 +39,37 @@ class MessageEditor(loader.Module):
             await msg.delete()
             return
 
-        text = reply.text or ""
-        formatted_text = format_func(text)
-
         try:
-            await reply.edit(formatted_text, parse_mode="HTML")
+            
+            from telethon.tl.types import (
+                MessageEntityBold,
+                MessageEntityCode,
+                MessageEntityPre,
+                MessageEntityBlockquote,
+            )
+            
+            text = reply.message or ""
+            entities = list(reply.entities) if reply.entities else []
+            
+            if entity_type == "bold":
+                new_entity = MessageEntityBold(offset=0, length=len(text))
+            elif entity_type == "code":
+                new_entity = MessageEntityCode(offset=0, length=len(text))
+            elif entity_type == "pre":
+                new_entity = MessageEntityPre(offset=0, length=len(text), language="")
+            elif entity_type == "quote":
+                new_entity = MessageEntityBlockquote(offset=0, length=len(text))
+            elif entity_type == "quote_expandable":
+                new_entity = MessageEntityBlockquote(offset=0, length=len(text), collapsed=True)
+            else:
+                return
+            
+            entities.insert(0, new_entity)
+            
+            await reply.edit(text, formatting_entities=entities)
             await message.delete()
-        except Exception:
-            msg = await utils.answer(message, self.strings["edit_failed"])
+        except Exception as e:
+            msg = await utils.answer(message, f"{self.strings['edit_failed']}: {str(e)}")
             await asyncio.sleep(5)
             await msg.delete()
 
@@ -56,7 +79,7 @@ class MessageEditor(loader.Module):
     )
     async def b(self, message: Message):
         """Make text bold"""
-        await self._check_and_edit(message, lambda text: f"<b>{utils.escape_html(text)}</b>")
+        await self._check_and_edit(message, "bold")
 
     @loader.command(
         ru_doc="Сделать текст кодом",
@@ -64,7 +87,7 @@ class MessageEditor(loader.Module):
     )
     async def c(self, message: Message):
         """Make text code"""
-        await self._check_and_edit(message, lambda text: f"<pre>{utils.escape_html(text)}</pre>")
+        await self._check_and_edit(message, "pre")
 
     @loader.command(
         ru_doc="Сделать текст моноширинным",
@@ -72,7 +95,7 @@ class MessageEditor(loader.Module):
     )
     async def m(self, message: Message):
         """Make text monospace"""
-        await self._check_and_edit(message, lambda text: f"<code>{utils.escape_html(text)}</code>")
+        await self._check_and_edit(message, "code")
 
     @loader.command(
         ru_doc="Сделать текст цитатой",
@@ -80,7 +103,7 @@ class MessageEditor(loader.Module):
     )
     async def q(self, message: Message):
         """Make text quote"""
-        await self._check_and_edit(message, lambda text: f"<blockquote>{utils.escape_html(text)}</blockquote>")
+        await self._check_and_edit(message, "quote")
 
     @loader.command(
         ru_doc="Сделать текст сворачиваемой цитатой",
@@ -88,4 +111,4 @@ class MessageEditor(loader.Module):
     )
     async def qe(self, message: Message):
         """Make text expandable quote"""
-        await self._check_and_edit(message, lambda text: f"<blockquote expandable>{utils.escape_html(text)}</blockquote>")
+        await self._check_and_edit(message, "quote_expandable")
