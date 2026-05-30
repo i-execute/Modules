@@ -21,6 +21,7 @@ OnlineKeeper
 QRAuthDumper
 RaidProtection
 Robber
+ServerBox
 Session
 StarsX
 Statistics
