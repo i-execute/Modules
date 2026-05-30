@@ -6,7 +6,6 @@ import asyncio
 import re
 from telethon.tl.types import PeerUser, Channel, User
 from telethon.errors import FloodWaitError
-from aiogram.types import LinkPreviewOptions
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
@@ -199,21 +198,14 @@ class Logger(loader.Module):
             logger.error(f"[Logger] Failed to create/get forum topic: {e}")
             return
 
-        lp = LinkPreviewOptions(
-            url=GREETING_MEDIA_URL,
-            prefer_large_media=True,
-            show_above_text=True,
-            is_disabled=False,
-        )
-
         try:
             await self._send_with_flood_wait(
-                self.inline.bot.send_message,
+                self.inline.bot.send_photo,
                 int(f"-100{self._asset_channel}"),
-                self.strings["greeting_first"],
+                photo=GREETING_MEDIA_URL,
+                caption=self.strings["greeting_first"],
                 parse_mode="HTML",
                 message_thread_id=self._logger_topic.id,
-                link_preview_options=lp,
             )
         except Exception:
             try:

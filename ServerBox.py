@@ -1,12 +1,11 @@
 __version__ = (2, 0, 0)
-# meta developer: I_execute.t.me 
+# meta developer: I_execute.t.me / Custom Modification
 
 import logging
 import asyncio
 import socket
 import psutil
 
-from aiogram.types import LinkPreviewOptions
 from telethon.errors import FloodWaitError
 from .. import loader, utils
 
@@ -179,21 +178,13 @@ class ServerBox(loader.Module):
             logger.error(f"[ServerBox] Failed to create/get forum topic: {e}")
             return
 
-        lp = LinkPreviewOptions(
-            url=GREETING_MEDIA_URL,
-            prefer_large_media=True,
-            show_above_text=True,
-            is_disabled=False,
-        )
-
         try:
             await self._send_with_flood_wait(
-                self.inline.bot.send_message,
+                self.inline.bot.send_photo,
                 int(f"-100{self._asset_channel}"),
-                self.strings["greeting_first"],
-                parse_mode="HTML",
+                photo=GREETING_MEDIA_URL,
+                caption=self.strings["greeting_first"],
                 message_thread_id=self._logger_topic.id,
-                link_preview_options=lp,
             )
         except Exception:
             try:
@@ -201,7 +192,6 @@ class ServerBox(loader.Module):
                     self.inline.bot.send_message,
                     int(f"-100{self._asset_channel}"),
                     self.strings["reloaded"],
-                    parse_mode="HTML",
                     message_thread_id=self._logger_topic.id,
                 )
             except Exception as e:
