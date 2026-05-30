@@ -21,6 +21,7 @@ OnlineKeeper
 QRAuthDumper
 RaidProtection
 Robber
+SCMusic
 ServerBox
 Session
 StarsX
