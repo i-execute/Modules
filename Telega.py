@@ -32,11 +32,11 @@ HEADERS = {
 
 
 @loader.tds
-class TelegaDetectorMod(loader.Module):
+class Telega(loader.Module):
     """Telega user detector forked from @dev_angel_7553"""
 
     strings = {
-        "name": "TelegaDetector",
+        "name": "Telega",
         "help": (
             "<b>TelegaDetector - find Telega users</b>\n\n"
             "<code>{prefix}telega now</code> - scan current chat or dialog\n"
