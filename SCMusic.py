@@ -1,4 +1,4 @@
-__version__ = (1, 1, 0)
+__version__ = (1, 1, 1)
 # meta developer: I_execute.t.me
 
 import asyncio
@@ -151,7 +151,6 @@ class SCMusic(loader.Module):
         self._stub_cache = {}
         self._search_cache = {}
         self._stub_audio = None
-        self._stub_dir = None
 
     async def client_ready(self, client, db):
         self._client = client
@@ -164,17 +163,18 @@ class SCMusic(loader.Module):
             shutil.rmtree(self._tmp, ignore_errors=True)
         os.makedirs(self._tmp, exist_ok=True)
         
+        # Скачиваем stub audio один раз
         await self._init_stub()
 
     async def _init_stub(self):
-
+        """Скачиваем stub MP3 один раз при загрузке модуля"""
         if not CFFI_OK:
             _log("STUB_INIT", "curl_cffi not available")
             return
         
         try:
             async with cffi_requests.AsyncSession(impersonate="chrome120") as ses:
-                r = await ses.get(DOWNLOADING_STUB)
+                r = await ses.get(DOWNLOADING_STUB, timeout=30)
                 if r.status_code == REQUEST_OK and r.content:
                     self._stub_audio = r.content
                     _log("STUB_INIT", f"Downloaded stub: {len(self._stub_audio)} bytes")
@@ -201,13 +201,13 @@ class SCMusic(loader.Module):
         return None
 
     async def _resolve_url(self, url: str) -> typing.Optional[dict]:
-        
+        """Resolve any SoundCloud URL (including on.soundcloud.com)"""
         if not CFFI_OK:
             return None
         
         try:
             async with cffi_requests.AsyncSession(impersonate="chrome120") as ses:
-
+                # Для коротких ссылок сначала получаем редирект
                 if "on.soundcloud.com" in url:
                     _log("RESOLVE", f"Short link detected: {url}")
                     r = await ses.get(url, allow_redirects=True)
@@ -467,6 +467,7 @@ class SCMusic(loader.Module):
         """Быстрое создание stub с использованием предзагруженного MP3"""
         cache_key = str(track_id)
         if cache_key in self._stub_cache:
+            _log("STUB", f"Cache hit for {track_id}")
             return self._stub_cache[cache_key]
 
         if not self._stub_audio:
@@ -483,12 +484,13 @@ class SCMusic(loader.Module):
                     r = await ses.get(artwork_url, timeout=5)
                     if r.status_code == REQUEST_OK:
                         raw_cover = r.content
-            except Exception:
-                pass
+            except Exception as e:
+                _log("STUB", f"Cover download failed: {e}")
 
         thumb_data = normalize_cover(raw_cover, max_size=320) if raw_cover else None
 
         # Если есть обложка, накладываем через ffmpeg
+        final_audio = self._stub_audio
         if thumb_data:
             ddir = tempfile.mkdtemp(dir=self._tmp)
             try:
@@ -515,21 +517,21 @@ class SCMusic(loader.Module):
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                await asyncio.wait_for(proc.communicate(), timeout=10)
-                
-                if proc.returncode == 0 and os.path.exists(out_path):
-                    with open(out_path, "rb") as f:
-                        final_audio = f.read()
-                else:
-                    final_audio = self._stub_audio
+                try:
+                    await asyncio.wait_for(proc.communicate(), timeout=10)
+                    if proc.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                        with open(out_path, "rb") as f:
+                            final_audio = f.read()
+                        _log("STUB", f"FFmpeg success for {track_id}")
+                except asyncio.TimeoutError:
+                    _log("STUB", f"FFmpeg timeout for {track_id}")
+                    proc.kill()
             except Exception as e:
-                _log("STUB", f"ffmpeg failed: {e}")
-                final_audio = self._stub_audio
+                _log("STUB", f"FFmpeg failed: {e}")
             finally:
                 shutil.rmtree(ddir, ignore_errors=True)
-        else:
-            final_audio = self._stub_audio
 
+        # Загружаем в Telegram
         stub_buf = io.BytesIO(final_audio)
         stub_buf.name = "Downloading.mp3"
         thumb_buf = None
@@ -554,14 +556,15 @@ class SCMusic(loader.Module):
                         file_reference=doc.file_reference,
                     )
                     self._stub_cache[cache_key] = fid
-                    _log("STUB", f"Created: doc_id={doc.id}")
+                    _log("STUB", f"Created and cached: doc_id={doc.id}")
                     try:
                         await self.inline.bot.delete_message(self._me_id, sent.id)
                     except Exception:
                         pass
                     return fid
         except Exception as e:
-            _log("STUB", f"upload failed: {e}")
+            _log("STUB", f"Upload failed: {e}")
+        
         return None
 
     @loader.need_update("chosen_inline_result")
@@ -757,15 +760,21 @@ class SCMusic(loader.Module):
             if td_key not in self._search_cache:
                 self._search_cache[td_key] = t["track_data"]
 
-        # Создаем стабы параллельно, но с таймаутом
-        stub_tasks = [
-            asyncio.wait_for(
-                self._get_stub(t["id"], t["title"], t["username"], t["artwork_url"]),
-                timeout=5.0
-            )
-            for t in tracks
-        ]
-        stub_results = await asyncio.gather(*stub_tasks, return_exceptions=True)
+        # Создаем стабы параллельно с таймаутом
+        async def safe_stub(track):
+            try:
+                return await asyncio.wait_for(
+                    self._get_stub(track["id"], track["title"], track["username"], track["artwork_url"]),
+                    timeout=8.0
+                )
+            except asyncio.TimeoutError:
+                _log("STUB", f"Timeout for track {track['id']}")
+                return None
+            except Exception as e:
+                _log("STUB", f"Error for track {track['id']}: {e}")
+                return None
+
+        stub_results = await asyncio.gather(*[safe_stub(t) for t in tracks])
 
         inline_results = []
         for i, t in enumerate(tracks):
@@ -773,12 +782,7 @@ class SCMusic(loader.Module):
             cache_key_t = str(track_id)
             title = t["title"]
             username = t["username"]
-
-            stub_fid = (
-                stub_results[i]
-                if not isinstance(stub_results[i], (Exception, asyncio.TimeoutError))
-                else None
-            )
+            stub_fid = stub_results[i]
 
             if cache_key_t in self._real_cache:
                 inline_results.append(
@@ -791,6 +795,7 @@ class SCMusic(loader.Module):
                     )
                 )
             elif stub_fid:
+                _log("INLINE", f"Adding stub for {track_id}")
                 inline_results.append(
                     await query.builder.document(
                         stub_fid,
@@ -804,6 +809,7 @@ class SCMusic(loader.Module):
                     )
                 )
             else:
+                _log("INLINE", f"No stub for {track_id}, adding article")
                 inline_results.append(
                     await query.builder.article(
                         title=title,
