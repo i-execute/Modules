@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 # meta developer: I_execute.t.me forked from @codrago_m
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/YNDXMusic/MetaBanner_new.jpeg
 
@@ -1379,8 +1379,6 @@ class YNDXMusic(loader.Module):
             ],
             silent=True,
         )
-        if is_forum and topic_id:
-            form_kwargs["reply_to"] = topic_id
         await self.inline.form(**form_kwargs)
 
     async def _ymp_link_input(self, call, query: str, session_id: str):
