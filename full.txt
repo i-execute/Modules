@@ -35,4 +35,5 @@ Uploader
 VKMusic
 XRay
 XRayKiller
+YNDXMusic
 YTMusic
