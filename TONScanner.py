@@ -1,21 +1,22 @@
 __version__ = (1, 1, 0)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/TONScanner/MetaBanner.jpeg
-# requires: aiohttp
 
 import re
 import time
 import logging
 import asyncio
 import datetime
+import html
 
 import aiohttp
 
-from aiogram.types import (
-    InlineQuery,
-    InlineQueryResultArticle,
-    InputTextMessageContent,
+from telethon.tl.types import (
+    InputBotInlineResult,
+    InputBotInlineMessageText,
+    InputWebDocument,
 )
+from telethon.utils import html as tl_html
 
 from .. import loader, utils
 
@@ -31,7 +32,7 @@ CACHE_TTL = 120
 
 
 def escape_html(t):
-    return (t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return html.escape(t or "")
 
 
 def nano_to_ton(nano):
@@ -338,15 +339,12 @@ class TONScanner(loader.Module):
     }
 
     def __init__(self):
-        self.inline_bot = None
         self._pending = {}
         self._cache = {}
 
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
-        if hasattr(self, "inline") and hasattr(self.inline, "bot"):
-            self.inline_bot = self.inline.bot
 
     def _cache_get(self, key):
         entry = self._cache.get(key)
@@ -374,23 +372,64 @@ class TONScanner(loader.Module):
             self._cache_set(cache_key, data)
             return data
 
+    def _make_web_document(self, url, mime_type="image/png"):
+        return InputWebDocument(
+            url=url,
+            size=0,
+            mime_type=mime_type,
+            attributes=[],
+        )
+
+    def _make_article(self, uid, title, description, message_text):
+        plain, entities = tl_html.parse(message_text)
+        return InputBotInlineResult(
+            id=uid,
+            type="article",
+            title=title,
+            description=description,
+            thumb=self._make_web_document(BANNER),
+            send_message=InputBotInlineMessageText(
+                message=plain,
+                no_webpage=True,
+                entities=entities or None,
+            ),
+        )
+
     @loader.inline_handler(
         ru_doc="Сканировать TON кошелек",
         en_doc="Scan TON wallet",
     )
-    async def ton_inline_handler(self, query: InlineQuery):
+    async def ton_inline_handler(self, query):
         """Scan TON wallet"""
         text = query.query.strip()
         if text.lower().startswith("ton"):
             text = text[3:].strip()
 
         if not text:
-            await self._answer_hint(query)
+            await query.answer(
+                results=[self._make_article(
+                    f"h_{int(time.time())}",
+                    self.strings["hint_title"],
+                    self.strings["hint_desc"],
+                    self.strings["hint_msg"],
+                )],
+                cache_time=0,
+                private=True,
+            )
             return
 
         addr = text.strip()
         if not TON_ADDR_RE.match(addr):
-            await self._answer_invalid(query)
+            await query.answer(
+                results=[self._make_article(
+                    f"inv_{int(time.time())}",
+                    self.strings["invalid_title"],
+                    self.strings["invalid_desc"],
+                    self.strings["invalid_msg"],
+                )],
+                cache_time=0,
+                private=True,
+            )
             return
 
         cache_key = f"ton_{addr}"
@@ -398,10 +437,28 @@ class TONScanner(loader.Module):
         cached = self._cache_get(cache_key)
         if cached:
             if "error" in cached:
-                await self._answer_error(query, cached["error"])
+                await query.answer(
+                    results=[self._make_article(
+                        f"e_{int(time.time())}",
+                        self.strings["err_title"],
+                        str(cached["error"])[:100],
+                        f"<b>TONScanner:</b> {escape_html(str(cached['error']))}",
+                    )],
+                    cache_time=0,
+                    private=True,
+                )
                 return
             if "message" in cached:
-                await self._answer_result(query, cached)
+                await query.answer(
+                    results=[self._make_article(
+                        f"r_{int(time.time())}",
+                        "TONScanner",
+                        f"Wallet: {cached.get('addr', '?')[:20]}...",
+                        cached["message"],
+                    )],
+                    cache_time=0,
+                    private=True,
+                )
                 return
 
         if cache_key in self._pending:
@@ -413,140 +470,64 @@ class TONScanner(loader.Module):
                 except Exception:
                     res = {"error": "Internal error"}
                 if "error" in res:
-                    await self._answer_error(query, res["error"])
+                    await query.answer(
+                        results=[self._make_article(
+                            f"e_{int(time.time())}",
+                            self.strings["err_title"],
+                            str(res["error"])[:100],
+                            f"<b>TONScanner:</b> {escape_html(str(res['error']))}",
+                        )],
+                        cache_time=0,
+                        private=True,
+                    )
                 elif "message" in res:
-                    await self._answer_result(query, res)
+                    await query.answer(
+                        results=[self._make_article(
+                            f"r_{int(time.time())}",
+                            "TONScanner",
+                            f"Wallet: {res.get('addr', '?')[:20]}...",
+                            res["message"],
+                        )],
+                        cache_time=0,
+                        private=True,
+                    )
                 else:
-                    await self._answer_error(query, "Unknown error")
+                    await query.answer(
+                        results=[self._make_article(
+                            f"e_{int(time.time())}",
+                            self.strings["err_title"],
+                            "Unknown error",
+                            "<b>TONScanner:</b> Unknown error",
+                        )],
+                        cache_time=0,
+                        private=True,
+                    )
                 return
-            await self._answer_loading(query)
+            await query.answer(
+                results=[self._make_article(
+                    f"ld_{int(time.time())}",
+                    self.strings["loading_title"],
+                    self.strings["loading_desc"],
+                    self.strings["loading_msg"],
+                )],
+                cache_time=0,
+                private=True,
+            )
             return
 
         self._pending[cache_key] = asyncio.ensure_future(
             self._scan_task(addr, cache_key)
         )
-        await self._answer_loading(query)
-
-    async def _answer_hint(self, query):
-        try:
-            await self.inline_bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=[
-                    InlineQueryResultArticle(
-                        id=f"h_{int(time.time())}",
-                        title=self.strings["hint_title"],
-                        description=self.strings["hint_desc"],
-                        input_message_content=InputTextMessageContent(
-                            message_text=self.strings["hint_msg"],
-                            parse_mode="HTML",
-                        ),
-                        thumbnail_url=BANNER,
-                        thumbnail_width=640,
-                        thumbnail_height=640,
-                    )
-                ],
-                cache_time=0,
-                is_personal=True,
-            )
-        except Exception:
-            pass
-
-    async def _answer_invalid(self, query):
-        try:
-            await self.inline_bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=[
-                    InlineQueryResultArticle(
-                        id=f"inv_{int(time.time())}",
-                        title=self.strings["invalid_title"],
-                        description=self.strings["invalid_desc"],
-                        input_message_content=InputTextMessageContent(
-                            message_text=self.strings["invalid_msg"],
-                            parse_mode="HTML",
-                        ),
-                        thumbnail_url=BANNER,
-                        thumbnail_width=640,
-                        thumbnail_height=640,
-                    )
-                ],
-                cache_time=0,
-                is_personal=True,
-            )
-        except Exception:
-            pass
-
-    async def _answer_loading(self, query):
-        try:
-            await self.inline_bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=[
-                    InlineQueryResultArticle(
-                        id=f"ld_{int(time.time())}",
-                        title=self.strings["loading_title"],
-                        description=self.strings["loading_desc"],
-                        input_message_content=InputTextMessageContent(
-                            message_text=self.strings["loading_msg"],
-                            parse_mode="HTML",
-                        ),
-                        thumbnail_url=BANNER,
-                        thumbnail_width=640,
-                        thumbnail_height=640,
-                    )
-                ],
-                cache_time=0,
-                is_personal=True,
-            )
-        except Exception:
-            pass
-
-    async def _answer_result(self, query, data):
-        try:
-            await self.inline_bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=[
-                    InlineQueryResultArticle(
-                        id=f"r_{int(time.time())}",
-                        title="TONScanner",
-                        description=f"Wallet: {data.get('addr', '?')[:20]}...",
-                        input_message_content=InputTextMessageContent(
-                            message_text=data["message"],
-                            parse_mode="HTML",
-                            disable_web_page_preview=True,
-                        ),
-                        thumbnail_url=BANNER,
-                        thumbnail_width=640,
-                        thumbnail_height=640,
-                    )
-                ],
-                cache_time=0,
-                is_personal=True,
-            )
-        except Exception:
-            pass
-
-    async def _answer_error(self, query, err):
-        try:
-            await self.inline_bot.answer_inline_query(
-                inline_query_id=query.id,
-                results=[
-                    InlineQueryResultArticle(
-                        id=f"e_{int(time.time())}",
-                        title=self.strings["err_title"],
-                        description=str(err)[:100],
-                        input_message_content=InputTextMessageContent(
-                            message_text=f"<b>TONScanner:</b> {escape_html(str(err))}",
-                            parse_mode="HTML",
-                        ),
-                        thumbnail_url=BANNER,
-                        thumbnail_width=640,
-                        thumbnail_height=640,
-                    )
-                ],
-                cache_time=0,
-                is_personal=True,
-            )
-        except Exception:
-            pass
+        await query.answer(
+            results=[self._make_article(
+                f"ld_{int(time.time())}",
+                self.strings["loading_title"],
+                self.strings["loading_desc"],
+                self.strings["loading_msg"],
+            )],
+            cache_time=0,
+            private=True,
+        )
 
     async def on_unload(self):
         for fut in self._pending.values():
