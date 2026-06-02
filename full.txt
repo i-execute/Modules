@@ -4,6 +4,7 @@ Buttons
 ChatRecovery
 DeleteAvka
 DeleteMusic
+DepInvoce
 Deleter
 DevTool
 Grabber
