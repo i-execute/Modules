@@ -1,5 +1,5 @@
 __version__ = (2, 0, 0)
-# meta developer: I_execute.t.me / Custom Modification
+# meta developer: I_execute.t.me 
 
 import logging
 import asyncio

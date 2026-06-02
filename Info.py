@@ -54,28 +54,28 @@ class Info(loader.Module):
     strings = {
         "name": "Info",
         "prem_user_full": (
-            "<blockquote><b>┌ [</b><tg-emoji emoji-id=5188516803638236397>🔝</tg-emoji><b>] Name:</b> {name}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188171393778359433>🤟</tg-emoji><b>] Username:</b> {username}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188654053613150361>📀</tg-emoji><b>] User ID:</b> <code>{user_id}</code>\n"
-            "<b>└ [</b><tg-emoji emoji-id=5188420042320020352>🪙</tg-emoji><b>] DC:</b> {dc}</blockquote>"
+            "<blockquote><b>┌ [</b><tg-emoji emoji-id=\"5251311523313260721\">🔝</tg-emoji><b>] Name:</b> {name}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251216063370141014\">🤟</tg-emoji><b>] Username:</b> {username}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251678987830204331\">📀</tg-emoji><b>] User ID:</b> <code>{user_id}</code>\n"
+            "<b>└ [</b><tg-emoji emoji-id=\"5251350989767742618\">🪙</tg-emoji><b>] DC:</b> {dc}</blockquote>"
         ),
         "prem_user_no_dc": (
-            "<blockquote><b>┌ [</b><tg-emoji emoji-id=5188516803638236397>🔝</tg-emoji><b>] Name:</b> {name}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188171393778359433>🤟</tg-emoji><b>] Username:</b> {username}\n"
-            "<b>└ [</b><tg-emoji emoji-id=5188654053613150361>📀</tg-emoji><b>] User ID:</b> <code>{user_id}</code></blockquote>"
+            "<blockquote><b>┌ [</b><tg-emoji emoji-id=\"5251311523313260721\">🔝</tg-emoji><b>] Name:</b> {name}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251216063370141014\">🤟</tg-emoji><b>] Username:</b> {username}\n"
+            "<b>└ [</b><tg-emoji emoji-id=\"5251678987830204331\">📀</tg-emoji><b>] User ID:</b> <code>{user_id}</code></blockquote>"
         ),
         "prem_chat_full": (
-            "<blockquote><b>┌ [</b><tg-emoji emoji-id=5188516803638236397>🔝</tg-emoji><b>] Name:</b> {name}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188171393778359433>🤟</tg-emoji><b>] Username:</b> {username}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188654053613150361>📀</tg-emoji><b>] Chat ID:</b> <code>{chat_id}</code>\n"
-            "├ <b>[</b><tg-emoji emoji-id=5190758450149233016>🌡</tg-emoji><b>] Type:</b> {type}\n"
-            "<b>└ [</b><tg-emoji emoji-id=5188420042320020352>🪙</tg-emoji><b>] DC:</b> {dc}</blockquote>"
+            "<blockquote><b>┌ [</b><tg-emoji emoji-id=\"5251311523313260721\">🔝</tg-emoji><b>] Name:</b> {name}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251216063370141014\">🤟</tg-emoji><b>] Username:</b> {username}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251678987830204331\">📀</tg-emoji><b>] Chat ID:</b> <code>{chat_id}</code>\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5253884208723567040\">🌡</tg-emoji><b>] Type:</b> {type}\n"
+            "<b>└ [</b><tg-emoji emoji-id=\"5251350989767742618\">🪙</tg-emoji><b>] DC:</b> {dc}</blockquote>"
         ),
         "prem_chat_no_dc": (
-            "<blockquote><b>┌ [</b><tg-emoji emoji-id=5188516803638236397>🔝</tg-emoji><b>] Name:</b> {name}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188171393778359433>🤟</tg-emoji><b>] Username:</b> {username}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188654053613150361>📀</tg-emoji><b>] Chat ID:</b> <code>{chat_id}</code>\n"
-            "<b>└ [</b><tg-emoji emoji-id=5190758450149233016>🌡</tg-emoji><b>] Type:</b> {type}</blockquote>"
+            "<blockquote><b>┌ [</b><tg-emoji emoji-id=\"5251311523313260721\">🔝</tg-emoji><b>] Name:</b> {name}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251216063370141014\">🤟</tg-emoji><b>] Username:</b> {username}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251678987830204331\">📀</tg-emoji><b>] Chat ID:</b> <code>{chat_id}</code>\n"
+            "<b>└ [</b><tg-emoji emoji-id=\"5253884208723567040\">🌡</tg-emoji><b>] Type:</b> {type}</blockquote>"
         ),
         "noprem_user_full": (
             "<blockquote><b>┌[ Name:</b> {name} <b>]</b>\n"
@@ -101,10 +101,10 @@ class Info(loader.Module):
             "├<b>[ Chat ID:</b> <code>{chat_id}</code> <b>]</b>\n"
             "<b>└[ Type:</b> {type} <b>]</b></blockquote>"
         ),
-        "error_reply": "<tg-emoji emoji-id=5188512006159766094>😵</tg-emoji><b> Error: </b>No reply or invalid username",
-        "no_photo_msg": "<tg-emoji emoji-id=5188512006159766094>😵</tg-emoji><b> Error: </b>User hid avatar or blocked you",
-        "no_chat_photo": "<tg-emoji emoji-id=5188512006159766094>😵</tg-emoji><b> Error: </b>Chat has no avatar",
-        "not_a_chat": "<tg-emoji emoji-id=5188512006159766094>😵</tg-emoji><b> Error: </b>This command only works in groups and channels",
+        "error_reply": "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Error: </b>No reply or invalid username",
+        "no_photo_msg": "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Error: </b>User hid avatar or blocked you",
+        "no_chat_photo": "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Error: </b>Chat has no avatar",
+        "not_a_chat": "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Error: </b>This command only works in groups and channels",
         "error_reply_noprem": "<b>Error:</b> No reply or invalid username",
         "no_photo_msg_noprem": "<b>Error:</b> User hid avatar or blocked you",
         "no_chat_photo_noprem": "<b>Error:</b> Chat has no avatar",
@@ -116,28 +116,28 @@ class Info(loader.Module):
 
     strings_ru = {
         "prem_user_full": (
-            "<blockquote><b>┌ [</b><tg-emoji emoji-id=5188516803638236397>🔝</tg-emoji><b>] Name:</b> {name}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188171393778359433>🤟</tg-emoji><b>] Username:</b> {username}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188654053613150361>📀</tg-emoji><b>] User ID:</b> <code>{user_id}</code>\n"
-            "<b>└ [</b><tg-emoji emoji-id=5188420042320020352>🪙</tg-emoji><b>] DC:</b> {dc}</blockquote>"
+            "<blockquote><b>┌ [</b><tg-emoji emoji-id=\"5251311523313260721\">🔝</tg-emoji><b>] Name:</b> {name}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251216063370141014\">🤟</tg-emoji><b>] Username:</b> {username}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251678987830204331\">📀</tg-emoji><b>] User ID:</b> <code>{user_id}</code>\n"
+            "<b>└ [</b><tg-emoji emoji-id=\"5251350989767742618\">🪙</tg-emoji><b>] DC:</b> {dc}</blockquote>"
         ),
         "prem_user_no_dc": (
-            "<blockquote><b>┌ [</b><tg-emoji emoji-id=5188516803638236397>🔝</tg-emoji><b>] Name:</b> {name}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188171393778359433>🤟</tg-emoji><b>] Username:</b> {username}\n"
-            "<b>└ [</b><tg-emoji emoji-id=5188654053613150361>📀</tg-emoji><b>] User ID:</b> <code>{user_id}</code></blockquote>"
+            "<blockquote><b>┌ [</b><tg-emoji emoji-id=\"5251311523313260721\">🔝</tg-emoji><b>] Name:</b> {name}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251216063370141014\">🤟</tg-emoji><b>] Username:</b> {username}\n"
+            "<b>└ [</b><tg-emoji emoji-id=\"5251678987830204331\">📀</tg-emoji><b>] User ID:</b> <code>{user_id}</code></blockquote>"
         ),
         "prem_chat_full": (
-            "<blockquote><b>┌ [</b><tg-emoji emoji-id=5188516803638236397>🔝</tg-emoji><b>] Name:</b> {name}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188171393778359433>🤟</tg-emoji><b>] Username:</b> {username}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188654053613150361>📀</tg-emoji><b>] Chat ID:</b> <code>{chat_id}</code>\n"
-            "├ <b>[</b><tg-emoji emoji-id=5190758450149233016>🌡</tg-emoji><b>] Type:</b> {type}\n"
-            "<b>└ [</b><tg-emoji emoji-id=5188420042320020352>🪙</tg-emoji><b>] DC:</b> {dc}</blockquote>"
+            "<blockquote><b>┌ [</b><tg-emoji emoji-id=\"5251311523313260721\">🔝</tg-emoji><b>] Name:</b> {name}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251216063370141014\">🤟</tg-emoji><b>] Username:</b> {username}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251678987830204331\">📀</tg-emoji><b>] Chat ID:</b> <code>{chat_id}</code>\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5253884208723567040\">🌡</tg-emoji><b>] Type:</b> {type}\n"
+            "<b>└ [</b><tg-emoji emoji-id=\"5251350989767742618\">🪙</tg-emoji><b>] DC:</b> {dc}</blockquote>"
         ),
         "prem_chat_no_dc": (
-            "<blockquote><b>┌ [</b><tg-emoji emoji-id=5188516803638236397>🔝</tg-emoji><b>] Name:</b> {name}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188171393778359433>🤟</tg-emoji><b>] Username:</b> {username}\n"
-            "├ <b>[</b><tg-emoji emoji-id=5188654053613150361>📀</tg-emoji><b>] Chat ID:</b> <code>{chat_id}</code>\n"
-            "<b>└ [</b><tg-emoji emoji-id=5190758450149233016>🌡</tg-emoji><b>] Type:</b> {type}</blockquote>"
+            "<blockquote><b>┌ [</b><tg-emoji emoji-id=\"5251311523313260721\">🔝</tg-emoji><b>] Name:</b> {name}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251216063370141014\">🤟</tg-emoji><b>] Username:</b> {username}\n"
+            "├ <b>[</b><tg-emoji emoji-id=\"5251678987830204331\">📀</tg-emoji><b>] Chat ID:</b> <code>{chat_id}</code>\n"
+            "<b>└ [</b><tg-emoji emoji-id=\"5253884208723567040\">🌡</tg-emoji><b>] Type:</b> {type}</blockquote>"
         ),
         "noprem_user_full": (
             "<blockquote><b>┌[ Name:</b> {name} <b>]</b>\n"
@@ -163,10 +163,10 @@ class Info(loader.Module):
             "├<b>[ Chat ID:</b> <code>{chat_id}</code> <b>]</b>\n"
             "<b>└[ Type:</b> {type} <b>]</b></blockquote>"
         ),
-        "error_reply": "<tg-emoji emoji-id=5188512006159766094>😵</tg-emoji><b> Error: </b>Нет реплая или некорректный юзернейм",
-        "no_photo_msg": "<tg-emoji emoji-id=5188512006159766094>😵</tg-emoji><b> Error: </b>Пользователь скрыл аватарку или заблокировал тебя",
-        "no_chat_photo": "<tg-emoji emoji-id=5188512006159766094>😵</tg-emoji><b> Error: </b>У чата нет аватарки",
-        "not_a_chat": "<tg-emoji emoji-id=5188512006159766094>😵</tg-emoji><b> Error: </b>Эта команда работает только в группах и каналах",
+        "error_reply": "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Error: </b>Нет реплая или некорректный юзернейм",
+        "no_photo_msg": "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Error: </b>Пользователь скрыл аватарку или заблокировал тебя",
+        "no_chat_photo": "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Error: </b>У чата нет аватарки",
+        "not_a_chat": "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Error: </b>Эта команда работает только в группах и каналах",
         "error_reply_noprem": "<b>Error:</b> Нет реплая или некорректный юзернейм",
         "no_photo_msg_noprem": "<b>Error:</b> Пользователь скрыл аватарку или заблокировал тебя",
         "no_chat_photo_noprem": "<b>Error:</b> У чата нет аватарки",

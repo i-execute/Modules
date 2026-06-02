@@ -1,7 +1,6 @@
 __version__ = (1, 2, 3)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DevTool/MetaBanner.jpeg
-# requires: aiohttp
 
 import time
 import html
@@ -173,7 +172,6 @@ class _DetailParser(HTMLParser):
             typ = row[1]
             if not name or name in ("Name", "Type"):
                 continue
-            # skip error table rows: type field contains spaces (error description) or name is numeric
             if not typ or " " in typ or name[0].isdigit():
                 continue
             rows.append(row)
