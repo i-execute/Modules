@@ -14,7 +14,7 @@ class NewYear(loader.Module):
     strings = {
         "name": "NewYear",
         "prem_help_text": (
-            "<emoji document_id=5319189482811985933>☃️</emoji><b> New Year module commands:</b>\n"
+            "<tg-emoji emoji-id=\"5251548158831400680\">☃️</tg-emoji><b> New Year module commands:</b>\n"
             "<blockquote expandable>"
             "<b>{prefix}new year</b> - show time until New Year\n"
             "<b>{prefix}new set [timezone]</b> - set timezone (from -12 to +12)\n"
@@ -41,17 +41,17 @@ class NewYear(loader.Module):
         ),
         "prem_new_year_template": (
             "<blockquote>"
-            "<emoji document_id=5318911370794671211>🎩</emoji><b> Time until New Year {year}:</b>"
+            "<tg-emoji emoji-id=\"5251721344797678028\">🎩</tg-emoji><b> Time until New Year {year}:</b>"
             "</blockquote>\n"
             "<blockquote>"
-            "<emoji document_id=5319037874761405673>🎆</emoji><b> Days: </b><code>{days}</code>\n"
-            "<emoji document_id=5319072286039382810>🕯</emoji><b> Hours: </b><code>{hours}</code>\n"
-            "<emoji document_id=5316650362571101462>🫐</emoji><b> Minutes: </b><code>{minutes}</code>\n"
-            "<emoji document_id=5316670952644316954>🎄</emoji><b> Seconds: </b><code>{seconds}</code>"
+            "<tg-emoji emoji-id=\"5251534981871736729\">🎆</tg-emoji><b> Days: </b><code>{days}</code>\n"
+            "<tg-emoji emoji-id=\"5251210071890762657\">🕯</tg-emoji><b> Hours: </b><code>{hours}</code>\n"
+            "<tg-emoji emoji-id=\"5251413099289811996\">🫐</tg-emoji><b> Minutes: </b><code>{minutes}</code>\n"
+            "<tg-emoji emoji-id=\"5253679386028187387\">🎄</tg-emoji><b> Seconds: </b><code>{seconds}</code>"
             "</blockquote>\n"
             "<blockquote>"
-            "<emoji document_id=5316829604441265941>🍪</emoji><b> Timezone: </b>UTC{timezone_str}\n"
-            "<emoji document_id=5316792757916833948>☕️</emoji><b> Current time: </b>{current_time}"
+            "<tg-emoji emoji-id=\"5251354202403282317\">🍪</tg-emoji><b> Timezone: </b>UTC{timezone_str}\n"
+            "<tg-emoji emoji-id=\"5251362057898466040\">☕️</tg-emoji><b> Current time: </b>{current_time}"
             "</blockquote>"
         ),
         "noprem_new_year_template": (
@@ -69,10 +69,10 @@ class NewYear(loader.Module):
             "<b>Current time: </b>{current_time}"
             "</blockquote>"
         ),
-        "prem_timezone_set": "<emoji document_id=5318910065124615176>👌</emoji><b> Timezone set: </b>UTC{timezone_str}",
+        "prem_timezone_set": "<tg-emoji emoji-id=\"5251215414830078979\">👌</tg-emoji><b> Timezone set: </b>UTC{timezone_str}",
         "noprem_timezone_set": "<b>Timezone set: </b>UTC{timezone_str}",
         "prem_media_added": (
-            "<emoji document_id=5318910065124615176>👌</emoji><b> Media file added!</b>\n"
+            "<tg-emoji emoji-id=\"5251215414830078979\">👌</tg-emoji><b> Media file added!</b>\n"
             "<blockquote>It will now be sent with the {prefix}new year command</blockquote>"
         ),
         "noprem_media_added": (
@@ -80,7 +80,7 @@ class NewYear(loader.Module):
             "<blockquote>It will now be sent with the {prefix}new year command</blockquote>"
         ),
         "prem_invalid_timezone": (
-            "<emoji document_id=5316833049005035923>😵</emoji><b> Invalid timezone!</b>\n"
+            "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Invalid timezone!</b>\n"
             "<blockquote>Use a number from -12 to +12</blockquote>"
         ),
         "noprem_invalid_timezone": (
@@ -88,7 +88,7 @@ class NewYear(loader.Module):
             "<blockquote>Use a number from -12 to +12</blockquote>"
         ),
         "prem_invalid_media": (
-            "<emoji document_id=5316833049005035923>😵</emoji><b> Provide a media link or reply to a media file!</b>\n"
+            "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Provide a media link or reply to a media file!</b>\n"
             "<blockquote>Example: {prefix}new add https://example.com/image.gif</blockquote>"
         ),
         "noprem_invalid_media": (
@@ -96,7 +96,7 @@ class NewYear(loader.Module):
             "<blockquote>Example: {prefix}new add https://example.com/image.gif</blockquote>"
         ),
         "prem_media_deleted_error": (
-            "<emoji document_id=5316833049005035923>😵</emoji><b> Media file is no longer available!</b>\n"
+            "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Media file is no longer available!</b>\n"
             "<blockquote>Add a new media file with {prefix}new add</blockquote>\n"
             "<blockquote>This message only appears on error, for the module to work correctly, your media value in cfg has just been reset</blockquote>"
         ),
@@ -106,7 +106,7 @@ class NewYear(loader.Module):
             "<blockquote>This message only appears on error, for the module to work correctly, your media value in cfg has just been reset</blockquote>"
         ),
         "prem_no_media_in_reply": (
-            "<emoji document_id=5316833049005035923>😵</emoji><b> No media in reply!</b>\n"
+            "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> No media in reply!</b>\n"
             "<blockquote>Reply to a photo, video or GIF</blockquote>"
         ),
         "noprem_no_media_in_reply": (
@@ -114,7 +114,7 @@ class NewYear(loader.Module):
             "<blockquote>Reply to a photo, video or GIF</blockquote>"
         ),
         "prem_media_load_error": (
-            "<emoji document_id=5316833049005035923>😵</emoji><b> Failed to load media!</b>\n"
+            "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Failed to load media!</b>\n"
             "<blockquote>Check the link or try another file</blockquote>"
         ),
         "noprem_media_load_error": (
@@ -122,22 +122,22 @@ class NewYear(loader.Module):
             "<blockquote>Check the link or try another file</blockquote>"
         ),
         "prem_media_preview_error": (
-            "<emoji document_id=5316833049005035923>😵</emoji><b> Failed to load media preview from this link!</b>\n"
+            "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Failed to load media preview from this link!</b>\n"
             "<blockquote>The link may not support previews. Try another link or reply to a media file directly</blockquote>"
         ),
         "noprem_media_preview_error": (
             "<b>Failed to load media preview from this link!</b>\n"
             "<blockquote>The link may not support previews. Try another link or reply to a media file directly</blockquote>"
         ),
-        "prem_media_removed": "<emoji document_id=5319222343606773249>❌</emoji><b> Media file removed!</b>",
+        "prem_media_removed": "<tg-emoji emoji-id=\"5251720043422585661\">❌</tg-emoji><b> Media file removed!</b>",
         "noprem_media_removed": "<b>Media file removed!</b>",
-        "prem_saved_caption": "<emoji document_id=5316890674581248786>🪟</emoji><b> Do not delete - media for the New Year module</b>",
+        "prem_saved_caption": "<tg-emoji emoji-id=\"5251350293983041557\">🪟</tg-emoji><b> Do not delete - media for the New Year module</b>",
         "noprem_saved_caption": "<b>Do not delete - media for the New Year module</b>",
     }
 
     strings_ru = {
         "prem_help_text": (
-            "<emoji document_id=5319189482811985933>☃️</emoji><b> Команды модуля New Year:</b>\n"
+            "<tg-emoji emoji-id=\"5251548158831400680\">☃️</tg-emoji><b> Команды модуля New Year:</b>\n"
             "<blockquote expandable>"
             "<b>{prefix}new year</b> - показать время до Нового года\n"
             "<b>{prefix}new set [часовой пояс]</b> - установить часовой пояс (от -12 до +12)\n"
@@ -164,17 +164,17 @@ class NewYear(loader.Module):
         ),
         "prem_new_year_template": (
             "<blockquote>"
-            "<emoji document_id=5318911370794671211>🎩</emoji><b> До Нового {year} года осталось:</b>"
+            "<tg-emoji emoji-id=\"5251721344797678028\">🎩</tg-emoji><b> До Нового {year} года осталось:</b>"
             "</blockquote>\n"
             "<blockquote>"
-            "<emoji document_id=5319037874761405673>🎆</emoji><b> Дней: </b><code>{days}</code>\n"
-            "<emoji document_id=5319072286039382810>🕯</emoji><b> Часов: </b><code>{hours}</code>\n"
-            "<emoji document_id=5316650362571101462>🫐</emoji><b> Минут: </b><code>{minutes}</code>\n"
-            "<emoji document_id=5316670952644316954>🎄</emoji><b> Секунд: </b><code>{seconds}</code>"
+            "<tg-emoji emoji-id=\"5251534981871736729\">🎆</tg-emoji><b> Дней: </b><code>{days}</code>\n"
+            "<tg-emoji emoji-id=\"5251210071890762657\">🕯</tg-emoji><b> Часов: </b><code>{hours}</code>\n"
+            "<tg-emoji emoji-id=\"5251413099289811996\">🫐</tg-emoji><b> Минут: </b><code>{minutes}</code>\n"
+            "<tg-emoji emoji-id=\"5253679386028187387\">🎄</tg-emoji><b> Секунд: </b><code>{seconds}</code>"
             "</blockquote>\n"
             "<blockquote>"
-            "<emoji document_id=5316829604441265941>🍪</emoji><b> Часовой пояс: </b>UTC{timezone_str}\n"
-            "<emoji document_id=5316792757916833948>☕️</emoji><b> Текущее время: </b>{current_time}"
+            "<tg-emoji emoji-id=\"5251354202403282317\">🍪</tg-emoji><b> Часовой пояс: </b>UTC{timezone_str}\n"
+            "<tg-emoji emoji-id=\"5251362057898466040\">☕️</tg-emoji><b> Текущее время: </b>{current_time}"
             "</blockquote>"
         ),
         "noprem_new_year_template": (
@@ -192,10 +192,10 @@ class NewYear(loader.Module):
             "<b>Текущее время: </b>{current_time}"
             "</blockquote>"
         ),
-        "prem_timezone_set": "<emoji document_id=5318910065124615176>👌</emoji><b> Часовой пояс установлен: </b>UTC{timezone_str}",
+        "prem_timezone_set": "<tg-emoji emoji-id=\"5251215414830078979\">👌</tg-emoji><b> Часовой пояс установлен: </b>UTC{timezone_str}",
         "noprem_timezone_set": "<b>Часовой пояс установлен: </b>UTC{timezone_str}",
         "prem_media_added": (
-            "<emoji document_id=5318910065124615176>👌</emoji><b> Медиафайл добавлен!</b>\n"
+            "<tg-emoji emoji-id=\"5251215414830078979\">👌</tg-emoji><b> Медиафайл добавлен!</b>\n"
             "<blockquote>Теперь он будет отправляться с командой {prefix}new year</blockquote>"
         ),
         "noprem_media_added": (
@@ -203,7 +203,7 @@ class NewYear(loader.Module):
             "<blockquote>Теперь он будет отправляться с командой {prefix}new year</blockquote>"
         ),
         "prem_invalid_timezone": (
-            "<emoji document_id=5316833049005035923>😵</emoji><b> Неверный часовой пояс!</b>\n"
+            "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Неверный часовой пояс!</b>\n"
             "<blockquote>Используйте число от -12 до +12</blockquote>"
         ),
         "noprem_invalid_timezone": (
@@ -211,7 +211,7 @@ class NewYear(loader.Module):
             "<blockquote>Используйте число от -12 до +12</blockquote>"
         ),
         "prem_invalid_media": (
-            "<emoji document_id=5316833049005035923>😵</emoji><b> Укажите ссылку на медиафайл или ответьте этой командой на него!</b>\n"
+            "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Укажите ссылку на медиафайл или ответьте этой командой на него!</b>\n"
             "<blockquote>Пример: {prefix}new add https://example.com/image.gif</blockquote>"
         ),
         "noprem_invalid_media": (
@@ -219,7 +219,7 @@ class NewYear(loader.Module):
             "<blockquote>Пример: {prefix}new add https://example.com/image.gif</blockquote>"
         ),
         "prem_media_deleted_error": (
-            "<emoji document_id=5316833049005035923>😵</emoji><b> Медиафайл больше не доступен!</b>\n"
+            "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Медиафайл больше не доступен!</b>\n"
             "<blockquote>Добавьте новый медиафайл командой {prefix}new add</blockquote>\n"
             "<blockquote>Это сообщение появляется только при ошибке, для корректной работы модуля, значение вашего медиафайла в cfg только что было сброшено</blockquote>"
         ),
@@ -229,7 +229,7 @@ class NewYear(loader.Module):
             "<blockquote>Это сообщение появляется только при ошибке, для корректной работы модуля, значение вашего медиафайла в cfg только что было сброшено</blockquote>"
         ),
         "prem_no_media_in_reply": (
-            "<emoji document_id=5316833049005035923>😵</emoji><b> В реплае нет медиа!</b>\n"
+            "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> В реплае нет медиа!</b>\n"
             "<blockquote>Ответьте на фото, видео или GIF</blockquote>"
         ),
         "noprem_no_media_in_reply": (
@@ -237,7 +237,7 @@ class NewYear(loader.Module):
             "<blockquote>Ответьте на фото, видео или GIF</blockquote>"
         ),
         "prem_media_load_error": (
-            "<emoji document_id=5316833049005035923>😵</emoji><b> Не удалось загрузить медиа!</b>\n"
+            "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Не удалось загрузить медиа!</b>\n"
             "<blockquote>Проверьте ссылку или попробуйте другой файл</blockquote>"
         ),
         "noprem_media_load_error": (
@@ -245,16 +245,16 @@ class NewYear(loader.Module):
             "<blockquote>Проверьте ссылку или попробуйте другой файл</blockquote>"
         ),
         "prem_media_preview_error": (
-            "<emoji document_id=5316833049005035923>😵</emoji><b> Не удалось загрузить превью медиа по этой ссылке!</b>\n"
+            "<tg-emoji emoji-id=\"5251663040616635665\">😵</tg-emoji><b> Не удалось загрузить превью медиа по этой ссылке!</b>\n"
             "<blockquote>Возможно, ссылка не поддерживает превью. Попробуйте другую ссылку или ответьте на медиафайл напрямую</blockquote>"
         ),
         "noprem_media_preview_error": (
             "<b>Не удалось загрузить превью медиа по этой ссылке!</b>\n"
             "<blockquote>Возможно, ссылка не поддерживает превью. Попробуйте другую ссылку или ответьте на медиафайл напрямую</blockquote>"
         ),
-        "prem_media_removed": "<emoji document_id=5319222343606773249>❌</emoji><b> Медиафайл удален!</b>",
+        "prem_media_removed": "<tg-emoji emoji-id=\"5251720043422585661\">❌</tg-emoji><b> Медиафайл удален!</b>",
         "noprem_media_removed": "<b>Медиафайл удален!</b>",
-        "prem_saved_caption": "<emoji document_id=5316890674581248786>🪟</emoji><b> Не удалять - медиа для модуля New Year</b>",
+        "prem_saved_caption": "<tg-emoji emoji-id=\"5251350293983041557\">🪟</tg-emoji><b> Не удалять - медиа для модуля New Year</b>",
         "noprem_saved_caption": "<b>Не удалять - медиа для модуля New Year</b>",
     }
 
