@@ -2,6 +2,7 @@ AdminTool
 AutoAvka
 Buttons
 ChatRecovery
+DeleteAvka
 DeleteMusic
 Deleter
 DevTool
