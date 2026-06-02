@@ -1,12 +1,15 @@
-__version__ = (2, 0, 0)
+__version__ = (2, 1, 0)
 # meta developer: I_execute.t.me 
 
 import logging
 import asyncio
 import socket
 import psutil
+import time
 
 from telethon.errors import FloodWaitError
+from telethon.tl.functions.messages import EditMessageRequest
+from telethon.tl.types import InputMediaWebPage
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
@@ -16,7 +19,7 @@ GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/S
 
 @loader.tds
 class ServerBox(loader.Module):
-    """Server resource monitor - CPU, RAM, swap, hostname"""
+    """Server resource monitor with CPU, RAM, swap alerts"""
 
     strings = {
         "name": "ServerBox",
@@ -143,10 +146,10 @@ class ServerBox(loader.Module):
                 validator=loader.validators.Float(),
             ),
             loader.ConfigValue(
-                "check_interval",
-                10,
-                "Resource check interval (seconds)",
-                validator=loader.validators.Integer(minimum=3),
+                "notification_interval",
+                5,
+                "Notification interval (seconds)",
+                validator=loader.validators.Integer(minimum=1),
             ),
         )
 
@@ -154,6 +157,9 @@ class ServerBox(loader.Module):
         self._logger_topic = None
         self._asset_channel = None
         self._monitor_task = None
+        self._last_cpu_alert = 0
+        self._last_ram_alert = 0
+        self._last_swap_alert = 0
 
         psutil.cpu_percent(interval=None)
 
@@ -179,19 +185,43 @@ class ServerBox(loader.Module):
             return
 
         try:
-            await self._send_with_flood_wait(
-                self.inline.bot.send_photo,
-                int(f"-100{self._asset_channel}"),
-                photo=GREETING_MEDIA_URL,
-                caption=self.strings["greeting_first"],
+            chat_id = int(f"-100{self._asset_channel}")
+            msg_text, entities = await self.inline.bot._parse_message_text(self.strings["greeting_first"], "html")
+            
+            msg = await self._send_with_flood_wait(
+                self.inline.bot.send_message,
+                chat_id,
+                msg_text,
+                parse_mode=None,
+                entities=entities,
                 message_thread_id=self._logger_topic.id,
             )
+            
+            if msg:
+                try:
+                    peer = await self.inline.bot.get_input_entity(chat_id)
+                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                    reply_markup = current_msg.reply_markup if current_msg else None
+                    
+                    await self.inline.bot(EditMessageRequest(
+                        peer=peer,
+                        id=msg.id,
+                        message=msg_text,
+                        media=InputMediaWebPage(url=GREETING_MEDIA_URL, optional=True, force_large_media=True),
+                        invert_media=True,
+                        reply_markup=reply_markup,
+                        entities=entities,
+                        no_webpage=False,
+                    ))
+                except Exception as e:
+                    logger.error(f"[ServerBox] Failed to add preview: {e}")
         except Exception:
             try:
                 await self._send_with_flood_wait(
                     self.inline.bot.send_message,
                     int(f"-100{self._asset_channel}"),
                     self.strings["reloaded"],
+                    parse_mode="HTML",
                     message_thread_id=self._logger_topic.id,
                 )
             except Exception as e:
@@ -262,44 +292,51 @@ class ServerBox(loader.Module):
     async def _monitor_loop(self):
         while True:
             try:
-                interval = max(3, self.config["check_interval"])
-                await asyncio.sleep(interval)
+                await asyncio.sleep(1)
 
                 hostname = self._get_hostname()
+                now = time.time()
+                interval = self.config["notification_interval"]
 
                 cpu = self._get_cpu()
                 if cpu >= self.config["cpu_threshold"]:
-                    await self._send_log(
-                        self.strings["cpu_alert"].format(
-                            cpu=round(cpu, 1),
-                            threshold=self.config["cpu_threshold"],
-                            hostname=hostname,
+                    if now - self._last_cpu_alert >= interval:
+                        await self._send_log(
+                            self.strings["cpu_alert"].format(
+                                cpu=round(cpu, 1),
+                                threshold=self.config["cpu_threshold"],
+                                hostname=hostname,
+                            )
                         )
-                    )
+                        self._last_cpu_alert = now
 
                 ram = self._get_ram()
                 if ram["percent"] >= self.config["ram_threshold"]:
-                    await self._send_log(
-                        self.strings["ram_alert"].format(
-                            ram=round(ram["percent"], 1),
-                            used=ram["used"],
-                            total=ram["total"],
-                            threshold=self.config["ram_threshold"],
-                            hostname=hostname,
+                    if now - self._last_ram_alert >= interval:
+                        await self._send_log(
+                            self.strings["ram_alert"].format(
+                                ram=round(ram["percent"], 1),
+                                used=ram["used"],
+                                total=ram["total"],
+                                threshold=self.config["ram_threshold"],
+                                hostname=hostname,
+                            )
                         )
-                    )
+                        self._last_ram_alert = now
 
                 swap = self._get_swap()
                 if swap["total"] > 0 and swap["percent"] >= self.config["swap_threshold"]:
-                    await self._send_log(
-                        self.strings["swap_alert"].format(
-                            swap=round(swap["percent"], 1),
-                            used=swap["used"],
-                            total=swap["total"],
-                            threshold=self.config["swap_threshold"],
-                            hostname=hostname,
+                    if now - self._last_swap_alert >= interval:
+                        await self._send_log(
+                            self.strings["swap_alert"].format(
+                                swap=round(swap["percent"], 1),
+                                used=swap["used"],
+                                total=swap["total"],
+                                threshold=self.config["swap_threshold"],
+                                hostname=hostname,
+                            )
                         )
-                    )
+                        self._last_swap_alert = now
 
             except asyncio.CancelledError:
                 break

@@ -1,10 +1,12 @@
-__version__ = (3, 1, 0)
+__version__ = (3, 2, 2)
 # meta developer: I_execute.t.me
 
 import logging
 import asyncio
 import re
 from telethon.tl.types import PeerUser, Channel, User
+from telethon.tl.functions.messages import EditMessageRequest
+from telethon.tl.types import InputMediaWebPage
 from telethon.errors import FloodWaitError
 from .. import loader, utils
 
@@ -27,7 +29,7 @@ class Logger(loader.Module):
             "<blockquote>Everything went to shit. Old group disappeared somewhere, who the fuck knows what happened</blockquote>"
         ),
         "reloaded": "<blockquote><b>Module successfully reloaded, everything works</b></blockquote>",
-        "username_row": "@{uname}",
+        "username_row": "\n<pre>@{uname}</pre>\n",
         "owner_attention": "<blockquote><b>{owner_link}, attention please</b></blockquote>\n",
         "log_dm_user": (
             "<blockquote><b>DIRECT MESSAGE</b></blockquote>\n"
@@ -61,7 +63,7 @@ class Logger(loader.Module):
             "<blockquote>Всё наебнулось к хуям. Старая группа куда-то съебалась, хер знает че такое</blockquote>"
         ),
         "reloaded": "<blockquote><b>Модуль был успешно перезагружен, все воркает</b></blockquote>",
-        "username_row": "@{uname}",
+        "username_row": "\n<pre>@{uname}</pre>\n",
         "owner_attention": "<blockquote><b>{owner_link}, минуточку внимания</b></blockquote>\n",
         "log_dm_user": (
             "<blockquote><b>DIRECT MESSAGE</b></blockquote>\n"
@@ -90,6 +92,7 @@ class Logger(loader.Module):
         self._logger_topic = None
         self._asset_channel = None
         self._flood_lock = asyncio.Lock()
+        self._owner_usernames = set()
 
     def _escape(self, text):
         if not text:
@@ -104,6 +107,16 @@ class Logger(loader.Module):
                 if getattr(uname_obj, "active", False):
                     return uname_obj.username
         return None
+
+    def _get_all_usernames(self, entity):
+        usernames = []
+        if hasattr(entity, "username") and entity.username:
+            usernames.append(entity.username)
+        if hasattr(entity, "usernames") and entity.usernames:
+            for uname_obj in entity.usernames:
+                if getattr(uname_obj, "active", False) and uname_obj.username:
+                    usernames.append(uname_obj.username)
+        return usernames
 
     def _get_display_name(self, entity):
         if isinstance(entity, Channel):
@@ -124,7 +137,7 @@ class Logger(loader.Module):
 
     def _format_username_row(self, entity):
         username = self._get_username(entity)
-        return "\n" + self.strings["username_row"].format(uname=username) + "\n" if username else "\n"
+        return self.strings["username_row"].format(uname=username) if username else "\n"
 
     def _get_topic_id(self, message):
         reply_to = getattr(message, "reply_to", None)
@@ -179,6 +192,8 @@ class Logger(loader.Module):
 
     async def client_ready(self):
         self._owner = await self._client.get_me()
+        self._owner_usernames = set(self._get_all_usernames(self._owner))
+        
         self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
 
         if not self._asset_channel:
@@ -199,23 +214,68 @@ class Logger(loader.Module):
             return
 
         try:
-            await self._send_with_flood_wait(
-                self.inline.bot.send_photo,
-                int(f"-100{self._asset_channel}"),
-                photo=GREETING_MEDIA_URL,
-                caption=self.strings["greeting_first"],
-                parse_mode="HTML",
+            chat_id = int(f"-100{self._asset_channel}")
+            msg_text, entities = await self.inline.bot._parse_message_text(self.strings["greeting_first"], "html")
+            
+            msg = await self._send_with_flood_wait(
+                self.inline.bot.send_message,
+                chat_id,
+                msg_text,
+                parse_mode=None,
+                entities=entities,
                 message_thread_id=self._logger_topic.id,
             )
+            
+            if msg:
+                try:
+                    peer = await self.inline.bot.get_input_entity(chat_id)
+                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                    reply_markup = current_msg.reply_markup if current_msg else None
+                    
+                    await self.inline.bot(EditMessageRequest(
+                        peer=peer,
+                        id=msg.id,
+                        message=msg_text,
+                        media=InputMediaWebPage(url=GREETING_MEDIA_URL, optional=True, force_large_media=True),
+                        invert_media=True,
+                        reply_markup=reply_markup,
+                        entities=entities,
+                        no_webpage=False,
+                    ))
+                except Exception as e:
+                    logger.error(f"[Logger] Failed to add preview: {e}")
         except Exception:
             try:
-                await self._send_with_flood_wait(
+                chat_id = int(f"-100{self._asset_channel}")
+                msg_text, entities = await self.inline.bot._parse_message_text(self.strings["reloaded"], "html")
+                
+                msg = await self._send_with_flood_wait(
                     self.inline.bot.send_message,
-                    int(f"-100{self._asset_channel}"),
-                    self.strings["reloaded"],
-                    parse_mode="HTML",
+                    chat_id,
+                    msg_text,
+                    parse_mode=None,
+                    entities=entities,
                     message_thread_id=self._logger_topic.id,
                 )
+                
+                if msg:
+                    try:
+                        peer = await self.inline.bot.get_input_entity(chat_id)
+                        current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                        reply_markup = current_msg.reply_markup if current_msg else None
+                        
+                        await self.inline.bot(EditMessageRequest(
+                            peer=peer,
+                            id=msg.id,
+                            message=msg_text,
+                            media=InputMediaWebPage(url=GREETING_MEDIA_URL, optional=True, force_large_media=True),
+                            invert_media=True,
+                            reply_markup=reply_markup,
+                            entities=entities,
+                            no_webpage=False,
+                        ))
+                    except Exception as e:
+                        logger.error(f"[Logger] Failed to add preview: {e}")
             except Exception as e:
                 logger.error(f"[Logger] Failed to send greeting: {e}")
 
