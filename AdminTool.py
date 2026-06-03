@@ -86,11 +86,11 @@ RIGHTS_UNBANNED = ChatBannedRights(
     send_plain=False,
 )
 
-E_OK    = '<tg-emoji emoji-id=5429319011286423791>😎</tg-emoji>'
-E_ANGRY = '<tg-emoji emoji-id=5429638101586711317>😠</tg-emoji>'
-E_DEAD1 = '<tg-emoji emoji-id=5429465319347362227>😵</tg-emoji>'
-E_DEAD2 = '<tg-emoji emoji-id=5429112861446147403>😵</tg-emoji>'
-E_DEAD3 = '<tg-emoji emoji-id=5429369507216924126>😵</tg-emoji>'
+E_OK    = '<tg-emoji emoji-id=5255888339248125403>😎</tg-emoji>'
+E_ANGRY = '<tg-emoji emoji-id=5258084738278658226>😠</tg-emoji>'
+E_DEAD1 = '<tg-emoji emoji-id=5258511597898340942>😵</tg-emoji>'
+E_DEAD2 = '<tg-emoji emoji-id=5258497347196852362>😵</tg-emoji>'
+E_DEAD3 = '<tg-emoji emoji-id=5256108885818778479>😵</tg-emoji>'
 
 
 def _parse_duration(raw: str):
