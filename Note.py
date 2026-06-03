@@ -10,12 +10,11 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-
-emj_cool = "<tg-emoji emoji-id=5255888339248125403>😎</tg-emoji>"
-    emj_dizzy = "<tg-emoji emoji-id=5258511597898340942>😵</tg-emoji>"
-    emj_cat = "<tg-emoji emoji-id=5255715243476164998>😸</tg-emoji>"
-    emj_angry = "<tg-emoji emoji-id=5258084738278658226>😠</tg-emoji>"
-    emj_storage = 5260682587902354590
+E_COOL = '<tg-emoji emoji-id=5255888339248125403>😎</tg-emoji>'
+E_DIZZY = '<tg-emoji emoji-id=5258511597898340942>😵</tg-emoji>'
+E_CAT = '<tg-emoji emoji-id=5255715243476164998>😸</tg-emoji>'
+E_ANGRY = '<tg-emoji emoji-id=5258084738278658226>😠</tg-emoji>'
+E_STORAGE = 5260682587902354590
 
 
 @loader.tds
@@ -34,31 +33,31 @@ class Note(loader.Module):
             "<code>{prefix}note [name]</code> - post note"
         ),
         "created": "<b>Note</b> <code>{name}</code> <b>saved!</b>",
-        "created_prem": "{emj_cool} <b>Note</b> <code>{name}</code> <b>saved!</b>",
+        "created_prem": f"{E_COOL} <b>Note</b> <code>{{name}}</code> <b>saved!</b>",
         "added": "<b>Media added to note</b> <code>{name}</code><b>!</b>",
-        "added_prem": "{emj_cool} <b>Media added to note</b> <code>{name}</code><b>!</b>",
+        "added_prem": f"{E_COOL} <b>Media added to note</b> <code>{{name}}</code><b>!</b>",
         "no_media": "<b>Error: reply to media!</b>",
-        "no_media_prem": "{emj_dizzy} <b>Error: reply to media!</b>",
+        "no_media_prem": f"{E_DIZZY} <b>Error: reply to media!</b>",
         "no_reply": "<b>Error: reply to a message!</b>",
-        "no_reply_prem": "{emj_dizzy} <b>Error: reply to a message!</b>",
+        "no_reply_prem": f"{E_DIZZY} <b>Error: reply to a message!</b>",
         "name_required": "<b>Error: specify a name!</b>",
-        "name_required_prem": "{emj_dizzy} <b>Error: specify a name!</b>",
+        "name_required_prem": f"{E_DIZZY} <b>Error: specify a name!</b>",
         "exists": "<b>Error: note <code>{name}</code> already exists!</b>",
-        "exists_prem": "{emj_dizzy} <b>Error: note <code>{name}</code> already exists!</b>",
+        "exists_prem": f"{E_DIZZY} <b>Error: note <code>{{name}}</code> already exists!</b>",
         "not_found": "<b>Error: note <code>{name}</code> not found!</b>",
-        "not_found_prem": "{emj_dizzy} <b>Error: note <code>{name}</code> not found!</b>",
+        "not_found_prem": f"{E_DIZZY} <b>Error: note <code>{{name}}</code> not found!</b>",
         "removed": "<b>Note <code>{name}</code> removed!</b>",
-        "removed_prem": "{emj_cat} <b>Note <code>{name}</code> removed!</b>",
+        "removed_prem": f"{E_CAT} <b>Note <code>{{name}}</code> removed!</b>",
         "rmall_done": "<b>All notes removed!</b>",
-        "rmall_done_prem": "{emj_cat} <b>All notes removed!</b>",
+        "rmall_done_prem": f"{E_CAT} <b>All notes removed!</b>",
         "rmall_empty": "<b>No notes to remove.</b>",
-        "rmall_empty_prem": "{emj_dizzy} <b>No notes to remove.</b>",
+        "rmall_empty_prem": f"{E_DIZZY} <b>No notes to remove.</b>",
         "list_header": "<b>Your notes list:</b>\n<blockquote expandable>{notes}</blockquote>",
-        "list_header_prem": "{emj_angry} <b>Your notes list:</b>\n<blockquote expandable>{notes}</blockquote>",
+        "list_header_prem": f"{E_ANGRY} <b>Your notes list:</b>\n<blockquote expandable>{{notes}}</blockquote>",
         "no_notes": "<b>No notes saved yet.</b>",
-        "no_notes_prem": "{emj_dizzy} <b>No notes saved yet.</b>",
+        "no_notes_prem": f"{E_DIZZY} <b>No notes saved yet.</b>",
         "storage_error": "<b>Error interacting with storage. Please try again.</b>",
-        "storage_error_prem": "{emj_dizzy} <b>Storage error. Please try again.</b>",
+        "storage_error_prem": f"{E_DIZZY} <b>Storage error. Please try again.</b>",
     }
 
     strings_ru = {
@@ -72,31 +71,31 @@ class Note(loader.Module):
             "<code>{prefix}note [название]</code> - отправить заметку"
         ),
         "created": "<b>Заметка</b> <code>{name}</code> <b>сохранена!</b>",
-        "created_prem": "{emj_cool} <b>Заметка</b> <code>{name}</code> <b>сохранена!</b>",
+        "created_prem": f"{E_COOL} <b>Заметка</b> <code>{{name}}</code> <b>сохранена!</b>",
         "added": "<b>Медиа добавлено в заметку</b> <code>{name}</code><b>!</b>",
-        "added_prem": "{emj_cool} <b>Медиа добавлено в заметку</b> <code>{name}</code><b>!</b>",
+        "added_prem": f"{E_COOL} <b>Медиа добавлено в заметку</b> <code>{{name}}</code><b>!</b>",
         "no_media": "<b>Ошибка: ответьте на медиа!</b>",
-        "no_media_prem": "{emj_dizzy} <b>Ошибка: ответьте на медиа!</b>",
+        "no_media_prem": f"{E_DIZZY} <b>Ошибка: ответьте на медиа!</b>",
         "no_reply": "<b>Ошибка: ответьте на сообщение!</b>",
-        "no_reply_prem": "{emj_dizzy} <b>Ошибка: ответьте на сообщение!</b>",
+        "no_reply_prem": f"{E_DIZZY} <b>Ошибка: ответьте на сообщение!</b>",
         "name_required": "<b>Ошибка: укажите название!</b>",
-        "name_required_prem": "{emj_dizzy} <b>Ошибка: укажите название!</b>",
+        "name_required_prem": f"{E_DIZZY} <b>Ошибка: укажите название!</b>",
         "exists": "<b>Ошибка: заметка <code>{name}</code> уже существует!</b>",
-        "exists_prem": "{emj_dizzy} <b>Ошибка: заметка <code>{name}</code> уже существует!</b>",
+        "exists_prem": f"{E_DIZZY} <b>Ошибка: заметка <code>{{name}}</code> уже существует!</b>",
         "not_found": "<b>Ошибка: заметка <code>{name}</code> не найдена!</b>",
-        "not_found_prem": "{emj_dizzy} <b>Ошибка: заметка <code>{name}</code> не найдена!</b>",
+        "not_found_prem": f"{E_DIZZY} <b>Ошибка: заметка <code>{{name}}</code> не найдена!</b>",
         "removed": "<b>Заметка <code>{name}</code> удалена!</b>",
-        "removed_prem": "{emj_cat} <b>Заметка <code>{name}</code> удалена!</b>",
+        "removed_prem": f"{E_CAT} <b>Заметка <code>{{name}}</code> удалена!</b>",
         "rmall_done": "<b>Все заметки удалены!</b>",
-        "rmall_done_prem": "{emj_cat} <b>Все заметки удалены!</b>",
+        "rmall_done_prem": f"{E_CAT} <b>Все заметки удалены!</b>",
         "rmall_empty": "<b>Нет заметок для удаления.</b>",
-        "rmall_empty_prem": "{emj_dizzy} <b>Нет заметок для удаления.</b>",
+        "rmall_empty_prem": f"{E_DIZZY} <b>Нет заметок для удаления.</b>",
         "list_header": "<b>Список ваших заметок:</b>\n<blockquote expandable>{notes}</blockquote>",
-        "list_header_prem": "{emj_angry} <b>Список ваших заметок:</b>\n<blockquote expandable>{notes}</blockquote>",
+        "list_header_prem": f"{E_ANGRY} <b>Список ваших заметок:</b>\n<blockquote expandable>{{notes}}</blockquote>",
         "no_notes": "<b>У вас пока нет сохраненных заметок.</b>",
-        "no_notes_prem": "{emj_dizzy} <b>У вас пока нет сохраненных заметок.</b>",
+        "no_notes_prem": f"{E_DIZZY} <b>У вас пока нет сохраненных заметок.</b>",
         "storage_error": "<b>Ошибка взаимодействия с хранилищем. Попробуйте снова.</b>",
-        "storage_error_prem": "{emj_dizzy} <b>Ошибка хранилища. Попробуйте снова.</b>",
+        "storage_error_prem": f"{E_DIZZY} <b>Ошибка хранилища. Попробуйте снова.</b>",
     }
 
     def __init__(self):
@@ -119,20 +118,10 @@ class Note(loader.Module):
             try:
                 val = self.strings(prem_key)
                 if val and not val.startswith("Unknown string"):
-                    return val.format(
-                        emj_cool=self.emj_cool,
-                        emj_dizzy=self.emj_dizzy,
-                        emj_cat=self.emj_cat,
-                        emj_angry=self.emj_angry
-                    )
+                    return val
             except Exception:
                 pass
-        return self.strings(key).format(
-            emj_cool=self.emj_cool,
-            emj_dizzy=self.emj_dizzy,
-            emj_cat=self.emj_cat,
-            emj_angry=self.emj_angry
-        )
+        return self.strings(key)
 
     async def client_ready(self):
         await self._get_premium_status()
@@ -150,7 +139,7 @@ class Note(loader.Module):
                 self._asset_channel,
                 "Note Storage",
                 description="Media storage for Note module.",
-                icon_emoji_id=self.emj_storage,
+                icon_emoji_id=E_STORAGE,
             )
         except Exception as e:
             logger.error(f"[Note] Failed to create/get storage topic: {e}")
