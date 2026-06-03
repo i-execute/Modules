@@ -97,8 +97,12 @@ class AutoAvka(loader.Module):
     def __init__(self):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
-                "UPDATE_AFTER", 60, "Minutes after offline to switch avatar",
+                "UPDATE_AFTER", 30, "Minutes after offline to switch avatar",
                 validator=loader.validators.Integer(minimum=1),
+            ),
+            loader.ConfigValue(
+                "REQUEST_RETRY", 60, "Seconds between authorization checks",
+                validator=loader.validators.Integer(minimum=10),
             ),
             loader.ConfigValue(
                 "ONLINE_AVKA_URL", "", "URL for online avatar",
@@ -108,11 +112,8 @@ class AutoAvka(loader.Module):
                 "OFFLINE_AVKA_URL", "", "URL for offline avatar",
                 validator=loader.validators.String(),
             ),
-            loader.ConfigValue(
-                "REQUEST_RETRY", 60, "Seconds between authorization checks",
-                validator=loader.validators.Integer(minimum=10),
-            ),
         )
+
         self._monitor_task = None
         self._current_online = None
         self._last_check = 0
