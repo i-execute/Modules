@@ -112,32 +112,40 @@ class AutoAvka(loader.Module):
                 "REQUEST_RETRY", 60, "Seconds between authorization checks",
                 validator=loader.validators.Integer(minimum=10),
             ),
-            loader.ConfigValue(
-                "selected_session_hash", 0, "Selected session hash (internal)",
-                validator=loader.validators.Hidden(loader.validators.Integer()),
-            ),
-            loader.ConfigValue(
-                "enabled", False, "Module enabled (internal)",
-                validator=loader.validators.Hidden(loader.validators.Boolean()),
-            ),
-            loader.ConfigValue(
-                "started", False, "Testflight passed (internal)",
-                validator=loader.validators.Hidden(loader.validators.Boolean()),
-            ),
         )
         self._monitor_task = None
-        self._current_online = None  # ←←← ФИКС: было False, теперь None чтобы при старте всегда поставил авку
+        self._current_online = None
         self._last_check = 0
+        self._db = None
 
     async def client_ready(self, client, db):
         self._client = client
-        if self.config["enabled"] and self.config["started"]:
+        self._db = db
+        if self._get_enabled() and self._get_started():
             await self._start_monitor()
 
     async def on_unload(self):
         if self._monitor_task:
             self._monitor_task.cancel()
             self._monitor_task = None
+
+    def _get_session_hash(self):
+        return self._db.get("AutoAvka", "selected_session_hash", 0)
+
+    def _set_session_hash(self, value):
+        self._db.set("AutoAvka", "selected_session_hash", value)
+
+    def _get_enabled(self):
+        return self._db.get("AutoAvka", "enabled", False)
+
+    def _set_enabled(self, value):
+        self._db.set("AutoAvka", "enabled", value)
+
+    def _get_started(self):
+        return self._db.get("AutoAvka", "started", False)
+
+    def _set_started(self, value):
+        self._db.set("AutoAvka", "started", value)
 
     async def _download_file(self, url):
         try:
@@ -241,11 +249,11 @@ class AutoAvka(loader.Module):
     async def _start_monitor(self):
         if self._monitor_task:
             self._monitor_task.cancel()
-        self._current_online = None  # ←←← ФИКС: сбрасываем состояние при каждом старте
+        self._current_online = None
         self._monitor_task = asyncio.create_task(self._monitor_loop())
 
     async def _monitor_loop(self):
-        while self.config["enabled"]:
+        while self._get_enabled():
             try:
                 now = datetime.now(timezone.utc)
                 auths = await self._get_authorizations()
@@ -255,7 +263,7 @@ class AutoAvka(loader.Module):
 
                 target = None
                 for auth in auths:
-                    if auth.hash == self.config["selected_session_hash"]:
+                    if auth.hash == self._get_session_hash():
                         target = auth
                         break
 
@@ -271,7 +279,6 @@ class AutoAvka(loader.Module):
                     if minutes_ago < self.config["UPDATE_AFTER"]:
                         is_online = True
 
-                # ФИКС: если состояние изменилось ИЛИ это первый запуск (None)
                 if is_online != self._current_online or self._current_online is None:
                     self._current_online = is_online
                     url = self.config["ONLINE_AVKA_URL"] if is_online else self.config["OFFLINE_AVKA_URL"]
@@ -313,7 +320,7 @@ class AutoAvka(loader.Module):
 
         if offline_ok and online_ok:
             await self._delete_avatars()
-            self.config["started"] = True
+            self._set_started(True)
             await self._start_monitor()
             await call.edit(self.strings("testflight_success"))
         elif offline_ok or online_ok:
@@ -324,12 +331,11 @@ class AutoAvka(loader.Module):
             log = "\n".join(errors)
             await call.edit(self.strings("testflight_fail").format(log))
 
-    # Остальные методы без изменений (cb_*, avka, avkashow и т.д.)
     async def _cb_toggle(self, call):
-        self.config["enabled"] = not self.config["enabled"]
-        if self.config["enabled"] and self.config["started"]:
+        self._set_enabled(not self._get_enabled())
+        if self._get_enabled() and self._get_started():
             await self._start_monitor()
-        elif not self.config["enabled"]:
+        elif not self._get_enabled():
             if self._monitor_task:
                 self._monitor_task.cancel()
                 self._monitor_task = None
@@ -342,13 +348,13 @@ class AutoAvka(loader.Module):
             pass
 
     async def _show_main_menu(self, call):
-        status = self.strings("status_enabled") if self.config["enabled"] else self.strings("status_disabled")
-        loop_status = self.strings("status_started") if self.config["started"] else self.strings("status_not_started")
+        status = self.strings("status_enabled") if self._get_enabled() else self.strings("status_disabled")
+        loop_status = self.strings("status_started") if self._get_started() else self.strings("status_not_started")
         text = f"{self.strings('menu_title')}\n\n{status}\n{loop_status}"
         markup = []
-        if self.config["started"]:
-            toggle_text = self.strings("btn_toggle_on") if self.config["enabled"] else self.strings("btn_toggle_off")
-            toggle_style = "danger" if self.config["enabled"] else "success"
+        if self._get_started():
+            toggle_text = self.strings("btn_toggle_on") if self._get_enabled() else self.strings("btn_toggle_off")
+            toggle_style = "danger" if self._get_enabled() else "success"
             markup.append([{"text": toggle_text, "callback": self._cb_toggle, "style": toggle_style}])
         markup.append([{"text": self.strings("btn_select"), "callback": self._cb_select_session, "style": "primary"}])
         markup.append([{"text": self.strings("btn_cancel"), "callback": self._cb_cancel, "style": "danger"}])
@@ -427,7 +433,7 @@ class AutoAvka(loader.Module):
         await call.edit(self.strings("session_info_title").format(info), reply_markup=markup)
 
     async def _cb_confirm_select(self, call, session_hash):
-        self.config["selected_session_hash"] = session_hash
+        self._set_session_hash(session_hash)
         await self._testflight(call)
 
     @loader.command(ru_doc="Открыть меню управления")
@@ -437,13 +443,13 @@ class AutoAvka(loader.Module):
             await utils.answer(message, self.strings("config_missing"))
             return
 
-        status = self.strings("status_enabled") if self.config["enabled"] else self.strings("status_disabled")
-        loop_status = self.strings("status_started") if self.config["started"] else self.strings("status_not_started")
+        status = self.strings("status_enabled") if self._get_enabled() else self.strings("status_disabled")
+        loop_status = self.strings("status_started") if self._get_started() else self.strings("status_not_started")
         text = f"{self.strings('menu_title')}\n\n{status}\n{loop_status}"
         markup = []
-        if self.config["started"]:
-            toggle_text = self.strings("btn_toggle_on") if self.config["enabled"] else self.strings("btn_toggle_off")
-            toggle_style = "danger" if self.config["enabled"] else "success"
+        if self._get_started():
+            toggle_text = self.strings("btn_toggle_on") if self._get_enabled() else self.strings("btn_toggle_off")
+            toggle_style = "danger" if self._get_enabled() else "success"
             markup.append([{"text": toggle_text, "callback": self._cb_toggle, "style": toggle_style}])
         markup.append([{"text": self.strings("btn_select"), "callback": self._cb_select_session, "style": "primary"}])
         markup.append([{"text": self.strings("btn_cancel"), "callback": self._cb_cancel, "style": "danger"}])
