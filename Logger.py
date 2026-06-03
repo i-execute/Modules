@@ -1,4 +1,4 @@
-__version__ = (3, 2, 2)
+__version__ = (3, 2, 3)
 # meta developer: I_execute.t.me
 
 import logging
@@ -21,69 +21,79 @@ class Logger(loader.Module):
     strings = {
         "name": "Logger",
         "greeting_first": (
-            "<blockquote><b>Yo!</b></blockquote>\n"
-            "<blockquote>Watchers are active. Now every command will be logged here, if some asshole uses your userbot I'll tag you</blockquote>"
+            "<blockquote><b>Yo!</b>\n"
+            "Watchers are active. Now every command will be logged here, if some asshole uses your userbot I'll tag you</blockquote>"
         ),
         "greeting_recovery": (
-            "<blockquote><b>Hey!</b></blockquote>\n"
-            "<blockquote>Everything went to shit. Old group disappeared somewhere, who the fuck knows what happened</blockquote>"
+            "<blockquote><b>Hey!</b>\n"
+            "Everything went to shit. Old group disappeared somewhere, who the fuck knows what happened</blockquote>"
         ),
         "reloaded": "<blockquote><b>Module successfully reloaded, everything works</b></blockquote>",
         "username_row": "\n<pre>@{uname}</pre>\n",
         "owner_attention": "<blockquote><b>{owner_link}, attention please</b></blockquote>\n",
         "log_dm_user": (
-            "<blockquote><b>DIRECT MESSAGE</b></blockquote>\n"
-            "<blockquote><b>Command:</b> <code>{cmd}</code></blockquote>\n"
-            "<blockquote><b>From:</b> {from_name}{from_uname}<b>Chat:</b> {to_name}{to_uname}</blockquote>"
+            "<blockquote><b>DIRECT MESSAGE</b>\n"
+            "<b>Command:</b> <code>{cmd}</code>\n"
+            "<b>From:</b> {from_name}</blockquote>{from_uname}"
+            "<blockquote><b>Chat:</b> {to_name}</blockquote>{to_uname}"
         ),
         "log_dm_bot": (
-            "<blockquote><b>DIRECT MESSAGE (BOT)</b></blockquote>\n"
-            "<blockquote><b>Command:</b> <code>{cmd}</code></blockquote>\n"
-            "<blockquote><b>From:</b> {from_name}{from_uname}<b>Bot:</b> {to_name}{to_uname}</blockquote>"
+            "<blockquote><b>DIRECT MESSAGE (BOT)</b>\n"
+            "<b>Command:</b> <code>{cmd}</code>\n"
+            "<b>From:</b> {from_name}</blockquote>{from_uname}"
+            "<blockquote><b>Bot:</b> {to_name}</blockquote>{to_uname}"
         ),
         "log_group": (
-            "<blockquote><b>GROUP</b></blockquote>\n"
-            "<blockquote><b>Command:</b> <code>{cmd}</code></blockquote>\n"
-            "<blockquote><b>From:</b> {from_name}{from_uname}<b>Group:</b> {chat_name} [<code>{chat_id}</code>]{chat_uname}<a href='{msg_link}'>Open message</a></blockquote>"
+            "<blockquote><b>GROUP</b>\n"
+            "<b>Command:</b> <code>{cmd}</code>\n"
+            "<b>From:</b> {from_name}</blockquote>{from_uname}"
+            "<blockquote><b>Group:</b></blockquote><blockquote> {chat_name} [</blockquote><blockquote><code>{chat_id}</code></blockquote><blockquote>]{chat_uname}</blockquote>"
+            "<blockquote><a href='{msg_link}'>Open message</a></blockquote>"
         ),
         "log_channel": (
-            "<blockquote><b>CHANNEL</b></blockquote>\n"
-            "<blockquote><b>Command:</b> <code>{cmd}</code></blockquote>\n"
-            "<blockquote><b>Channel:</b> {chat_name} [<code>{chat_id}</code>]{chat_uname}<a href='{msg_link}'>Open message</a></blockquote>"
+            "<blockquote><b>CHANNEL</b>\n"
+            "<b>Command:</b> <code>{cmd}</code>\n"
+            "<b>Channel:</b></blockquote><blockquote> {chat_name} [</blockquote><blockquote><code>{chat_id}</code></blockquote><blockquote>]{chat_uname}</blockquote>"
+            "<blockquote><a href='{msg_link}'>Open message</a></blockquote>"
         ),
     }
 
     strings_ru = {
         "greeting_first": (
-            "<blockquote><b>Ку!</b></blockquote>\n"
-            "<blockquote>Вотчеры активны. Теперь каждая команда будет залетать сюда, если какой-то хуй будет использовать твой юзербот то я тэгну тебя</blockquote>"
+            "<blockquote><b>Ку!</b>\n"
+            "Вотчеры активны. Теперь каждая команда будет залетать сюда, если какой-то хуй будет использовать твой юзербот то я тэгну тебя</blockquote>"
         ),
         "greeting_recovery": (
-            "<blockquote><b>Прием!</b></blockquote>\n"
-            "<blockquote>Всё наебнулось к хуям. Старая группа куда-то съебалась, хер знает че такое</blockquote>"
+            "<blockquote><b>Прием!</b>\n"
+            "Всё наебнулось к хуям. Старая группа куда-то съебалась, хер знает че такое</blockquote>"
         ),
         "reloaded": "<blockquote><b>Модуль был успешно перезагружен, все воркает</b></blockquote>",
         "username_row": "\n<pre>@{uname}</pre>\n",
         "owner_attention": "<blockquote><b>{owner_link}, минуточку внимания</b></blockquote>\n",
         "log_dm_user": (
-            "<blockquote><b>DIRECT MESSAGE</b></blockquote>\n"
-            "<blockquote><b>Команда:</b> <code>{cmd}</code></blockquote>\n"
-            "<blockquote><b>От:</b> {from_name}{from_uname}<b>Чат:</b> {to_name}{to_uname}</blockquote>"
+            "<blockquote><b>DIRECT MESSAGE</b>\n"
+            "<b>Команда:</b> <code>{cmd}</code>\n"
+            "<b>От:</b> {from_name}</blockquote>{from_uname}"
+            "<blockquote><b>Чат:</b> {to_name}</blockquote>{to_uname}"
         ),
         "log_dm_bot": (
-            "<blockquote><b>DIRECT MESSAGE (BOT)</b></blockquote>\n"
-            "<blockquote><b>Команда:</b> <code>{cmd}</code></blockquote>\n"
-            "<blockquote><b>От:</b> {from_name}{from_uname}<b>Бот:</b> {to_name}{to_uname}</blockquote>"
+            "<blockquote><b>DIRECT MESSAGE (BOT)</b>\n"
+            "<b>Команда:</b> <code>{cmd}</code>\n"
+            "<b>От:</b> {from_name}</blockquote>{from_uname}"
+            "<blockquote><b>Бот:</b> {to_name}</blockquote>{to_uname}"
         ),
         "log_group": (
-            "<blockquote><b>GROUP</b></blockquote>\n"
-            "<blockquote><b>Команда:</b> <code>{cmd}</code></blockquote>\n"
-            "<blockquote><b>От:</b> {from_name}{from_uname}<b>Группа:</b> {chat_name} [<code>{chat_id}</code>]{chat_uname}<a href='{msg_link}'>Открыть сообщение</a></blockquote>"
+            "<blockquote><b>GROUP</b>\n"
+            "<b>Команда:</b> <code>{cmd}</code>\n"
+            "<b>От:</b> {from_name}</blockquote>{from_uname}"
+            "<blockquote><b>Группа:</b></blockquote><blockquote> {chat_name} [</blockquote><blockquote><code>{chat_id}</code></blockquote><blockquote>]{chat_uname}</blockquote>"
+            "<blockquote><a href='{msg_link}'>Открыть сообщение</a></blockquote>"
         ),
         "log_channel": (
-            "<blockquote><b>CHANNEL</b></blockquote>\n"
-            "<blockquote><b>Команда:</b> <code>{cmd}</code></blockquote>\n"
-            "<blockquote><b>Канал:</b> {chat_name} [<code>{chat_id}</code>]{chat_uname}<a href='{msg_link}'>Открыть сообщение</a></blockquote>"
+            "<blockquote><b>CHANNEL</b>\n"
+            "<b>Команда:</b> <code>{cmd}</code>\n"
+            "<b>Канал:</b></blockquote><blockquote> {chat_name} [</blockquote><blockquote><code>{chat_id}</code></blockquote><blockquote>]{chat_uname}</blockquote>"
+            "<blockquote><a href='{msg_link}'>Открыть сообщение</a></blockquote>"
         ),
     }
 
@@ -215,14 +225,12 @@ class Logger(loader.Module):
 
         try:
             chat_id = int(f"-100{self._asset_channel}")
-            msg_text, entities = await self.inline.bot._parse_message_text(self.strings["greeting_first"], "html")
             
             msg = await self._send_with_flood_wait(
                 self.inline.bot.send_message,
                 chat_id,
-                msg_text,
-                parse_mode=None,
-                entities=entities,
+                self.strings["greeting_first"],
+                parse_mode="html",
                 message_thread_id=self._logger_topic.id,
             )
             
@@ -231,6 +239,7 @@ class Logger(loader.Module):
                     peer = await self.inline.bot.get_input_entity(chat_id)
                     current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
                     reply_markup = current_msg.reply_markup if current_msg else None
+                    msg_text, entities = await self.inline.bot._parse_message_text(self.strings["greeting_first"], "html")
                     
                     await self.inline.bot(EditMessageRequest(
                         peer=peer,
@@ -247,14 +256,12 @@ class Logger(loader.Module):
         except Exception:
             try:
                 chat_id = int(f"-100{self._asset_channel}")
-                msg_text, entities = await self.inline.bot._parse_message_text(self.strings["reloaded"], "html")
                 
                 msg = await self._send_with_flood_wait(
                     self.inline.bot.send_message,
                     chat_id,
-                    msg_text,
-                    parse_mode=None,
-                    entities=entities,
+                    self.strings["reloaded"],
+                    parse_mode="html",
                     message_thread_id=self._logger_topic.id,
                 )
                 
@@ -263,6 +270,7 @@ class Logger(loader.Module):
                         peer = await self.inline.bot.get_input_entity(chat_id)
                         current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
                         reply_markup = current_msg.reply_markup if current_msg else None
+                        msg_text, entities = await self.inline.bot._parse_message_text(self.strings["reloaded"], "html")
                         
                         await self.inline.bot(EditMessageRequest(
                             peer=peer,
