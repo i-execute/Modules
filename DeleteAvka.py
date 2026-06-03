@@ -59,7 +59,7 @@ class DeleteAvka(loader.Module):
                 
                 await self.client(functions.photos.DeletePhotosRequest(id=ids))
                 c += len(ids)
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.1)
             
             await utils.answer(message, self.strings["deleted"].format(c))
         except Exception as e:

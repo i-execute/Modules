@@ -85,7 +85,7 @@ class DeleteMusic(loader.Module):
                             unsave=True,
                         ))
                         c += 1
-                        await asyncio.sleep(0.3)
+                        await asyncio.sleep(0.1)
                     except Exception:
                         pass
                 music = await self.client(GetSavedMusic(me, 0, 100, 0))
