@@ -437,7 +437,10 @@ class AutoAvka(loader.Module):
         self._set_session_hash(session_hash)
         await self._testflight(call)
 
-    @loader.command(ru_doc="Открыть меню управления")
+    @loader.command(
+        ru_doc="Открыть меню управления", 
+        en_doc="Open control menu", 
+    )
     async def avka(self, message):
         """Open control menu"""
         if not self.config["ONLINE_AVKA_URL"] or not self.config["OFFLINE_AVKA_URL"]:
@@ -456,7 +459,10 @@ class AutoAvka(loader.Module):
         markup.append([{"text": self.strings("btn_cancel"), "callback": self._cb_cancel, "style": "danger"}])
         await self.inline.form(text=text, message=message, reply_markup=markup, silent=True)
 
-    @loader.command(ru_doc="Показать аватарки")
+    @loader.command(
+        ru_doc="Скачать и показать аватарки", 
+        en_doc="Download and show current avatars", 
+    )
     async def avkashow(self, message):
         """Download and show current avatars"""
         if not self.config["ONLINE_AVKA_URL"] or not self.config["OFFLINE_AVKA_URL"]:
