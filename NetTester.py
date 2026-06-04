@@ -27,13 +27,12 @@ class NetTester(loader.Module):
     strings = {
         "name": "NetTester",
         "help": (
-            "<b>NetTester - Network Monitor</b>\n\n"
-            "<b>Commands:</b>\n"
-            "<code>{prefix}test speed</code> - internet speed test (Cloudflare)\n"
+            "<b>NetTester - Network Monitoring</b>\n"
+            "<blockquote><code>{prefix}test speed</code> - internet speed test (Cloudflare)\n"
             "<code>{prefix}test net</code> - network usage statistics\n"
             "<code>{prefix}test ping</code> - ping to popular services\n"
             "<code>{prefix}test dns</code> - DNS resolve speed test\n"
-            "<code>{prefix}test ip</code> - external IP, geo, ASN\n"
+            "<code>{prefix}test ip</code> - external IP, geo, ASN\n</blockquote>"
         ),
 
         "speed_progress": "<b>Running speed test...</b>",
@@ -98,13 +97,12 @@ class NetTester(loader.Module):
 
     strings_ru = {
         "help": (
-            "<b>NetTester - Сетевой монитор</b>\n\n"
-            "<b>Команды:</b>\n"
-            "<code>{prefix}test speed</code> - тест скорости интернета (Cloudflare)\n"
+            "<b>NetTester - Мониторинг сети</b>\n"
+            "<blockquote><code>{prefix}test speed</code> - тест скорости интернета (Cloudflare)\n"
             "<code>{prefix}test net</code> - статистика использования сети\n"
             "<code>{prefix}test ping</code> - пинг до популярных сервисов\n"
             "<code>{prefix}test dns</code> - тест скорости DNS резолва\n"
-            "<code>{prefix}test ip</code> - внешний IP, гео, ASN\n"
+            "<code>{prefix}test ip</code> - внешний IP, гео, ASN\n</blockquote>"
         ),
 
         "speed_progress": "<b>Запуск теста скорости...</b>",

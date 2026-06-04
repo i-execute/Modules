@@ -24,13 +24,13 @@ class Note(loader.Module):
     strings = {
         "name": "Note",
         "help": (
-            "<b>Note module commands</b>\n\n"
-            "<code>{prefix}note create [name]</code> - save replied media\n"
+            "<b>Note module commands</b>\n"
+            "<blockquote><code>{prefix}note create [name]</code> - save replied media\n"
             "<code>{prefix}note add [name]</code> - add media to existing note\n"
             "<code>{prefix}note remove [name]</code> - delete note\n"
             "<code>{prefix}note rmall</code> - delete all notes\n"
             "<code>{prefix}note list</code> - list all notes\n"
-            "<code>{prefix}note [name]</code> - post note"
+            "<code>{prefix}note [name]</code> - post note</blockquote>"
         ),
         "created": "<b>Note</b> <code>{name}</code> <b>saved!</b>",
         "created_prem": f"{E_COOL} <b>Note</b> <code>{{name}}</code> <b>saved!</b>",
@@ -62,13 +62,13 @@ class Note(loader.Module):
 
     strings_ru = {
         "help": (
-            "<b>Команды модуля Note</b>\n\n"
-            "<code>{prefix}note create [название]</code> - сохранить медиа из реплая\n"
+            "<b>Команды модуля Note</b>\n"
+            "<blockquote><code>{prefix}note create [название]</code> - сохранить медиа из реплая\n"
             "<code>{prefix}note add [название]</code> - добавить медиа к существующей заметке\n"
             "<code>{prefix}note remove [название]</code> - удалить заметку\n"
             "<code>{prefix}note rmall</code> - удалить все заметки\n"
             "<code>{prefix}note list</code> - список всех заметок\n"
-            "<code>{prefix}note [название]</code> - отправить заметку"
+            "<code>{prefix}note [название]</code> - отправить заметку</blockquote>"
         ),
         "created": "<b>Заметка</b> <code>{name}</code> <b>сохранена!</b>",
         "created_prem": f"{E_COOL} <b>Заметка</b> <code>{{name}}</code> <b>сохранена!</b>",
