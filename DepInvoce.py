@@ -1,4 +1,4 @@
-__version__ = (1, 2, 1)
+__version__ = (1, 3, 0)
 # meta developer: I_execute.t.me
 
 import re
@@ -6,8 +6,8 @@ import time
 import logging
 import aiohttp
 
-from herokutl import events
-from herokutl.tl.types import (
+from telethon import events
+from telethon.tl.types import (
     InputBotInlineResult,
     InputBotInlineMessageMediaInvoice,
     InputBotInlineMessageText,
@@ -20,7 +20,7 @@ from herokutl.tl.types import (
     LabeledPrice,
     DataJSON,
 )
-from herokutl.tl.functions.messages import SetBotPrecheckoutResultsRequest
+from telethon.tl.functions.messages import SetBotPrecheckoutResultsRequest
 
 from .. import loader, utils
 
@@ -35,16 +35,25 @@ class DepInvoice(loader.Module):
 
     strings = {
         "name": "DepInvoice",
-        "no_bot": "<b>[ERR]</b> Inline bot not found. Enable inline mode in config.",
-        "refund_usage": "<b>[USAGE]</b> <code>{prefix}refund [user_id] [charge_id]</code>",
-        "refund_invalid_args": "<b>[ERR]</b> Invalid arguments. User ID must be a number.",
-        "refund_success": "<b>[OK]</b> Refund completed successfully",
-        "refund_error": "<b>[ERR]</b> Refund failed: <code>{error}</code>",
+        
+        "no_bot": "<blockquote><b>Error:</b> Inline bot not found. Enable inline mode in config.</blockquote>",
+        "refund_invalid_args": "<blockquote><b>Error:</b> Invalid arguments. User ID must be a number.</blockquote>",
+        
+        "refund_usage": (
+            "<blockquote><b>Usage:</b> <code>{prefix}refund [user_id] [charge_id]</code></blockquote>\n"
+            "<blockquote>Example: <code>{prefix}refund 123456789 charge_abc123</code></blockquote>"
+        ),
+        
+        "refund_success": "<blockquote><b>Success:</b> Refund completed successfully.</blockquote>",
+        
+        "refund_error": (
+            "<blockquote><b>Refund failed</b></blockquote>\n"
+            "<blockquote><b>Error:</b> <code>{error}</code></blockquote>"
+        ),
 
         "inline_hint_title": "DepInvoice",
         "inline_hint_desc": "Enter Stars amount (e.g., 100)",
-        "inline_hint_msg": "Enter Stars amount",
-
+        "inline_hint_msg": "Enter the amount of Stars to create an invoice",
         "inline_title": "Payment {stars} Stars",
         "inline_desc": "Tap to create invoice",
 
@@ -52,33 +61,116 @@ class DepInvoice(loader.Module):
         "invoice_desc_default": "Payment for {stars} Telegram Stars",
 
         "log_payment_received": (
-            "<blockquote><b>PAYMENT RECEIVED</b></blockquote>\n"
-            "<blockquote><b>Amount:</b> {stars} Stars</blockquote>\n"
-            "<blockquote><b>User ID:</b> <code>{user_id}</code></blockquote>\n"
-            "<blockquote><b>Charge ID:</b> <code>{charge_id}</code></blockquote>\n"
-            "<blockquote><b>Provider Charge ID:</b> <code>{provider_charge_id}</code></blockquote>"
+            "<pre><code class=\"language-depinvoice\">"
+            "PAYMENT RECEIVED\n"
+            "----------------\n"
+            "Amount:    {stars} Stars\n"
+            "User ID:   {user_id}\n"
+            "Charge:    {charge_id}\n"
+            "Provider:  {provider_charge_id}"
+            "</code></pre>"
         ),
         "log_refund_success": (
-            "<blockquote><b>REFUND COMPLETED</b></blockquote>\n"
-            "<blockquote><b>User ID:</b> <code>{user_id}</code></blockquote>\n"
-            "<blockquote><b>Charge ID:</b> <code>{charge_id}</code></blockquote>"
+            "<pre><code class=\"language-depinvoice\">"
+            "REFUND COMPLETED\n"
+            "----------------\n"
+            "User ID:   {user_id}\n"
+            "Charge:    {charge_id}"
+            "</code></pre>"
         ),
         "log_refund_error": (
-            "<blockquote><b>REFUND FAILED</b></blockquote>\n"
-            "<blockquote><b>User ID:</b> <code>{user_id}</code></blockquote>\n"
-            "<blockquote><b>Charge ID:</b> <code>{charge_id}</code></blockquote>\n"
-            "<blockquote><b>Error:</b> <code>{error}</code></blockquote>"
+            "<pre><code class=\"language-depinvoice\">"
+            "REFUND FAILED\n"
+            "----------------\n"
+            "User ID:   {user_id}\n"
+            "Charge:    {charge_id}\n"
+            "Error:     {error}"
+            "</code></pre>"
         ),
     }
 
-    strings_ru = {**strings}
+    strings_ru = {
+        "name": "DepInvoice",
+        
+        "no_bot": "<blockquote><b>Ошибка:</b> Inline бот не найден. Включите inline режим в конфиге.</blockquote>",
+        "refund_invalid_args": "<blockquote><b>Ошибка:</b> Неверные аргументы. ID пользователя должен быть числом.</blockquote>",
+        
+        "refund_usage": (
+            "<blockquote><b>Использование:</b> <code>{prefix}refund [user_id] [charge_id]</code></blockquote>\n"
+            "<blockquote>Пример: <code>{prefix}refund 123456789 charge_abc123</code></blockquote>"
+        ),
+        
+        "refund_success": "<blockquote><b>Успешно:</b> Возврат выполнен успешно.</blockquote>",
+        
+        "refund_error": (
+            "<blockquote><b>Возврат не выполнен</b></blockquote>\n"
+            "<blockquote><b>Ошибка:</b> <code>{error}</code></blockquote>"
+        ),
+
+        "inline_hint_title": "DepInvoice",
+        "inline_hint_desc": "Введите количество Stars (например, 100)",
+        "inline_hint_msg": "Введите количество Stars для создания счёта",
+        "inline_title": "Оплата {stars} Stars",
+        "inline_desc": "Нажмите для создания счёта",
+
+        "invoice_title_default": "Покупка {stars} Stars",
+        "invoice_desc_default": "Оплата {stars} Telegram Stars",
+
+        "log_payment_received": (
+            "<pre><code class=\"language-depinvoice\">"
+            "ПЛАТЁЖ ПОЛУЧЕН\n"
+            "----------------\n"
+            "Сумма:     {stars} Stars\n"
+            "User ID:   {user_id}\n"
+            "Charge:    {charge_id}\n"
+            "Provider:  {provider_charge_id}"
+            "</code></pre>"
+        ),
+        "log_refund_success": (
+            "<pre><code class=\"language-depinvoice\">"
+            "ВОЗВРАТ ВЫПОЛНЕН\n"
+            "----------------\n"
+            "User ID:   {user_id}\n"
+            "Charge:    {charge_id}"
+            "</code></pre>"
+        ),
+        "log_refund_error": (
+            "<pre><code class=\"language-depinvoice\">"
+            "ВОЗВРАТ НЕ ВЫПОЛНЕН\n"
+            "----------------\n"
+            "User ID:   {user_id}\n"
+            "Charge:    {charge_id}\n"
+            "Ошибка:    {error}"
+            "</code></pre>"
+        ),
+    }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            loader.ConfigValue("invoice_title", "", "Invoice title (use {stars} placeholder)", validator=loader.validators.String()),
-            loader.ConfigValue("invoice_description", "", "Invoice description (use {stars} placeholder)", validator=loader.validators.String()),
-            loader.ConfigValue("invoice_banner", None, "Invoice banner URL (None = no banner)", validator=loader.validators.String()),
-            loader.ConfigValue("inline_banner", None, "Inline preview banner URL (None = no preview)", validator=loader.validators.String()),
+            loader.ConfigValue(
+                "invoice_title",
+                "",
+                "Invoice title template (use {stars} placeholder). Leave empty for default",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "invoice_description",
+                "",
+                "Invoice description template (use {stars} placeholder). Leave empty for default",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "invoice_banner",
+                None,
+                "Invoice banner image URL (shown in payment form). Set to None for no banner",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "inline_banner",
+                None,
+                "Inline preview banner image URL (shown in inline results). Set to None for no preview",
+                validator=loader.validators.String(),
+            ),
         )
 
         self._bot_token = None
@@ -110,9 +202,12 @@ class DepInvoice(loader.Module):
         if self._asset_channel:
             try:
                 self._logger_topic = await utils.asset_forum_topic(
-                    self._client, self._db, self._asset_channel, "DepInvoice",
+                    self._client, 
+                    self._db, 
+                    self._asset_channel, 
+                    "DepInvoice",
                     description="Payment and refund logs",
-                    icon_emoji_id=5188466187448650036,
+                    icon_emoji_id=5267278506617772644,
                 )
             except Exception as e:
                 logger.error(f"[DepInvoice] Failed to create/get forum topic: {e}")
@@ -186,8 +281,9 @@ class DepInvoice(loader.Module):
         except Exception as e:
             return False, str(e)
 
-    @loader.command(ru_doc="[user_id] [charge_id] - Вернуть Stars пользователю", en_doc="[user_id] [charge_id] - Refund Stars to user")
+    @loader.command()
     async def refund(self, message):
+        """[user_id] [charge_id] - Refund Stars to user"""
         if not self._bot_token:
             await utils.answer(message, self.strings["no_bot"])
             return
@@ -201,7 +297,7 @@ class DepInvoice(loader.Module):
             await utils.answer(message, self.strings["refund_invalid_args"])
             return
         charge_id = args[1].strip()
-        status_msg = await utils.answer(message, "<b>[WAIT]</b> Processing refund...")
+        status_msg = await utils.answer(message, "<blockquote><b>Processing refund...</b></blockquote>")
         success, error = await self._refund_via_api(user_id, charge_id)
         if success:
             await utils.answer(status_msg, self.strings["refund_success"])
@@ -225,8 +321,9 @@ class DepInvoice(loader.Module):
             return None
         return InputWebDocument(url=url, size=0, mime_type=mime_type, attributes=[])
 
-    @loader.inline_handler(ru_doc="Создание инвойса на Stars", en_doc="Create Stars invoice")
+    @loader.inline_handler()
     async def dep_inline_handler(self, query):
+        """Create Stars invoice"""
         text = query.query.strip()
         if text.lower().startswith("dep"):
             text = text[3:].strip()
