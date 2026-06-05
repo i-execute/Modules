@@ -1,4 +1,4 @@
-__version__ = (1, 2, 3)
+__version__ = (1, 3, 3)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DevTool/MetaBanner.jpeg
 
@@ -102,56 +102,94 @@ class _DetailParser(HTMLParser):
         self._in_td = False
         self._td_buf = ""
         self._table_index = 0
-        self._in_first_table = False
+        self._in_params_table = False
+
+        self._returns_rows = []
+        self._returns_row = []
+        self._in_returns_table = False
+        self._in_returns_td = False
+        self._returns_td_buf = ""
 
         self._pres = []
         self._in_pre = False
         self._pre_buf = ""
-        self._pre_count = 0
+
+        self._cur_h3 = ""
+        self._in_h3 = False
+        self._h3_buf = ""
 
     def handle_starttag(self, tag, attrs):
-        if tag == "p":
+        if tag == "h3":
+            self._in_h3 = True
+            self._h3_buf = ""
+        elif tag == "p":
             self._in_p = True
             self._p_buf = ""
         elif tag == "table":
             self._table_index += 1
-            self._in_first_table = (self._table_index == 1)
+            h = self._cur_h3.lower()
+            if "parameter" in h:
+                self._in_params_table = True
+                self._in_returns_table = False
+            elif "return" in h:
+                self._in_returns_table = True
+                self._in_params_table = False
+            else:
+                self._in_params_table = False
+                self._in_returns_table = False
         elif tag == "tr":
             self._row = []
+            self._returns_row = []
         elif tag == "td":
-            if self._in_first_table:
+            if self._in_params_table:
                 self._in_td = True
                 self._td_buf = ""
+            elif self._in_returns_table:
+                self._in_returns_td = True
+                self._returns_td_buf = ""
         elif tag == "pre":
             self._in_pre = True
             self._pre_buf = ""
 
     def handle_endtag(self, tag):
-        if tag == "p":
+        if tag == "h3":
+            self._in_h3 = False
+            self._cur_h3 = self._h3_buf.strip()
+        elif tag == "p":
             self._in_p = False
             t = self._p_buf.strip()
             if t:
                 self._paragraphs.append(t)
         elif tag == "table":
-            self._in_first_table = False
+            self._in_params_table = False
+            self._in_returns_table = False
         elif tag == "td":
             if self._in_td:
                 self._in_td = False
                 self._row.append(self._td_buf.strip())
+            elif self._in_returns_td:
+                self._in_returns_td = False
+                self._returns_row.append(self._returns_td_buf.strip())
         elif tag == "tr":
-            if self._row and self._in_first_table:
+            if self._row and self._in_params_table:
                 self._table_rows.append(self._row[:])
                 self._row = []
+            elif self._returns_row and self._in_returns_table:
+                self._returns_rows.append(self._returns_row[:])
+                self._returns_row = []
         elif tag == "pre":
             self._in_pre = False
             self._pres.append(self._pre_buf)
-            self._pre_count += 1
 
     def handle_data(self, data):
+        if self._in_h3:
+            self._h3_buf += data
         if self._in_p:
             self._p_buf += data
         if self._in_td:
             self._td_buf += data
+        if self._in_returns_td:
+            self._returns_td_buf += data
         if self._in_pre:
             self._pre_buf += data
 
@@ -176,6 +214,16 @@ class _DetailParser(HTMLParser):
                 continue
             rows.append(row)
         return rows
+
+    @property
+    def returns(self):
+        result = []
+        for row in self._returns_rows:
+            for cell in row:
+                cell = cell.strip()
+                if cell and cell not in ("Type",):
+                    result.append(cell)
+        return result
 
     @property
     def example(self):
@@ -270,12 +318,12 @@ async def _load_detail(href: str):
     p.feed(text)
 
     filename = href.rstrip("/").split("/")[-1].replace(".html", "")
-    name = filename
 
     return {
-        "name": name,
+        "name": filename,
         "description": p.description,
         "params": p.params,
+        "returns": p.returns,
         "example": p.example,
         "url": url,
     }
@@ -301,6 +349,10 @@ def _build_result_message(detail: dict, display_name: str, url: str) -> str:
 
     if detail["description"]:
         lines.append("<blockquote>" + e(detail["description"]) + "</blockquote>")
+
+    if detail.get("returns"):
+        ret_types = ", ".join(e(r) for r in detail["returns"])
+        lines.append("<b>Returns:</b> <code>" + ret_types + "</code>")
 
     if detail["params"]:
         lines.append("<b>Parameters:</b>")

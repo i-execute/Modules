@@ -20,7 +20,7 @@ class OnlineKeeper(loader.Module):
     strings = {
         "name": "OnlineKeeper",
         "status_online": (
-            "<b>OnlineKeeper Status</b>\n\n"
+            "<b>OnlineKeeper Status</b>\n"
             "<b>Mode:</b> Active\n"
             "<b>Account:</b> Online\n"
             "<b>Update interval:</b> 15 seconds"
@@ -38,7 +38,7 @@ class OnlineKeeper(loader.Module):
 
     strings_ru = {
         "status_online": (
-            "<b>Статус OnlineKeeper</b>\n\n"
+            "<b>Статус OnlineKeeper</b>\n"
             "<b>Режим:</b> Активен\n"
             "<b>Аккаунт:</b> Онлайн\n"
             "<b>Интервал обновления:</b> 15 секунд"
