@@ -356,6 +356,7 @@ class Stories(loader.Module):
     }
 
     def __init__(self):
+        self._pending_reply = None
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "period",
@@ -591,7 +592,7 @@ class Stories(loader.Module):
         )
 
     async def _cb_post_profile(self, call: InlineCall):
-        reply = call.form.get("reply_message")
+        reply = self._pending_reply
         if not reply or not reply.photo:
             await call.edit(
                 self.strings["no_reply"],
@@ -638,7 +639,7 @@ class Stories(loader.Module):
             )
 
     async def _cb_post_archive(self, call: InlineCall):
-        reply = call.form.get("reply_message")
+        reply = self._pending_reply
         if not reply or not reply.photo:
             await call.edit(
                 self.strings["no_reply"],
@@ -685,7 +686,7 @@ class Stories(loader.Module):
             )
 
     async def _cb_post_album_menu(self, call: InlineCall):
-        reply = call.form.get("reply_message")
+        reply = self._pending_reply
         if not reply or not reply.photo:
             await call.edit(
                 self.strings["no_reply"],
@@ -716,7 +717,7 @@ class Stories(loader.Module):
         await call.edit(text, reply_markup=markup)
 
     async def _cb_post_album_select(self, call: InlineCall, album_name: str):
-        reply = call.form.get("reply_message")
+        reply = self._pending_reply
         if not reply or not reply.photo:
             await call.edit(
                 self.strings["no_reply"],
@@ -763,7 +764,7 @@ class Stories(loader.Module):
             )
 
     async def _cb_post_new_album(self, call: InlineCall, album_name: str):
-        reply = call.form.get("reply_message")
+        reply = self._pending_reply
         if not reply or not reply.photo:
             await call.edit(
                 self.strings["no_reply"],
@@ -1045,22 +1046,14 @@ class Stories(loader.Module):
         await call.delete()
 
     @loader.command()
-    async def stories(self, message):
+    async def st(self, message):
         """Stories manager"""
         reply = await message.get_reply_message()
-        
-        if reply and reply.photo:
-            await self.inline.form(
-                text=self.strings["main_menu"],
-                message=message,
-                reply_markup=self._get_main_markup(),
-                reply_message=reply,
-                silent=True,
-            )
-        else:
-            await self.inline.form(
-                text=self.strings["main_menu"],
-                message=message,
-                reply_markup=self._get_main_markup(),
-                silent=True,
-            )
+        self._pending_reply = reply if (reply and reply.photo) else None
+
+        await self.inline.form(
+            text=self.strings["main_menu"],
+            message=message,
+            reply_markup=self._get_main_markup(),
+            silent=True,
+        )
