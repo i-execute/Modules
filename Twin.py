@@ -1,4 +1,4 @@
-__version__ = (2, 0, 0)
+__version__ = (2, 1, 0)
 # meta developer: I_execute.t.me
 
 import asyncio
@@ -13,6 +13,7 @@ from telethon.tl.types import Message
 from telethon.errors import AuthKeyUnregisteredError, UserDeactivatedBanError
 
 from .. import loader, utils
+from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
@@ -25,136 +26,269 @@ class Twin(loader.Module):
 
     strings = {
         "name": "Twin",
-        "line": "--------------------",
-        "help": (
+        
+        "session_success": (
+            "<b>Session Connected Successfully</b>\n\n"
+            "<b>Account:</b> {name}\n"
+            "<b>ID:</b> <code>{id}</code>\n\n"
+            "Click continue to access settings"
+        ),
+        
+        "main_menu": (
             "<b>Twin Account Manager</b>\n\n"
-            "<b>Session:</b>\n"
-            "<code>{prefix}twin add [session]</code> - add session\n"
-            "<code>{prefix}twin remove</code> - remove session\n"
-            "<code>{prefix}twin status</code> - connection status\n\n"
-            "<b>Settings:</b>\n"
-            "<code>{prefix}twin timezone [-12..12]</code> - set timezone\n"
-            "<code>{prefix}twin nick [name]</code> - set nickname (format: name | HH:MM)\n"
-            "<code>{prefix}twin text [text]</code> - set auto-reply text (HTML supported)\n"
-            "<code>{prefix}twin media [url]</code> - set media for auto-reply\n"
-            "<code>{prefix}twin online</code> - set online status\n"
-            "<code>{prefix}twin offline</code> - set offline status\n\n"
-            "<b>Triggers:</b>\n"
-            "<code>{prefix}twin target [words...]</code> - add triggers (max 10)\n"
-            "<code>{prefix}twin target clear</code> - clear triggers\n"
-            "<code>{prefix}twin target list</code> - list triggers\n"
+            "<b>Status:</b> {status}\n"
+            "<b>Account:</b> {account}\n"
+            "<b>Nickname:</b> {nickname}\n"
+            "<b>Timezone:</b> UTC{timezone}\n"
+            "<b>Auto-reply:</b> {autoreply}\n"
+            "<b>Triggers:</b> {triggers}\n"
+            "<b>Online mode:</b> {online}"
         ),
-        "no_session": "<b>Error:</b> No session added. Use <code>{prefix}twin add [session]</code>",
-        "session_added": "<b>Session added successfully</b>\n{line}\nAccount: {name}\nID: <code>{user_id}</code>\n{line}",
-        "session_removed": "<b>Session removed from memory</b>",
-        "session_invalid": "<b>Error:</b> Invalid session\n{line}\nReason: {error}\n{line}",
-        "session_exists": "<b>Error:</b> Session already exists. Remove first: <code>{prefix}twin remove</code>",
-        "provide_session": "<b>Error:</b> Provide StringSession via argument or reply",
-        "timezone_set": "<b>Timezone set:</b> UTC{tz}",
-        "timezone_invalid": "<b>Error:</b> Invalid timezone. Range: -12 to +12",
-        "nick_set": "<b>Nickname set:</b> <code>{nick}</code>\n{line}\nFormat: {nick} | HH:MM\n{line}",
-        "nick_provide": "<b>Error:</b> Provide nickname",
-        "text_set": "<b>Auto-reply text set:</b>\n{line}\n{text}\n{line}",
-        "text_provide": "<b>Error:</b> Provide auto-reply text",
-        "media_set": "<b>Media set successfully</b>",
-        "media_removed": "<b>Media removed</b>",
-        "media_invalid": "<b>Error:</b> Provide media URL or reply to media",
-        "target_added": "<b>Triggers added:</b>\n{line}\n{targets}\n{line}",
-        "target_cleared": "<b>Trigger list cleared</b>",
-        "target_list": "<b>Current triggers ({count}/10):</b>\n{line}\n{targets}\n{line}",
-        "target_empty": "<b>Trigger list is empty</b>",
-        "target_max": "<b>Error:</b> Maximum 10 triggers. Current: {count}",
-        "target_provide": "<b>Error:</b> Provide trigger words",
-        "status_online": (
-            "<b>Twin Status: Online</b>\n"
-            "{line}\n"
-            "Account: {name}\n"
-            "ID: <code>{user_id}</code>\n"
-            "Timezone: UTC{tz}\n"
-            "Nickname: <code>{nick}</code>\n"
-            "Triggers: {targets}\n"
-            "Auto-reply: {has_text}\n"
-            "Media: {has_media}\n"
-            "Online mode: {online_mode}\n"
-            "{line}"
+        
+        "session_menu": (
+            "<b>Session Management</b>\n\n"
+            "<b>Current status:</b> {status}\n"
+            "{info}"
         ),
-        "status_offline": "<b>Twin Status: Offline</b>",
-        "online_set": "<b>Twin account status:</b> Online\n{line}\nAccount will appear online\n{line}",
-        "offline_set": "<b>Twin account status:</b> Offline\n{line}\nAccount will appear offline\n{line}",
-        "online_error": "<b>Error:</b> Failed to update status",
+        
+        "settings_menu": (
+            "<b>Settings</b>\n\n"
+            "<b>Nickname:</b> {nickname}\n"
+            "<b>Timezone:</b> UTC{timezone}\n"
+            "<b>Auto-reply text:</b> {text}\n"
+            "<b>Media:</b> {media}"
+        ),
+        
+        "nickname_menu": (
+            "<b>Nickname Settings</b>\n\n"
+            "<b>Current:</b> {nickname}\n"
+            "<b>Format:</b> {nickname} | HH:MM"
+        ),
+        
+        "timezone_menu": (
+            "<b>Timezone Settings</b>\n\n"
+            "<b>Current:</b> UTC{timezone}"
+        ),
+        
+        "text_menu": (
+            "<b>Auto-reply Text Settings</b>\n\n"
+            "<b>Current:</b> {text}"
+        ),
+        
+        "media_menu": (
+            "<b>Media Settings</b>\n\n"
+            "<b>Status:</b> {status}"
+        ),
+        
+        "triggers_menu": (
+            "<b>Trigger Words ({count}/10)</b>\n\n"
+            "{triggers}"
+        ),
+        
+        "online_menu": (
+            "<b>Online Status Control</b>\n\n"
+            "<b>Current mode:</b> {mode}\n"
+            "<b>Account visibility:</b> {visibility}"
+        ),
+        
+        "btn_continue": "Continue",
+        "btn_session": "Session",
+        "btn_settings": "Settings",
+        "btn_triggers": "Triggers",
+        "btn_online": "Online",
+        "btn_back": "Back",
+        "btn_close": "Close",
+        
+        "btn_remove_session": "Remove Session",
+        
+        "btn_nickname": "Nickname",
+        "btn_timezone": "Timezone",
+        "btn_text": "Text",
+        "btn_media": "Media",
+        
+        "btn_set_nickname": "Set Nickname",
+        "btn_set_timezone": "Set Timezone",
+        "btn_set_text": "Set Text",
+        "btn_set_media": "Set Media",
+        "btn_remove_media": "Remove Media",
+        
+        "btn_add_trigger": "Add Trigger",
+        "btn_clear_triggers": "Clear All",
+        
+        "btn_enable_online": "Enable Online",
+        "btn_disable_online": "Disable Online",
+        
+        "input_nickname": "Enter nickname template (without time):",
+        "input_timezone": "Enter timezone offset (-12 to +12):",
+        "input_text": "Enter auto-reply text (HTML supported):",
+        "input_media": "Enter media URL:",
+        "input_trigger": "Enter trigger words (space separated):",
+        
+        "status_connected": "Connected",
+        "status_disconnected": "Disconnected",
+        "status_not_set": "Not set",
+        "status_enabled": "Enabled",
+        "status_disabled": "Disabled",
+        "status_online": "Online",
+        "status_offline": "Offline",
+        
+        "session_removed": "Session removed",
+        "session_invalid": "Invalid session: {error}",
+        "session_info": "Account: {name}\nID: {id}",
+        "no_session": "<b>No session configured.</b> Reply to StringSession with <code>.twin</code> command",
+        
+        "nickname_set": "Nickname set: {nickname}",
+        "timezone_set": "Timezone set: UTC{timezone}",
+        "timezone_invalid": "Invalid timezone. Use range: -12 to +12",
+        "text_set": "Auto-reply text set",
+        "media_set": "Media set successfully",
+        "media_removed": "Media removed",
+        
+        "triggers_added": "Triggers added: {triggers}",
+        "triggers_cleared": "All triggers cleared",
+        "triggers_max": "Maximum 10 triggers reached",
+        "triggers_list": "{triggers}",
+        "triggers_empty": "No triggers set",
+        
+        "online_enabling": "<b>Enabling online mode...</b>\n\nTwin account will appear online",
+        "online_disabling": "<b>Disabling online mode...</b>\n\nTwin account will go offline",
+        
+        "error_no_session": "No session configured",
+        "error_not_connected": "Session not connected",
     }
 
     strings_ru = {
-        "line": "--------------------",
-        "help": (
-            "<b>Twin - Менеджер второго аккаунта</b>\n\n"
-            "<b>Сессия:</b>\n"
-            "<code>{prefix}twin add [сессия]</code> - добавить сессию\n"
-            "<code>{prefix}twin remove</code> - удалить сессию\n"
-            "<code>{prefix}twin status</code> - статус подключения\n\n"
-            "<b>Настройки:</b>\n"
-            "<code>{prefix}twin timezone [-12..12]</code> - установить часовой пояс\n"
-            "<code>{prefix}twin nick [имя]</code> - установить никнейм (формат: имя | ЧЧ:ММ)\n"
-            "<code>{prefix}twin text [текст]</code> - установить текст автоответа (HTML)\n"
-            "<code>{prefix}twin media [url]</code> - установить медиа для автоответа\n"
-            "<code>{prefix}twin online</code> - установить статус онлайн\n"
-            "<code>{prefix}twin offline</code> - установить статус оффлайн\n\n"
-            "<b>Триггеры:</b>\n"
-            "<code>{prefix}twin target [слова...]</code> - добавить триггеры (макс 10)\n"
-            "<code>{prefix}twin target clear</code> - очистить триггеры\n"
-            "<code>{prefix}twin target list</code> - список триггеров\n"
+        "session_success": (
+            "<b>Сессия успешно подключена</b>\n\n"
+            "<b>Аккаунт:</b> {name}\n"
+            "<b>ID:</b> <code>{id}</code>\n\n"
+            "Нажмите продолжить для доступа к настройкам"
         ),
-        "no_session": "<b>Ошибка:</b> Нет сессии. Используйте <code>{prefix}twin add [сессия]</code>",
-        "session_added": "<b>Сессия успешно добавлена</b>\n{line}\nАккаунт: {name}\nID: <code>{user_id}</code>\n{line}",
-        "session_removed": "<b>Сессия удалена из памяти</b>",
-        "session_invalid": "<b>Ошибка:</b> Недействительная сессия\n{line}\nПричина: {error}\n{line}",
-        "session_exists": "<b>Ошибка:</b> Сессия уже существует. Сначала удалите: <code>{prefix}twin remove</code>",
-        "provide_session": "<b>Ошибка:</b> Укажите StringSession аргументом или ответом",
-        "timezone_set": "<b>Часовой пояс установлен:</b> UTC{tz}",
-        "timezone_invalid": "<b>Ошибка:</b> Неверный часовой пояс. Диапазон: от -12 до +12",
-        "nick_set": "<b>Никнейм установлен:</b> <code>{nick}</code>\n{line}\nФормат: {nick} | ЧЧ:ММ\n{line}",
-        "nick_provide": "<b>Ошибка:</b> Укажите никнейм",
-        "text_set": "<b>Текст автоответа установлен:</b>\n{line}\n{text}\n{line}",
-        "text_provide": "<b>Ошибка:</b> Укажите текст автоответа",
-        "media_set": "<b>Медиа успешно установлено</b>",
-        "media_removed": "<b>Медиа удалено</b>",
-        "media_invalid": "<b>Ошибка:</b> Укажите URL медиа или ответьте на медиа",
-        "target_added": "<b>Триггеры добавлены:</b>\n{line}\n{targets}\n{line}",
-        "target_cleared": "<b>Список триггеров очищен</b>",
-        "target_list": "<b>Текущие триггеры ({count}/10):</b>\n{line}\n{targets}\n{line}",
-        "target_empty": "<b>Список триггеров пуст</b>",
-        "target_max": "<b>Ошибка:</b> Максимум 10 триггеров. Текущее количество: {count}",
-        "target_provide": "<b>Ошибка:</b> Укажите слова-триггеры",
-        "status_online": (
-            "<b>Статус Twin: Онлайн</b>\n"
-            "{line}\n"
-            "Аккаунт: {name}\n"
-            "ID: <code>{user_id}</code>\n"
-            "Часовой пояс: UTC{tz}\n"
-            "Никнейм: <code>{nick}</code>\n"
-            "Триггеры: {targets}\n"
-            "Автоответ: {has_text}\n"
-            "Медиа: {has_media}\n"
-            "Режим онлайн: {online_mode}\n"
-            "{line}"
+        
+        "main_menu": (
+            "<b>Twin Account Manager</b>\n\n"
+            "<b>Статус:</b> {status}\n"
+            "<b>Аккаунт:</b> {account}\n"
+            "<b>Никнейм:</b> {nickname}\n"
+            "<b>Часовой пояс:</b> UTC{timezone}\n"
+            "<b>Автоответ:</b> {autoreply}\n"
+            "<b>Триггеры:</b> {triggers}\n"
+            "<b>Режим онлайн:</b> {online}"
         ),
-        "status_offline": "<b>Статус Twin: Оффлайн</b>",
-        "online_set": "<b>Статус Twin аккаунта:</b> Онлайн\n{line}\nАккаунт будет отображаться онлайн\n{line}",
-        "offline_set": "<b>Статус Twin аккаунта:</b> Оффлайн\n{line}\nАккаунт будет отображаться оффлайн\n{line}",
-        "online_error": "<b>Ошибка:</b> Не удалось обновить статус",
+        
+        "session_menu": (
+            "<b>Управление сессией</b>\n\n"
+            "<b>Текущий статус:</b> {status}\n"
+            "{info}"
+        ),
+        
+        "settings_menu": (
+            "<b>Настройки</b>\n\n"
+            "<b>Никнейм:</b> {nickname}\n"
+            "<b>Часовой пояс:</b> UTC{timezone}\n"
+            "<b>Текст автоответа:</b> {text}\n"
+            "<b>Медиа:</b> {media}"
+        ),
+        
+        "nickname_menu": (
+            "<b>Настройки никнейма</b>\n\n"
+            "<b>Текущий:</b> {nickname}\n"
+            "<b>Формат:</b> {nickname} | ЧЧ:ММ"
+        ),
+        
+        "timezone_menu": (
+            "<b>Настройки часового пояса</b>\n\n"
+            "<b>Текущий:</b> UTC{timezone}"
+        ),
+        
+        "text_menu": (
+            "<b>Настройки текста автоответа</b>\n\n"
+            "<b>Текущий:</b> {text}"
+        ),
+        
+        "media_menu": (
+            "<b>Настройки медиа</b>\n\n"
+            "<b>Статус:</b> {status}"
+        ),
+        
+        "triggers_menu": (
+            "<b>Слова-триггеры ({count}/10)</b>\n\n"
+            "{triggers}"
+        ),
+        
+        "online_menu": (
+            "<b>Управление онлайн статусом</b>\n\n"
+            "<b>Текущий режим:</b> {mode}\n"
+            "<b>Видимость аккаунта:</b> {visibility}"
+        ),
+        
+        "btn_continue": "Продолжить",
+        "btn_session": "Сессия",
+        "btn_settings": "Настройки",
+        "btn_triggers": "Триггеры",
+        "btn_online": "Онлайн",
+        "btn_back": "Назад",
+        "btn_close": "Закрыть",
+        
+        "btn_remove_session": "Удалить сессию",
+        
+        "btn_nickname": "Никнейм",
+        "btn_timezone": "Часовой пояс",
+        "btn_text": "Текст",
+        "btn_media": "Медиа",
+        
+        "btn_set_nickname": "Установить никнейм",
+        "btn_set_timezone": "Установить пояс",
+        "btn_set_text": "Установить текст",
+        "btn_set_media": "Установить медиа",
+        "btn_remove_media": "Удалить медиа",
+        
+        "btn_add_trigger": "Добавить триггер",
+        "btn_clear_triggers": "Очистить все",
+        
+        "btn_enable_online": "Включить онлайн",
+        "btn_disable_online": "Выключить онлайн",
+        
+        "input_nickname": "Введите шаблон никнейма (без времени):",
+        "input_timezone": "Введите смещение часового пояса (от -12 до +12):",
+        "input_text": "Введите текст автоответа (поддерживается HTML):",
+        "input_media": "Введите URL медиа:",
+        "input_trigger": "Введите слова-триггеры (через пробел):",
+        
+        "status_connected": "Подключено",
+        "status_disconnected": "Отключено",
+        "status_not_set": "Не установлено",
+        "status_enabled": "Включено",
+        "status_disabled": "Выключено",
+        "status_online": "Онлайн",
+        "status_offline": "Оффлайн",
+        
+        "session_removed": "Сессия удалена",
+        "session_invalid": "Неверная сессия: {error}",
+        "session_info": "Аккаунт: {name}\nID: {id}",
+        "no_session": "<b>Сессия не настроена.</b> Ответьте на StringSession командой <code>.twin</code>",
+        
+        "nickname_set": "Никнейм установлен: {nickname}",
+        "timezone_set": "Часовой пояс установлен: UTC{timezone}",
+        "timezone_invalid": "Неверный часовой пояс. Используйте диапазон: от -12 до +12",
+        "text_set": "Текст автоответа установлен",
+        "media_set": "Медиа успешно установлено",
+        "media_removed": "Медиа удалено",
+        
+        "triggers_added": "Триггеры добавлены: {triggers}",
+        "triggers_cleared": "Все триггеры очищены",
+        "triggers_max": "Достигнут максимум в 10 триггеров",
+        "triggers_list": "{triggers}",
+        "triggers_empty": "Триггеры не установлены",
+        
+        "online_enabling": "<b>Включение режима онлайн...</b>\n\nTwin аккаунт появится в сети",
+        "online_disabling": "<b>Выключение режима онлайн...</b>\n\nTwin аккаунт пропадет из сети",
+        
+        "error_no_session": "Сессия не настроена",
+        "error_not_connected": "Сессия не подключена",
     }
 
     def __init__(self):
-        self.config = loader.ModuleConfig(
-            "SESSION", "", "StringSession of second account",
-            "TIMEZONE", 3, "Timezone UTC offset",
-            "NICK_TEMPLATE", "", "Nickname template without time",
-            "AUTO_TEXT", "", "Auto-reply text",
-            "MEDIA_URL", "", "Media URL for auto-reply",
-            "SAVED_MSG_ID", 0, "Saved media message ID",
-            "TARGETS", [], "Trigger words for auto-reply",
-            "KEEP_ONLINE", False, "Keep account online",
-        )
         self._twin_client = None
         self._twin_me = None
         self._nick_task = None
@@ -164,19 +298,69 @@ class Twin(loader.Module):
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
-        if self.config["SESSION"]:
+        
+        if self._db.get(self.name, "session", None):
             asyncio.create_task(self._connect_twin())
 
     async def on_unload(self):
         await self._disconnect_twin()
 
+    def _get_session(self):
+        return self._db.get(self.name, "session", None)
+
+    def _set_session(self, value):
+        self._db.set(self.name, "session", value)
+
+    def _get_timezone(self):
+        return self._db.get(self.name, "timezone", 3)
+
+    def _set_timezone(self, value):
+        self._db.set(self.name, "timezone", value)
+
+    def _get_nick_template(self):
+        return self._db.get(self.name, "nick_template", "")
+
+    def _set_nick_template(self, value):
+        self._db.set(self.name, "nick_template", value)
+
+    def _get_auto_text(self):
+        return self._db.get(self.name, "auto_text", "")
+
+    def _set_auto_text(self, value):
+        self._db.set(self.name, "auto_text", value)
+
+    def _get_media_url(self):
+        return self._db.get(self.name, "media_url", "")
+
+    def _set_media_url(self, value):
+        self._db.set(self.name, "media_url", value)
+
+    def _get_saved_msg_id(self):
+        return self._db.get(self.name, "saved_msg_id", 0)
+
+    def _set_saved_msg_id(self, value):
+        self._db.set(self.name, "saved_msg_id", value)
+
+    def _get_targets(self):
+        return self._db.get(self.name, "targets", [])
+
+    def _set_targets(self, value):
+        self._db.set(self.name, "targets", value)
+
+    def _get_keep_online(self):
+        return self._db.get(self.name, "keep_online", False)
+
+    def _set_keep_online(self, value):
+        self._db.set(self.name, "keep_online", value)
+
     async def _connect_twin(self):
-        if not self.config["SESSION"]:
+        session = self._get_session()
+        if not session:
             return False
 
         try:
             self._twin_client = TelegramClient(
-                StringSession(self.config["SESSION"]),
+                StringSession(session),
                 api_id=2040,
                 api_hash="b18441a1ff607e10a989891a5462e627"
             )
@@ -188,10 +372,10 @@ class Twin(loader.Module):
             self._twin_me = await self._twin_client.get_me()
             self._connected = True
             
-            if self.config["NICK_TEMPLATE"]:
+            if self._get_nick_template():
                 await self._start_nick_loop()
             
-            if self.config["KEEP_ONLINE"]:
+            if self._get_keep_online():
                 await self._start_online_loop()
             
             from telethon import events
@@ -207,12 +391,12 @@ class Twin(loader.Module):
             
         except AuthKeyUnregisteredError:
             self._connected = False
-            self.config["SESSION"] = ""
+            self._set_session(None)
             logger.error("[TWIN] Session revoked")
             return False
         except UserDeactivatedBanError:
             self._connected = False
-            self.config["SESSION"] = ""
+            self._set_session(None)
             logger.error("[TWIN] Account banned")
             return False
         except Exception as e:
@@ -276,14 +460,14 @@ class Twin(loader.Module):
             self._online_task = None
 
     async def _nick_update_loop(self):
-        while self._connected and self.config["NICK_TEMPLATE"]:
+        while self._connected and self._get_nick_template():
             try:
-                offset = self.config["TIMEZONE"]
+                offset = self._get_timezone()
                 tz = timezone(timedelta(hours=offset))
                 now = datetime.now(tz)
                 time_str = now.strftime("%H:%M")
                 
-                new_nick = f"{self.config['NICK_TEMPLATE']} | {time_str}"
+                new_nick = f"{self._get_nick_template()} | {time_str}"
                 
                 await self._twin_client(UpdateProfileRequest(first_name=new_nick[:64]))
                 
@@ -300,7 +484,7 @@ class Twin(loader.Module):
                 await asyncio.sleep(60)
 
     async def _online_update_loop(self):
-        while self._connected and self.config["KEEP_ONLINE"]:
+        while self._connected and self._get_keep_online():
             try:
                 await self._twin_client(UpdateStatusRequest(offline=False))
                 await asyncio.sleep(15)
@@ -319,8 +503,8 @@ class Twin(loader.Module):
         if message.out:
             return
         
-        targets = self.config["TARGETS"]
-        auto_text = self.config["AUTO_TEXT"]
+        targets = self._get_targets()
+        auto_text = self._get_auto_text()
         
         if not targets or not auto_text:
             return
@@ -340,11 +524,11 @@ class Twin(loader.Module):
         
         try:
             media = None
-            media_url = self.config["MEDIA_URL"]
+            media_url = self._get_media_url()
             
             if media_url:
                 if media_url.startswith("saved:"):
-                    msg_id = self.config["SAVED_MSG_ID"]
+                    msg_id = self._get_saved_msg_id()
                     if msg_id:
                         saved_msg = await self._client.get_messages("me", ids=msg_id)
                         if saved_msg and saved_msg.media:
@@ -360,348 +544,386 @@ class Twin(loader.Module):
         except Exception as e:
             logger.error(f"[TWIN] Auto-reply error: {e}")
 
-    @loader.command(
-        ru_doc="Управление Twin аккаунтом",
-        en_doc="Twin account management",
-    )
-    async def twin(self, message: Message):
-        """Twin account management"""
-        args = utils.get_args_raw(message)
-        args_list = args.split() if args else []
-        prefix = self.get_prefix()
-        
-        if not args_list:
-            await utils.answer(
-                message,
-                self.strings["help"].format(prefix=prefix),
-            )
-            return
-        
-        cmd = args_list[0].lower()
-        
-        if cmd == "add":
-            await self._cmd_add(message, args_list)
-        elif cmd == "remove":
-            await self._cmd_remove(message)
-        elif cmd == "status":
-            await self._cmd_status(message)
-        elif cmd == "timezone":
-            await self._cmd_timezone(message, args_list)
-        elif cmd == "nick":
-            await self._cmd_nick(message, args, args_list)
-        elif cmd == "text":
-            await self._cmd_text(message, args)
-        elif cmd == "media":
-            await self._cmd_media(message, args_list)
-        elif cmd == "target":
-            await self._cmd_target(message, args_list)
-        elif cmd == "online":
-            await self._cmd_online(message)
-        elif cmd == "offline":
-            await self._cmd_offline(message)
-        else:
-            await utils.answer(
-                message,
-                self.strings["help"].format(prefix=prefix),
-            )
+    def _get_main_markup(self):
+        return [
+            [
+                {"text": self.strings["btn_session"], "callback": self._cb_session_menu, "style": "primary"},
+                {"text": self.strings["btn_settings"], "callback": self._cb_settings_menu, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_triggers"], "callback": self._cb_triggers_menu, "style": "primary"},
+                {"text": self.strings["btn_online"], "callback": self._cb_online_toggle, "style": "success" if not self._get_keep_online() else "danger"},
+            ],
+            [
+                {"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"},
+            ],
+        ]
 
-    async def _cmd_add(self, message: Message, args):
-        prefix = self.get_prefix()
-        if self.config["SESSION"]:
-            return await utils.answer(
-                message,
-                self.strings["session_exists"].format(prefix=prefix),
-            )
+    def _format_main_text(self):
+        status = self.strings["status_connected"] if self._connected else self.strings["status_disconnected"]
+        account = f"{self._twin_me.first_name} ({self._twin_me.id})" if self._twin_me else self.strings["status_not_set"]
+        nickname = self._get_nick_template() or self.strings["status_not_set"]
         
-        session_str = None
-        
-        if len(args) > 1:
-            text = " ".join(args[1:])
-            match = STRING_SESSION_PATTERN.search(text)
-            if match:
-                session_str = match.group(0)
-        
-        if not session_str:
-            reply = await message.get_reply_message()
-            if reply and reply.text:
-                match = STRING_SESSION_PATTERN.search(reply.text)
-                if match:
-                    session_str = match.group(0)
-        
-        if not session_str:
-            return await utils.answer(message, self.strings["provide_session"])
-        
-        self.config["SESSION"] = session_str
-        
-        try:
-            success = await self._connect_twin()
-            
-            if success:
-                name = self._twin_me.first_name or "Unknown"
-                await message.delete()
-                await self._client.send_message(
-                    message.chat_id,
-                    self.strings["session_added"].format(
-                        line=self.strings["line"],
-                        name=name,
-                        user_id=self._twin_me.id
-                    ),
-                    reply_to=message.reply_to_msg_id
-                )
-            else:
-                self.config["SESSION"] = ""
-                await utils.answer(
-                    message,
-                    self.strings["session_invalid"].format(
-                        line=self.strings["line"],
-                        error="Connection failed"
-                    )
-                )
-        except Exception as e:
-            self.config["SESSION"] = ""
-            await utils.answer(
-                message,
-                self.strings["session_invalid"].format(
-                    line=self.strings["line"],
-                    error=str(e)
-                )
-            )
-
-    async def _cmd_remove(self, message: Message):
-        await self._disconnect_twin()
-        self.config["SESSION"] = ""
-        self.config["NICK_TEMPLATE"] = ""
-        self.config["KEEP_ONLINE"] = False
-        await utils.answer(message, self.strings["session_removed"])
-
-    async def _cmd_status(self, message: Message):
-        if not self._connected or not self._twin_me:
-            return await utils.answer(message, self.strings["status_offline"])
-        
-        tz = self.config["TIMEZONE"]
+        tz = self._get_timezone()
         tz_str = f"+{tz}" if tz >= 0 else str(tz)
         
-        await utils.answer(
-            message,
-            self.strings["status_online"].format(
-                line=self.strings["line"],
-                name=self._twin_me.first_name or "Unknown",
-                user_id=self._twin_me.id,
-                tz=tz_str,
-                nick=self.config["NICK_TEMPLATE"] or "not set",
-                targets=len(self.config["TARGETS"]),
-                has_text="Yes" if self.config["AUTO_TEXT"] else "No",
-                has_media="Yes" if self.config["MEDIA_URL"] else "No",
-                online_mode="Yes" if self.config["KEEP_ONLINE"] else "No"
-            )
+        autoreply = self.strings["status_enabled"] if self._get_auto_text() else self.strings["status_disabled"]
+        triggers = f"{len(self._get_targets())}/10"
+        online = self.strings["status_enabled"] if self._get_keep_online() else self.strings["status_disabled"]
+        
+        return self.strings["main_menu"].format(
+            status=status,
+            account=account,
+            nickname=nickname,
+            timezone=tz_str,
+            autoreply=autoreply,
+            triggers=triggers,
+            online=online
         )
 
-    async def _cmd_timezone(self, message: Message, args):
-        if len(args) < 2:
-            return await utils.answer(message, self.strings["timezone_invalid"])
-        
-        try:
-            tz = int(args[1].replace("+", ""))
-            if not -12 <= tz <= 12:
-                raise ValueError
-            
-            self.config["TIMEZONE"] = tz
-            tz_str = f"+{tz}" if tz >= 0 else str(tz)
-            await utils.answer(message, self.strings["timezone_set"].format(tz=tz_str))
-            
-        except ValueError:
-            await utils.answer(message, self.strings["timezone_invalid"])
-
-    async def _cmd_nick(self, message: Message, raw_args: str, args_list: list):
-        if len(args_list) < 2:
-            return await utils.answer(message, self.strings["nick_provide"])
-        
-        nick = raw_args[5:].strip()
-        self.config["NICK_TEMPLATE"] = nick
-        
-        await utils.answer(
-            message,
-            self.strings["nick_set"].format(
-                line=self.strings["line"],
-                nick=nick
-            )
+    async def _cb_main_menu(self, call: InlineCall):
+        await call.edit(
+            self._format_main_text(),
+            reply_markup=self._get_main_markup()
         )
+
+    async def _cb_session_menu(self, call: InlineCall):
+        status = self.strings["status_connected"] if self._connected else self.strings["status_disconnected"]
+        info = ""
+        if self._twin_me:
+            info = self.strings["session_info"].format(
+                name=self._twin_me.first_name,
+                id=self._twin_me.id
+            )
+        
+        markup = [
+            [
+                {"text": self.strings["btn_remove_session"], "callback": self._cb_remove_session, "style": "danger"}
+            ],
+            [
+                {"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}
+            ],
+        ]
+        
+        await call.edit(
+            self.strings["session_menu"].format(status=status, info=info),
+            reply_markup=markup
+        )
+
+    async def _cb_remove_session(self, call: InlineCall):
+        await self._disconnect_twin()
+        self._set_session(None)
+        self._set_nick_template("")
+        self._set_keep_online(False)
+        await call.answer(self.strings["session_removed"], show_alert=True)
+        await call.delete()
+
+    async def _cb_settings_menu(self, call: InlineCall):
+        nickname = self._get_nick_template() or self.strings["status_not_set"]
+        
+        tz = self._get_timezone()
+        tz_str = f"+{tz}" if tz >= 0 else str(tz)
+        
+        text = self._get_auto_text()
+        text = text[:50] + "..." if len(text) > 50 else (text or self.strings["status_not_set"])
+        media = self.strings["status_enabled"] if self._get_media_url() else self.strings["status_disabled"]
+        
+        markup = [
+            [
+                {"text": self.strings["btn_nickname"], "callback": self._cb_nickname_menu, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_timezone"], "callback": self._cb_timezone_menu, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_text"], "callback": self._cb_text_menu, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_media"], "callback": self._cb_media_menu, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}
+            ],
+        ]
+        
+        await call.edit(
+            self.strings["settings_menu"].format(
+                nickname=nickname,
+                timezone=tz_str,
+                text=text,
+                media=media
+            ),
+            reply_markup=markup
+        )
+
+    async def _cb_nickname_menu(self, call: InlineCall):
+        nickname = self._get_nick_template() or self.strings["status_not_set"]
+        
+        markup = [
+            [
+                {"text": self.strings["btn_set_nickname"], "input": self.strings["input_nickname"], "handler": self._cb_set_nickname, "style": "success"}
+            ],
+            [
+                {"text": self.strings["btn_back"], "callback": self._cb_settings_menu, "style": "danger"}
+            ],
+        ]
+        
+        await call.edit(
+            self.strings["nickname_menu"].format(nickname=nickname),
+            reply_markup=markup
+        )
+
+    async def _cb_timezone_menu(self, call: InlineCall):
+        tz = self._get_timezone()
+        tz_str = f"+{tz}" if tz >= 0 else str(tz)
+        
+        markup = [
+            [
+                {"text": self.strings["btn_set_timezone"], "input": self.strings["input_timezone"], "handler": self._cb_set_timezone, "style": "success"}
+            ],
+            [
+                {"text": self.strings["btn_back"], "callback": self._cb_settings_menu, "style": "danger"}
+            ],
+        ]
+        
+        await call.edit(
+            self.strings["timezone_menu"].format(timezone=tz_str),
+            reply_markup=markup
+        )
+
+    async def _cb_text_menu(self, call: InlineCall):
+        text = self._get_auto_text() or self.strings["status_not_set"]
+        
+        markup = [
+            [
+                {"text": self.strings["btn_set_text"], "input": self.strings["input_text"], "handler": self._cb_set_text, "style": "success"}
+            ],
+            [
+                {"text": self.strings["btn_back"], "callback": self._cb_settings_menu, "style": "danger"}
+            ],
+        ]
+        
+        await call.edit(
+            self.strings["text_menu"].format(text=text),
+            reply_markup=markup
+        )
+
+    async def _cb_media_menu(self, call: InlineCall):
+        status = self.strings["status_enabled"] if self._get_media_url() else self.strings["status_disabled"]
+        
+        markup = [
+            [
+                {"text": self.strings["btn_set_media"], "input": self.strings["input_media"], "handler": self._cb_set_media, "style": "success"}
+            ],
+        ]
+        
+        if self._get_media_url():
+            markup.append([
+                {"text": self.strings["btn_remove_media"], "callback": self._cb_remove_media, "style": "danger"}
+            ])
+        
+        markup.append([
+            {"text": self.strings["btn_back"], "callback": self._cb_settings_menu, "style": "danger"}
+        ])
+        
+        await call.edit(
+            self.strings["media_menu"].format(status=status),
+            reply_markup=markup
+        )
+
+    async def _cb_set_nickname(self, call: InlineCall, nickname: str):
+        self._set_nick_template(nickname.strip())
         
         if self._connected:
             await self._stop_nick_loop()
-            await self._start_nick_loop()
+            if nickname.strip():
+                await self._start_nick_loop()
+        
+        await call.answer(self.strings["nickname_set"].format(nickname=nickname.strip()), show_alert=True)
+        await self._cb_nickname_menu(call)
 
-    async def _cmd_text(self, message: Message, raw_args: str):
-        if len(raw_args) <= 5:
-            return await utils.answer(message, self.strings["text_provide"])
+    async def _cb_set_timezone(self, call: InlineCall, timezone: str):
+        try:
+            tz = int(timezone.replace("+", ""))
+            if not -12 <= tz <= 12:
+                raise ValueError
+            
+            self._set_timezone(tz)
+            tz_str = f"+{tz}" if tz >= 0 else str(tz)
+            await call.answer(self.strings["timezone_set"].format(timezone=tz_str), show_alert=True)
+            await self._cb_timezone_menu(call)
+        except ValueError:
+            await call.answer(self.strings["timezone_invalid"], show_alert=True)
+
+    async def _cb_set_text(self, call: InlineCall, text: str):
+        self._set_auto_text(text.strip())
+        await call.answer(self.strings["text_set"], show_alert=True)
+        await self._cb_text_menu(call)
+
+    async def _cb_set_media(self, call: InlineCall, url: str):
+        old_msg_id = self._get_saved_msg_id()
+        if old_msg_id:
+            try:
+                old_msg = await self._client.get_messages("me", ids=old_msg_id)
+                if old_msg:
+                    await old_msg.delete()
+            except:
+                pass
         
-        text = raw_args[5:].strip()
+        self._set_saved_msg_id(0)
+        self._set_media_url(url.strip())
         
-        if not text:
-            return await utils.answer(message, self.strings["text_provide"])
+        await call.answer(self.strings["media_set"], show_alert=True)
+        await self._cb_media_menu(call)
+
+    async def _cb_remove_media(self, call: InlineCall):
+        old_msg_id = self._get_saved_msg_id()
+        if old_msg_id:
+            try:
+                old_msg = await self._client.get_messages("me", ids=old_msg_id)
+                if old_msg:
+                    await old_msg.delete()
+            except:
+                pass
         
-        self.config["AUTO_TEXT"] = text
+        self._set_saved_msg_id(0)
+        self._set_media_url("")
         
-        await utils.answer(
-            message,
-            self.strings["text_set"].format(
-                line=self.strings["line"],
-                text=text
-            )
+        await call.answer(self.strings["media_removed"], show_alert=True)
+        await self._cb_media_menu(call)
+
+    async def _cb_triggers_menu(self, call: InlineCall):
+        targets = self._get_targets()
+        count = len(targets)
+        
+        if targets:
+            triggers_text = self.strings["triggers_list"].format(triggers=", ".join(targets))
+        else:
+            triggers_text = self.strings["triggers_empty"]
+        
+        markup = []
+        
+        if count < 10:
+            markup.append([
+                {"text": self.strings["btn_add_trigger"], "input": self.strings["input_trigger"], "handler": self._cb_add_trigger, "style": "success"}
+            ])
+        
+        if targets:
+            markup.append([
+                {"text": self.strings["btn_clear_triggers"], "callback": self._cb_clear_triggers, "style": "danger"}
+            ])
+        
+        markup.append([
+            {"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}
+        ])
+        
+        await call.edit(
+            self.strings["triggers_menu"].format(count=count, triggers=triggers_text),
+            reply_markup=markup
         )
 
-    async def _cmd_media(self, message: Message, args):
-        reply = await message.get_reply_message()
+    async def _cb_add_trigger(self, call: InlineCall, triggers: str):
+        new_triggers = triggers.strip().split()
+        current = self._get_targets()
         
-        if reply and reply.media:
-            try:
-                old_msg_id = self.config["SAVED_MSG_ID"]
-                if old_msg_id:
-                    try:
-                        old_msg = await self._client.get_messages("me", ids=old_msg_id)
-                        if old_msg:
-                            await old_msg.delete()
-                    except:
-                        pass
-                
-                saved_msg = await self._client.send_file(
-                    "me",
-                    reply.media,
-                    caption="Twin module media storage",
-                    silent=True
-                )
-                
-                self.config["SAVED_MSG_ID"] = saved_msg.id
-                self.config["MEDIA_URL"] = f"saved:{saved_msg.id}"
-                
-                await utils.answer(message, self.strings["media_set"])
-                return
-                
-            except Exception as e:
-                logger.error(f"[TWIN] Media save error: {e}")
-        
-        if len(args) > 1:
-            url = args[1]
-            
-            old_msg_id = self.config["SAVED_MSG_ID"]
-            if old_msg_id:
-                try:
-                    old_msg = await self._client.get_messages("me", ids=old_msg_id)
-                    if old_msg:
-                        await old_msg.delete()
-                except:
-                    pass
-            
-            self.config["SAVED_MSG_ID"] = 0
-            self.config["MEDIA_URL"] = url
-            
-            await utils.answer(message, self.strings["media_set"])
+        available = 10 - len(current)
+        if available <= 0:
+            await call.answer(self.strings["triggers_max"], show_alert=True)
             return
         
-        if len(args) == 1:
-            old_msg_id = self.config["SAVED_MSG_ID"]
-            if old_msg_id:
-                try:
-                    old_msg = await self._client.get_messages("me", ids=old_msg_id)
-                    if old_msg:
-                        await old_msg.delete()
-                except:
-                    pass
-            
-            self.config["SAVED_MSG_ID"] = 0
-            self.config["MEDIA_URL"] = ""
-            
-            await utils.answer(message, self.strings["media_removed"])
+        added = []
+        for t in new_triggers[:available]:
+            if t.lower() not in [x.lower() for x in current]:
+                current.append(t)
+                added.append(t)
+        
+        self._set_targets(current)
+        
+        await call.answer(
+            self.strings["triggers_added"].format(triggers=", ".join(added) if added else "none"),
+            show_alert=True
+        )
+        await self._cb_triggers_menu(call)
+
+    async def _cb_clear_triggers(self, call: InlineCall):
+        self._set_targets([])
+        await call.answer(self.strings["triggers_cleared"], show_alert=True)
+        await self._cb_triggers_menu(call)
+
+    async def _cb_online_toggle(self, call: InlineCall):
+        if not self._connected:
+            await call.answer(self.strings["error_not_connected"], show_alert=True)
             return
         
-        await utils.answer(message, self.strings["media_invalid"])
-
-    async def _cmd_target(self, message: Message, args):
-        if len(args) < 2:
-            return await utils.answer(message, self.strings["target_provide"])
+        is_online = self._get_keep_online()
         
-        subcmd = args[1].lower()
-        
-        if subcmd == "clear":
-            self.config["TARGETS"] = []
-            await utils.answer(message, self.strings["target_cleared"])
-            
-        elif subcmd == "list":
-            targets = self.config["TARGETS"]
-            if not targets:
-                await utils.answer(message, self.strings["target_empty"])
-            else:
-                await utils.answer(
-                    message,
-                    self.strings["target_list"].format(
-                        line=self.strings["line"],
-                        count=len(targets),
-                        targets=", ".join(targets)
-                    )
-                )
-        else:
-            new_targets = args[1:]
-            current = self.config["TARGETS"] or []
-            
-            available = 10 - len(current)
-            if available <= 0:
-                return await utils.answer(
-                    message,
-                    self.strings["target_max"].format(count=len(current))
-                )
-            
-            added = []
-            for t in new_targets[:available]:
-                if t.lower() not in [x.lower() for x in current]:
-                    current.append(t)
-                    added.append(t)
-            
-            self.config["TARGETS"] = current
-            
-            await utils.answer(
-                message,
-                self.strings["target_added"].format(
-                    line=self.strings["line"],
-                    targets=", ".join(added) if added else "already exist"
-                )
-            )
-
-    async def _cmd_online(self, message: Message):
-        prefix = self.get_prefix()
-        if not self._connected or not self._twin_client:
-            return await utils.answer(
-                message,
-                self.strings["no_session"].format(prefix=prefix),
-            )
-        
-        try:
-            await self._twin_client(UpdateStatusRequest(offline=False))
-            self.config["KEEP_ONLINE"] = True
-            await self._start_online_loop()
-            await utils.answer(
-                message,
-                self.strings["online_set"].format(line=self.strings["line"])
-            )
-        except Exception as e:
-            logger.error(f"[TWIN] Online status error: {e}")
-            await utils.answer(message, self.strings["online_error"])
-
-    async def _cmd_offline(self, message: Message):
-        prefix = self.get_prefix()
-        if not self._connected or not self._twin_client:
-            return await utils.answer(
-                message,
-                self.strings["no_session"].format(prefix=prefix),
-            )
-        
-        try:
-            self.config["KEEP_ONLINE"] = False
+        if is_online:
+            await call.edit(self.strings["online_disabling"])
+            self._set_keep_online(False)
             await self._stop_online_loop()
             await self._twin_client(UpdateStatusRequest(offline=True))
-            await utils.answer(
-                message,
-                self.strings["offline_set"].format(line=self.strings["line"])
+            await asyncio.sleep(1)
+            await call.edit(
+                text=self._format_main_text(),
+                reply_markup=self._get_main_markup()
             )
-        except Exception as e:
-            logger.error(f"[TWIN] Offline status error: {e}")
-            await utils.answer(message, self.strings["online_error"])
+        else:
+            await call.edit(self.strings["online_enabling"])
+            await self._twin_client(UpdateStatusRequest(offline=False))
+            self._set_keep_online(True)
+            await self._start_online_loop()
+            await asyncio.sleep(1)
+            await call.edit(
+                text=self._format_main_text(),
+                reply_markup=self._get_main_markup()
+            )
+
+    async def _cb_close(self, call: InlineCall):
+        await call.delete()
+
+    @loader.command()
+    async def twin(self, message: Message):
+        """Twin account management"""
+        reply = await message.get_reply_message()
+        
+        if reply and reply.text:
+            match = STRING_SESSION_PATTERN.search(reply.text)
+            if match:
+                session_str = match.group(0)
+                self._set_session(session_str)
+                
+                success = await self._connect_twin()
+                
+                if success:
+                    await self.inline.form(
+                        text=self.strings["session_success"].format(
+                            name=self._twin_me.first_name,
+                            id=self._twin_me.id
+                        ),
+                        message=message,
+                        reply_markup=[
+                            [
+                                {"text": self.strings["btn_continue"], "callback": self._cb_main_menu, "style": "success"}
+                            ],
+                        ],
+                        silent=True,
+                    )
+                    return
+                else:
+                    self._set_session(None)
+                    await utils.answer(
+                        message,
+                        self.strings["session_invalid"].format(error="Connection failed")
+                    )
+                    return
+        
+        if not self._get_session():
+            await utils.answer(message, self.strings["no_session"])
+            return
+        
+        await self.inline.form(
+            text=self._format_main_text(),
+            message=message,
+            reply_markup=self._get_main_markup(),
+            silent=True,
+        )

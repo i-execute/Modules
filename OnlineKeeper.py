@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 # meta developer: I_execute.t.me
 
 import asyncio
@@ -23,7 +23,7 @@ class OnlineKeeper(loader.Module):
             "<b>OnlineKeeper Status</b>\n"
             "<b>Mode:</b> Active\n"
             "<b>Account:</b> Online\n"
-            "<b>Update interval:</b> 15 seconds"
+            "<b>Update interval:</b> {interval} seconds"
         ),
         "status_offline": (
             "<b>OnlineKeeper Status</b>\n\n"
@@ -41,7 +41,7 @@ class OnlineKeeper(loader.Module):
             "<b>Статус OnlineKeeper</b>\n"
             "<b>Режим:</b> Активен\n"
             "<b>Аккаунт:</b> Онлайн\n"
-            "<b>Интервал обновления:</b> 15 секунд"
+            "<b>Интервал обновления:</b> {interval} секунд"
         ),
         "status_offline": (
             "<b>Статус OnlineKeeper</b>\n\n"
@@ -59,9 +59,15 @@ class OnlineKeeper(loader.Module):
             loader.ConfigValue(
                 "AUTORUNNER",
                 True,
-                lambda: "Auto-start OnlineKeeper after restart",
+                "Auto-start OnlineKeeper after restart",
                 validator=loader.validators.Boolean(),
-            )
+            ),
+            loader.ConfigValue(
+                "UPDATE_INTERVAL",
+                15,
+                "Status update interval in seconds",
+                validator=loader.validators.Integer(minimum=5, maximum=600),
+            ),
         )
         self._online_task = None
 
@@ -99,7 +105,7 @@ class OnlineKeeper(loader.Module):
         while self._db.get(self.name, "keep_online", False):
             try:
                 await self._client(UpdateStatusRequest(offline=False))
-                await asyncio.sleep(15)
+                await asyncio.sleep(self.config["UPDATE_INTERVAL"])
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -112,7 +118,7 @@ class OnlineKeeper(loader.Module):
         is_active = self._db.get(self.name, "keep_online", False)
 
         await self.inline.form(
-            text=self.strings["status_online"] if is_active else self.strings["status_offline"],
+            text=self.strings["status_online"].format(interval=self.config["UPDATE_INTERVAL"]) if is_active else self.strings["status_offline"],
             message=message,
             reply_markup=[
                 [
@@ -149,7 +155,7 @@ class OnlineKeeper(loader.Module):
             await self._start_online_loop()
             await asyncio.sleep(1)
             await call.edit(
-                text=self.strings["status_online"],
+                text=self.strings["status_online"].format(interval=self.config["UPDATE_INTERVAL"]),
                 reply_markup=[
                     [
                         {
