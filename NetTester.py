@@ -1,15 +1,16 @@
-__version__ = (1, 4, 0)
+__version__ = (1, 5, 0)
 # meta developer: I_execute.t.me
 
 import os
 import re
 import time
 import asyncio
-import platform
 import logging
-import socket
+
+from telethon.tl.types import Message
 
 from .. import loader, utils
+from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +27,20 @@ class NetTester(loader.Module):
 
     strings = {
         "name": "NetTester",
-        "help": (
-            "<b>NetTester - Network Monitoring</b>\n"
-            "<blockquote><code>{prefix}test speed</code> - internet speed test (Cloudflare)\n"
-            "<code>{prefix}test net</code> - network usage statistics\n"
-            "<code>{prefix}test ping</code> - ping to popular services\n"
-            "<code>{prefix}test dns</code> - DNS resolve speed test\n"
-            "<code>{prefix}test ip</code> - external IP, geo, ASN\n</blockquote>"
+        
+        "main_menu": (
+            "<b>Network Testing Suite</b>\n\n"
+            "Select test type:"
         ),
-
+        
+        "btn_speed": "Speed Test",
+        "btn_net": "Network Stats",
+        "btn_ping": "Ping Test",
+        "btn_dns": "DNS Test",
+        "btn_ip": "IP Info",
+        "btn_back": "Back to Menu",
+        "btn_close": "Close",
+        
         "speed_progress": "<b>Running speed test...</b>",
         "speed_result": (
             "<b>Speed Test Results</b>\n"
@@ -48,7 +54,7 @@ class NetTester(loader.Module):
         "speed_fail": "<b>Speed test failed</b>\n<code>{error}</code>",
 
         "net_stats": (
-            "<b>Network Statistics</b>\n\n"
+            "<b>Network Statistics</b>\n"
             "<b>Interfaces:</b>\n"
             "<blockquote>{interfaces}</blockquote>\n"
             "<b>Totals (excl. loopback):</b>\n"
@@ -96,15 +102,19 @@ class NetTester(loader.Module):
     }
 
     strings_ru = {
-        "help": (
-            "<b>NetTester - Мониторинг сети</b>\n"
-            "<blockquote><code>{prefix}test speed</code> - тест скорости интернета (Cloudflare)\n"
-            "<code>{prefix}test net</code> - статистика использования сети\n"
-            "<code>{prefix}test ping</code> - пинг до популярных сервисов\n"
-            "<code>{prefix}test dns</code> - тест скорости DNS резолва\n"
-            "<code>{prefix}test ip</code> - внешний IP, гео, ASN\n</blockquote>"
+        "main_menu": (
+            "<b>Набор сетевых тестов</b>\n\n"
+            "Выберите тип теста:"
         ),
-
+        
+        "btn_speed": "Тест скорости",
+        "btn_net": "Сетевая статистика",
+        "btn_ping": "Тест пинга",
+        "btn_dns": "Тест DNS",
+        "btn_ip": "Информация IP",
+        "btn_back": "Назад в меню",
+        "btn_close": "Закрыть",
+        
         "speed_progress": "<b>Запуск теста скорости...</b>",
         "speed_result": (
             "<b>Результаты теста скорости</b>\n"
@@ -118,7 +128,7 @@ class NetTester(loader.Module):
         "speed_fail": "<b>Тест скорости провалился</b>\n<code>{error}</code>",
 
         "net_stats": (
-            "<b>Сетевая статистика</b>\n\n"
+            "<b>Сетевая статистика</b>\n"
             "<b>Интерфейсы:</b>\n"
             "<blockquote>{interfaces}</blockquote>\n"
             "<b>Итого (без loopback):</b>\n"
@@ -232,14 +242,6 @@ class NetTester(loader.Module):
         except Exception as e:
             return None, 0, 0, str(e)
         return interfaces, total_rx, total_tx, None
-
-    async def _safe_edit(self, msg, text):
-        try:
-            if isinstance(msg, list):
-                msg = msg[0]
-            await msg.edit(text)
-        except Exception:
-            pass
 
     async def _run_download_test(self):
         test_files = [
@@ -588,67 +590,36 @@ class NetTester(loader.Module):
                 continue
         return None
 
-    @loader.command(
-        ru_doc="Мониторинг сети и тесты скорости",
-        en_doc="Network monitoring and speed tests",
-    )
-    async def test(self, message):
-        """Network monitoring and speed tests"""
-        args = utils.get_args_raw(message).strip()
-        prefix = self.get_prefix()
+    def _get_main_markup(self):
+        return [
+            [
+                {"text": self.strings["btn_speed"], "callback": self._cb_speed, "style": "primary"},
+                {"text": self.strings["btn_net"], "callback": self._cb_net, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_ping"], "callback": self._cb_ping, "style": "primary"},
+                {"text": self.strings["btn_dns"], "callback": self._cb_dns, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_ip"], "callback": self._cb_ip, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"},
+            ],
+        ]
 
-        if not args:
-            await utils.answer(
-                message,
-                self.strings["help"].format(prefix=prefix),
-            )
-            return
+    async def _cb_main_menu(self, call: InlineCall):
+        await call.edit(
+            self.strings["main_menu"],
+            reply_markup=self._get_main_markup()
+        )
 
-        split = args.split(maxsplit=1)
-        cmd = split[0].lower()
-
-        handlers = {
-            "speed": self._cmd_speed,
-            "net": self._cmd_net,
-            "ping": self._cmd_ping,
-            "dns": self._cmd_dns,
-            "ip": self._cmd_ip,
-        }
-
-        handler = handlers.get(cmd)
-        if handler:
-            try:
-                await handler(message, split)
-            except Exception as e:
-                logger.error("[Test] Command %s error: %s", cmd, e)
-                await utils.answer(
-                    message,
-                    f"<b>Error:</b> <code>{_escape(str(e)[:300])}</code>",
-                )
-        else:
-            await utils.answer(
-                message,
-                self.strings["help"].format(prefix=prefix),
-            )
-
-    async def _cmd_speed(self, message, parts):
-        m = await utils.answer(message, self.strings["speed_progress"])
-        steps = []
-
-        async def update(text):
-            steps.append(text)
-            display = self.strings["speed_progress"] + "\n\n"
-            display += "\n".join(f"<code>{_escape(s)}</code>" for s in steps)
-            await self._safe_edit(m, display)
-
+    async def _cb_speed(self, call: InlineCall):
+        await call.edit(self.strings["speed_progress"])
+        
         try:
-            await update("Testing download...")
             dl_results = await self._run_download_test()
-
-            await update("Testing upload...")
             ul_results = await self._run_upload_test()
-
-            await update("Testing latency...")
             quick_targets = await self._run_quick_latency()
 
             if dl_results:
@@ -683,27 +654,33 @@ class NetTester(loader.Module):
             else:
                 lat_text = "n/a"
 
-            await self._safe_edit(
-                m,
+            await call.edit(
                 self.strings["speed_result"].format(
                     download=dl_text,
                     upload=ul_text,
                     latency=lat_text,
                 ),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
         except Exception as e:
-            await self._safe_edit(
-                m,
+            await call.edit(
                 self.strings["speed_fail"].format(error=_escape(str(e)[:300])),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
 
-    async def _cmd_net(self, message, parts):
+    async def _cb_net(self, call: InlineCall):
         interfaces, total_rx, total_tx, error = self._get_net_interfaces()
 
         if error or interfaces is None:
-            await utils.answer(
-                message,
+            await call.edit(
                 self.strings["net_fail"].format(error=_escape(error or "Unknown")),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
             return
 
@@ -730,8 +707,7 @@ class NetTester(loader.Module):
 
         uptime = self._get_system_uptime()
 
-        await utils.answer(
-            message,
+        await call.edit(
             self.strings["net_stats"].format(
                 interfaces="\n".join(iface_lines),
                 total_rx=self._format_bytes(total_rx),
@@ -739,10 +715,13 @@ class NetTester(loader.Module):
                 total=self._format_bytes(total_rx + total_tx),
                 uptime=uptime,
             ),
+            reply_markup=[
+                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+            ]
         )
 
-    async def _cmd_ping(self, message, parts):
-        m = await utils.answer(message, self.strings["ping_progress"])
+    async def _cb_ping(self, call: InlineCall):
+        await call.edit(self.strings["ping_progress"])
 
         try:
             services = [
@@ -770,30 +749,36 @@ class NetTester(loader.Module):
                 data = await self._ping_host(host)
                 tg_lines.append(self._format_ping_line(name, host, data))
 
-            await self._safe_edit(
-                m,
+            await call.edit(
                 self.strings["ping_result"].format(
                     services="\n".join(svc_lines),
                     telegram="\n".join(tg_lines),
                 ),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
 
         except Exception as e:
-            await self._safe_edit(
-                m,
+            await call.edit(
                 self.strings["ping_fail"].format(error=_escape(str(e)[:300])),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
 
-    async def _cmd_dns(self, message, parts):
-        m = await utils.answer(message, self.strings["dns_progress"])
+    async def _cb_dns(self, call: InlineCall):
+        await call.edit(self.strings["dns_progress"])
 
         try:
             results = await self._run_dns_test()
 
             if not results:
-                await self._safe_edit(
-                    m,
+                await call.edit(
                     self.strings["dns_fail"].format(error="No results"),
+                    reply_markup=[
+                        [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                    ]
                 )
                 return
 
@@ -829,33 +814,38 @@ class NetTester(loader.Module):
                         f"   all {r['total']} queries failed"
                     )
 
-            await self._safe_edit(
-                m,
+            await call.edit(
                 self.strings["dns_result"].format(results="\n".join(lines)),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
 
         except Exception as e:
-            await self._safe_edit(
-                m,
+            await call.edit(
                 self.strings["dns_fail"].format(error=_escape(str(e)[:300])),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
 
-    async def _cmd_ip(self, message, parts):
-        m = await utils.answer(message, self.strings["ip_progress"])
+    async def _cb_ip(self, call: InlineCall):
+        await call.edit(self.strings["ip_progress"])
 
         try:
             ip = await self._get_external_ip()
             if not ip:
-                await self._safe_edit(
-                    m,
+                await call.edit(
                     self.strings["ip_fail"].format(error="Cannot detect external IP"),
+                    reply_markup=[
+                        [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                    ]
                 )
                 return
 
             info = await self._get_ip_info(ip)
             if not info:
-                await self._safe_edit(
-                    m,
+                await call.edit(
                     self.strings["ip_result"].format(
                         ip=ip,
                         country="n/a",
@@ -866,11 +856,13 @@ class NetTester(loader.Module):
                         org="n/a",
                         timezone="n/a",
                     ),
+                    reply_markup=[
+                        [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                    ]
                 )
                 return
 
-            await self._safe_edit(
-                m,
+            await call.edit(
                 self.strings["ip_result"].format(
                     ip=_escape(info.get("query", ip)),
                     country=_escape(info.get("country", "n/a")),
@@ -881,10 +873,28 @@ class NetTester(loader.Module):
                     org=_escape(info.get("org", "n/a")),
                     timezone=_escape(info.get("timezone", "n/a")),
                 ),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
 
         except Exception as e:
-            await self._safe_edit(
-                m,
+            await call.edit(
                 self.strings["ip_fail"].format(error=_escape(str(e)[:300])),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
+
+    async def _cb_close(self, call: InlineCall):
+        await call.delete()
+
+    @loader.command()
+    async def test(self, message: Message):
+        """Network monitoring and speed tests"""
+        await self.inline.form(
+            text=self.strings["main_menu"],
+            message=message,
+            reply_markup=self._get_main_markup(),
+            silent=True,
+        )

@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Robber/MetaBanner.jpeg
 
@@ -18,6 +18,7 @@ from telethon.tl.types import (
 )
 from telethon.errors import FloodWaitError
 from .. import loader, utils
+from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
@@ -39,18 +40,22 @@ PAUSE_DURATION = 5
 
 @loader.tds
 class Robber(loader.Module):
-    """Fully steal channels and stories, support for private channels, look config"""
+    """Fully steal channels and stories, support for private channels"""
 
     strings = {
         "name": "Robber",
-        "help": (
-            "<b>Robber Commands</b>\n\n"
-            "<code>.double [channel_id]</code> — fully copy a channel\n"
-            "<code>.steal [post_link]</code> — steal a post to current chat\n"
-            "<code>.sdl [story_link]</code> — download a story as file\n\n"
-            "Post link example: <code>https://t.me/c/3872609933/8</code>\n"
-            "Story link example: <code>https://t.me/username/s/53</code>"
+        
+        "main_menu": (
+            "<b>Robber - Channel & Content Stealer</b>\n\n"
+            "Select operation:"
         ),
+        
+        "btn_double": "Copy Channel",
+        "btn_steal": "Steal Post",
+        "btn_sdl": "Download Story",
+        "btn_back": "Back to Menu",
+        "btn_close": "Close",
+        
         "double_start": "<b>Starting copy...</b>\nFetching messages...",
         "double_progress": (
             "<b>Copying...</b>\n"
@@ -72,28 +77,38 @@ class Robber(loader.Module):
             "Processed: {done} / {total}\n"
             "Skipped: {skipped}\n"
             "Albums: {albums}\n\n"
-            "<b>⚠️ Send error on msg {msg_id}:</b>\n<code>{err}</code>"
+            "<b>Send error on msg {msg_id}:</b>\n<code>{err}</code>"
         ),
-        "steal_no_link": "<b>Error:</b> Provide post link\nExample: <code>https://t.me/c/3872609933/8</code>",
+        
+        "input_channel": "Enter channel ID or username:",
+        "input_post": "Enter post link (e.g., https://t.me/c/3872609933/8):",
+        "input_story": "Enter story link (e.g., https://t.me/username/s/53):",
+        
         "steal_bad_link": "<b>Error:</b> Cannot parse post link",
         "steal_not_found": "<b>Error:</b> Post not found",
         "steal_error": "<b>Error:</b> <code>{err}</code>",
-        "sdl_no_link": "<b>Error:</b> Provide story link\nExample: <code>https://t.me/username/s/53</code>",
+        "steal_processing": "<b>Stealing post...</b>",
+        "steal_done": "<b>Post stolen successfully!</b>",
+        
         "sdl_bad_link": "<b>Error:</b> Cannot parse story link",
         "sdl_not_found": "<b>Error:</b> Story not found or has no media",
         "sdl_download_fail": "<b>Error:</b> Download failed",
-        "sdl_done": "<b>Done!</b>",
+        "sdl_processing": "<b>Downloading story...</b>",
+        "sdl_done": "<b>Story downloaded successfully!</b>",
     }
 
     strings_ru = {
-        "help": (
-            "<b>Команды Robber</b>\n\n"
-            "<code>.double [id канала]</code> — полностью скопировать канал\n"
-            "<code>.steal [ссылка на пост]</code> — украсть пост в текущий чат\n"
-            "<code>.sdl [ссылка на историю]</code> — скачать историю как файл\n\n"
-            "Пример поста: <code>https://t.me/c/3872609933/8</code>\n"
-            "Пример истории: <code>https://t.me/username/s/53</code>"
+        "main_menu": (
+            "<b>Robber - Копировщик каналов и контента</b>\n\n"
+            "Выберите операцию:"
         ),
+        
+        "btn_double": "Копировать канал",
+        "btn_steal": "Украсть пост",
+        "btn_sdl": "Скачать историю",
+        "btn_back": "Назад в меню",
+        "btn_close": "Закрыть",
+        
         "double_start": "<b>Начинаю копирование...</b>\nПолучаю сообщения...",
         "double_progress": (
             "<b>Копирую...</b>\n"
@@ -108,24 +123,31 @@ class Robber(loader.Module):
             "Альбомы: {albums}\n"
             "Ссылка: {link}"
         ),
-        "double_no_id": "<b>Ошибка:</b> Укажи ID или юзернейм канала",
+        "double_no_id": "<b>Ошибка:</b> Укажите ID или юзернейм канала",
         "double_error": "<b>Ошибка:</b> <code>{err}</code>",
         "double_send_error": (
             "<b>Копирую...</b>\n"
             "Обработано: {done} / {total}\n"
             "Пропущено: {skipped}\n"
             "Альбомы: {albums}\n\n"
-            "<b>⚠️ Ошибка отправки сообщения {msg_id}:</b>\n<code>{err}</code>"
+            "<b>Ошибка отправки сообщения {msg_id}:</b>\n<code>{err}</code>"
         ),
-        "steal_no_link": "<b>Ошибка:</b> Укажи ссылку на пост\nПример: <code>https://t.me/c/3872609933/8</code>",
-        "steal_bad_link": "<b>Ошибка:</b> Не могу распарсить ссылку",
+        
+        "input_channel": "Введите ID или юзернейм канала:",
+        "input_post": "Введите ссылку на пост (например, https://t.me/c/3872609933/8):",
+        "input_story": "Введите ссылку на историю (например, https://t.me/username/s/53):",
+        
+        "steal_bad_link": "<b>Ошибка:</b> Не могу распарсить ссылку на пост",
         "steal_not_found": "<b>Ошибка:</b> Пост не найден",
         "steal_error": "<b>Ошибка:</b> <code>{err}</code>",
-        "sdl_no_link": "<b>Ошибка:</b> Укажи ссылку на историю\nПример: <code>https://t.me/username/s/53</code>",
-        "sdl_bad_link": "<b>Ошибка:</b> Не могу распарсить ссылку",
+        "steal_processing": "<b>Крадем пост...</b>",
+        "steal_done": "<b>Пост успешно украден!</b>",
+        
+        "sdl_bad_link": "<b>Ошибка:</b> Не могу распарсить ссылку на историю",
         "sdl_not_found": "<b>Ошибка:</b> История не найдена или без медиа",
         "sdl_download_fail": "<b>Ошибка:</b> Не удалось скачать",
-        "sdl_done": "<b>Готово!</b>",
+        "sdl_processing": "<b>Скачиваю историю...</b>",
+        "sdl_done": "<b>История успешно скачана!</b>",
     }
 
     def __init__(self):
@@ -133,7 +155,7 @@ class Robber(loader.Module):
             loader.ConfigValue(
                 "CREATE_CHANNEL",
                 True,
-                lambda: "If True creates channel, if false - group",
+                "If True creates channel, if False creates group",
                 validator=loader.validators.Boolean(),
             )
         )
@@ -364,24 +386,80 @@ class Robber(loader.Module):
         album.sort(key=lambda m: m.id)
         return album
 
-    @loader.command(
-        ru_doc="Полностью скопировать канал",
-        en_doc="Fully copy a channel"
-    )
-    async def double(self, message):
-        """Fully copy a channel"""
-        args = utils.get_args_raw(message).strip()
-        if not args:
-            await utils.answer(message, self.strings["double_no_id"])
+    def _get_main_markup(self):
+        return [
+            [
+                {"text": self.strings["btn_double"], "callback": self._cb_double_menu, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_steal"], "callback": self._cb_steal_menu, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_sdl"], "callback": self._cb_sdl_menu, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"},
+            ],
+        ]
+
+    async def _cb_main_menu(self, call: InlineCall):
+        await call.edit(
+            self.strings["main_menu"],
+            reply_markup=self._get_main_markup()
+        )
+
+    async def _cb_double_menu(self, call: InlineCall):
+        await call.edit(
+            self.strings["main_menu"],
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_double"], "input": self.strings["input_channel"], "handler": self._cb_double_execute, "style": "success"}
+                ],
+                [
+                    {"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}
+                ],
+            ]
+        )
+
+    async def _cb_steal_menu(self, call: InlineCall):
+        await call.edit(
+            self.strings["main_menu"],
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_steal"], "input": self.strings["input_post"], "handler": self._cb_steal_execute, "style": "success"}
+                ],
+                [
+                    {"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}
+                ],
+            ]
+        )
+
+    async def _cb_sdl_menu(self, call: InlineCall):
+        await call.edit(
+            self.strings["main_menu"],
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_sdl"], "input": self.strings["input_story"], "handler": self._cb_sdl_execute, "style": "success"}
+                ],
+                [
+                    {"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}
+                ],
+            ]
+        )
+
+    async def _cb_double_execute(self, call: InlineCall, channel_input: str):
+        channel_input = channel_input.strip()
+        if not channel_input:
+            await call.answer(self.strings["double_no_id"], show_alert=True)
             return
 
-        status = await utils.answer(message, self.strings["double_start"])
+        await call.edit(self.strings["double_start"])
 
         try:
             try:
-                src = await self._client.get_entity(int(args))
+                src = await self._client.get_entity(int(channel_input))
             except ValueError:
-                src = await self._client.get_entity(args)
+                src = await self._client.get_entity(channel_input)
 
             src_title = getattr(src, "title", "Copied")
             src_about = ""
@@ -441,8 +519,7 @@ class Robber(loader.Module):
                         except Exception as e:
                             skipped += len(album)
                             done += len(album)
-                            status = await utils.answer(
-                                status,
+                            await call.edit(
                                 self.strings["double_send_error"].format(
                                     done=done, total=total,
                                     skipped=skipped, albums=albums,
@@ -465,8 +542,7 @@ class Robber(loader.Module):
                         except Exception as e:
                             skipped += 1
                             done += 1
-                            status = await utils.answer(
-                                status,
+                            await call.edit(
                                 self.strings["double_send_error"].format(
                                     done=done, total=total,
                                     skipped=skipped, albums=albums,
@@ -478,8 +554,7 @@ class Robber(loader.Module):
                         j += 1
 
                     if done > 0 and done % PAUSE_EVERY == 0:
-                        status = await utils.answer(
-                            status,
+                        await call.edit(
                             self.strings["double_progress"].format(
                                 done=done, total=total,
                                 skipped=skipped, albums=albums,
@@ -489,8 +564,7 @@ class Robber(loader.Module):
 
                 i += BATCH_SIZE
 
-                status = await utils.answer(
-                    status,
+                await call.edit(
                     self.strings["double_progress"].format(
                         done=done, total=total,
                         skipped=skipped, albums=albums,
@@ -503,49 +577,49 @@ class Robber(loader.Module):
             except Exception:
                 link = f"<code>-100{new_channel.id}</code>"
 
-            await utils.answer(
-                status,
+            await call.edit(
                 self.strings["double_done"].format(
                     done=done, skipped=skipped, albums=albums, link=link
-                )
+                ),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
 
         except Exception as e:
             logger.error(f"[Robber] double error: {e}", exc_info=True)
-            await utils.answer(
-                status,
-                self.strings["double_error"].format(err=str(e))
+            await call.edit(
+                self.strings["double_error"].format(err=str(e)),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
 
-    @loader.command(
-        ru_doc="Украсть пост в текущий чат",
-        en_doc="Steal a post to current chat"
-    )
-    async def steal(self, message):
-        """Steal a post to current chat"""
-        args = utils.get_args_raw(message).strip()
-        if not args:
-            await utils.answer(message, self.strings["steal_no_link"])
+    async def _cb_steal_execute(self, call: InlineCall, post_link: str):
+        post_link = post_link.strip()
+        
+        if not POST_LINK_RE.search(post_link):
+            await call.answer(self.strings["steal_bad_link"], show_alert=True)
             return
 
-        if not POST_LINK_RE.search(args):
-            await utils.answer(message, self.strings["steal_bad_link"])
-            return
-
-        target_chat = message.chat_id
-        await message.delete()
+        await call.edit(self.strings["steal_processing"])
 
         try:
-            entity, msg_id = await self._resolve_post_link(args)
+            entity, msg_id = await self._resolve_post_link(post_link)
 
             anchor = await self._client.get_messages(entity, ids=[msg_id])
             anchor = anchor[0] if anchor else None
 
             if not anchor:
-                await self._client.send_message(
-                    target_chat, self.strings["steal_not_found"]
+                await call.edit(
+                    self.strings["steal_not_found"],
+                    reply_markup=[
+                        [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                    ]
                 )
                 return
+
+            target_chat = call.form["chat"]
 
             if anchor.grouped_id:
                 album = await self._fetch_album(entity, anchor)
@@ -553,33 +627,34 @@ class Robber(loader.Module):
             else:
                 await self._send_msg(target_chat, anchor, {})
 
-        except Exception as e:
-            logger.error(f"[Robber] steal error: {e}", exc_info=True)
-            await self._client.send_message(
-                target_chat,
-                self.strings["steal_error"].format(err=str(e))
+            await call.edit(
+                self.strings["steal_done"],
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
 
-    @loader.command(
-        ru_doc="Скачать историю как файл",
-        en_doc="Download a story as file"
-    )
-    async def sdl(self, message):
-        """Download a story as file"""
-        args = utils.get_args_raw(message).strip()
-        if not args:
-            await utils.answer(message, self.strings["sdl_no_link"])
-            return
+        except Exception as e:
+            logger.error(f"[Robber] steal error: {e}", exc_info=True)
+            await call.edit(
+                self.strings["steal_error"].format(err=str(e)),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
+            )
 
-        m = STORY_LINK_RE.search(args)
+    async def _cb_sdl_execute(self, call: InlineCall, story_link: str):
+        story_link = story_link.strip()
+        
+        m = STORY_LINK_RE.search(story_link)
         if not m:
-            await utils.answer(message, self.strings["sdl_bad_link"])
+            await call.answer(self.strings["sdl_bad_link"], show_alert=True)
             return
 
         username = m.group(1)
         story_id = int(m.group(2))
 
-        status = await utils.answer(message, "⏳")
+        await call.edit(self.strings["sdl_processing"])
 
         try:
             peer = (
@@ -594,13 +669,18 @@ class Robber(loader.Module):
 
             stories = stories_result.stories
             if not stories or not getattr(stories[0], "media", None):
-                await utils.answer(status, self.strings["sdl_not_found"])
+                await call.edit(
+                    self.strings["sdl_not_found"],
+                    reply_markup=[
+                        [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                    ]
+                )
                 return
 
             media = stories[0].media
             is_video = isinstance(media, types.MessageMediaDocument)
             ext = ".mp4" if is_video else ".jpg"
-            fname = f"create_ur_dreams{ext}"
+            fname = f"story{ext}"
             path = self._tmp_path(fname)
 
             if os.path.exists(path):
@@ -609,20 +689,31 @@ class Robber(loader.Module):
             downloaded = await self._client.download_media(media, file=path)
 
             if not downloaded or not os.path.exists(downloaded):
-                await utils.answer(status, self.strings["sdl_download_fail"])
+                await call.edit(
+                    self.strings["sdl_download_fail"],
+                    reply_markup=[
+                        [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                    ]
+                )
                 return
+
+            target_chat = call.form["chat"]
 
             try:
                 await self._client.send_file(
-                    message.chat_id,
+                    target_chat,
                     downloaded,
                     force_document=True,
-                    reply_to=message.reply_to_msg_id or None,
                     attributes=[
                         types.DocumentAttributeFilename(file_name=fname)
                     ],
                 )
-                await utils.answer(status, self.strings["sdl_done"])
+                await call.edit(
+                    self.strings["sdl_done"],
+                    reply_markup=[
+                        [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                    ]
+                )
             finally:
                 try:
                     os.remove(downloaded)
@@ -631,7 +722,22 @@ class Robber(loader.Module):
 
         except Exception as e:
             logger.error(f"[Robber] sdl error: {e}", exc_info=True)
-            await utils.answer(
-                status,
-                self.strings["steal_error"].format(err=str(e))
+            await call.edit(
+                self.strings["steal_error"].format(err=str(e)),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]
+                ]
             )
+
+    async def _cb_close(self, call: InlineCall):
+        await call.delete()
+
+    @loader.command()
+    async def rob(self, message):
+        """Channel & content stealer"""
+        await self.inline.form(
+            text=self.strings["main_menu"],
+            message=message,
+            reply_markup=self._get_main_markup(),
+            silent=True,
+        )
