@@ -1,4 +1,4 @@
-__version__ = (4, 0, 0)
+__version__ = (4, 1, 0)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/MetaBanner.jpeg
 
@@ -59,7 +59,7 @@ OG_IMAGE_RE2 = re.compile(
     re.IGNORECASE,
 )
 
-GRABBER_TOPIC_ICON = 5188466187448650036
+GRABBER_TOPIC_ICON = 5269364267290765511
 
 
 def _escape_html(t):
@@ -477,6 +477,32 @@ class Grabber(loader.Module):
         "log_done": "<b>Done:</b> {title} | {size_mb:.1f} MB",
         "log_error": "<b>Error:</b> {title}\n<code>{error}</code>",
         "log_large": "<b>Large file ({size_mb:.1f} MB), uploading via userbot...</b>",
+        "main_menu": (
+            "<b>Grabber</b>\n\n"
+            "Status: {status}\n"
+            "Token: {token}\n"
+            "Cookies: {cookies}\n"
+            "Queue: {pending} | Active: {active}\n"
+            "Done: {completed} | Errors: {errors}"
+        ),
+        "token_menu": "<b>Token</b>\n\nSet bot token below:",
+        "cookies_menu": "<b>Cookies</b>\n\nStatus: {status}",
+        "clear_confirm": "<b>Factory reset?</b>\n\nAll data will be deleted.",
+        "btn_status": "Refresh",
+        "btn_token": "Token",
+        "btn_cookies": "Cookies",
+        "btn_reboot": "Reboot",
+        "btn_clear": "Reset",
+        "btn_close": "Close",
+        "btn_start": "Start",
+        "btn_stop": "Stop",
+        "btn_set_token": "Set token",
+        "btn_remove_cookies": "Remove cookies",
+        "btn_confirm_reboot": "Confirm",
+        "btn_confirm_clear": "Confirm reset",
+        "input_token": "Paste bot token:",
+        "installing": "Installing...",
+        "cookie_cleared_short": "Cookies removed!",
     }
 
     strings_ru = {
@@ -616,6 +642,32 @@ class Grabber(loader.Module):
         "log_done": "<b>Готово:</b> {title} | {size_mb:.1f} MB",
         "log_error": "<b>Ошибка:</b> {title}\n<code>{error}</code>",
         "log_large": "<b>Большой файл ({size_mb:.1f} МБ), загружаю через юзербот...</b>",
+        "main_menu": (
+            "<b>Grabber</b>\n\n"
+            "Статус: {status}\n"
+            "Токен: {token}\n"
+            "Куки: {cookies}\n"
+            "Очередь: {pending} | Активно: {active}\n"
+            "Готово: {completed} | Ошибки: {errors}"
+        ),
+        "token_menu": "<b>Токен</b>\n\nВведи токен бота:",
+        "cookies_menu": "<b>Куки</b>\n\nСтатус: {status}",
+        "clear_confirm": "<b>Сброс к заводским?</b>\n\nВсе данные будут удалены.",
+        "btn_status": "Обновить",
+        "btn_token": "Токен",
+        "btn_cookies": "Куки",
+        "btn_reboot": "Перезагрузка",
+        "btn_clear": "Сброс",
+        "btn_close": "Закрыть",
+        "btn_start": "Старт",
+        "btn_stop": "Стоп",
+        "btn_set_token": "Установить токен",
+        "btn_remove_cookies": "Удалить куки",
+        "btn_confirm_reboot": "Подтвердить",
+        "btn_confirm_clear": "Подтвердить сброс",
+        "input_token": "Вставьте токен бота:",
+        "installing": "Установка...",
+        "cookie_cleared_short": "Куки удалены!",
     }
 
     def __init__(self):
@@ -1065,150 +1117,288 @@ class Grabber(loader.Module):
         except Exception as e:
             return False, str(e)
 
+    def _fmt_main_menu(self):
+        st = self.strings["status_running"] if self._running else self.strings["status_stopped"]
+        cookies_st = (
+            self.strings["cookie_ok"]
+            if self._cookie_path and os.path.exists(self._cookie_path)
+            else self.strings["cookie_empty"]
+        )
+        has_token = bool(self.config["BOT_TOKEN"])
+        return self.strings["main_menu"].format(
+            status=st,
+            token="+" if has_token else "-",
+            cookies=cookies_st,
+            pending=len(self._queue_items),
+            active=len(self._current_downloads),
+            completed=self._stats["completed"],
+            errors=self._stats["errors"],
+        )
+
+    def _get_main_markup(self):
+        if self._running:
+            start_stop = {"text": self.strings["btn_stop"], "callback": self._cb_stop, "style": "danger"}
+        else:
+            start_stop = {"text": self.strings["btn_start"], "callback": self._cb_start, "style": "success"}
+        return [
+            [
+                {"text": self.strings["btn_status"], "callback": self._cb_status, "style": "primary"},
+                {"text": self.strings["btn_token"], "callback": self._cb_token_menu, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_cookies"], "callback": self._cb_cookies_menu, "style": "primary"},
+                {"text": self.strings["btn_reboot"], "callback": self._cb_reboot, "style": "primary"},
+            ],
+            [
+                start_stop,
+                {"text": self.strings["btn_clear"], "callback": self._cb_clear_confirm, "style": "danger"},
+            ],
+            [
+                {"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"},
+            ],
+        ]
+
     @loader.command(ru_doc="Управление Grabber", en_doc="Grabber management")
     async def grab(self, message):
         """Grabber management"""
-        args = utils.get_args(message)
-        cmd = args[0].lower() if args else None
-        prefix = self.get_prefix()
-
-        if not cmd:
-            await utils.answer(message, self.strings["usage"].format(prefix=prefix))
+        reply = await message.get_reply_message()
+        token = None
+        if reply and reply.text:
+            token = self._extract_bot_token(reply.text)
+        if token:
+            await self._do_set_token_msg(message, token)
             return
+        await self.inline.form(
+            text=self._fmt_main_menu(),
+            message=message,
+            reply_markup=self._get_main_markup(),
+            silent=True,
+        )
 
-        if cmd == "status":
-            st = self.strings["status_running"] if self._running else self.strings["status_stopped"]
-            cookies_st = (
-                self.strings["cookie_ok"]
-                if self._cookie_path and os.path.exists(self._cookie_path)
-                else self.strings["cookie_empty"]
-            )
-            await utils.answer(
-                message,
-                self.strings["status_template"].format(
-                    status=st,
-                    cookies=cookies_st,
-                    pending=len(self._queue_items),
-                    active=len(self._current_downloads),
-                    completed=self._stats["completed"],
-                    errors=self._stats["errors"],
-                ),
-            )
-
-        elif cmd == "token":
-            token = None
-            if len(args) >= 2:
-                token = self._extract_bot_token(args[1])
-            if not token:
-                reply = await message.get_reply_message()
-                if reply and reply.text:
-                    token = self._extract_bot_token(reply.text)
-            if not token:
-                await utils.answer(message, self.strings["need_token"])
+    @loader.command(ru_doc="Добавить куки (реплай на .txt)", en_doc="Add cookies (reply to .txt file)")
+    async def cookie(self, message):
+        """Add cookies from .txt file reply"""
+        reply = await message.get_reply_message()
+        if not reply or not reply.media:
+            await utils.answer(message, self.strings["no_reply_file"])
+            return
+        fname = getattr(reply.file, "name", "") or ""
+        if not fname.endswith(".txt"):
+            await utils.answer(message, self.strings["invalid_ext"])
+            return
+        try:
+            temp_path = os.path.join(self._root, "temp_cookies.txt")
+            dl = await reply.download_media(file=temp_path)
+            with open(dl, "r", encoding="utf-8") as f:
+                cookie_content = f.read()
+            if not self._validate_cookies(cookie_content):
+                os.remove(dl)
+                await utils.answer(message, self.strings["cookie_invalid_format"])
                 return
-            msg = await utils.answer(message, "<b>Installing dependencies...</b>")
-            if isinstance(msg, list):
-                msg = msg[0]
-            dep_log = await self._install_and_check()
-            self.config["BOT_TOKEN"] = token
-            try:
-                await self._launch(token)
-                bot_me = await self._bot.get_me()
-                connect_line = f"bot: @{bot_me.username} ({bot_me.id}): OK"
-                self.config["AUTORUNNER"] = True
-                await self._create_backup()
-                full_log = connect_line + "\n" + dep_log
-                await self._safe_edit(msg, self.strings["token_started"].format(
-                    log=_escape_html(full_log[-3700:])), parse_mode="html")
-            except Exception as e:
-                await self._safe_edit(msg, self.strings["start_failed"].format(
-                    error=str(e)[:200], prefix=prefix))
-
-        elif cmd == "reboot":
-            msg = await utils.answer(message, self.strings["reboot_start"])
-            if isinstance(msg, list):
-                msg = msg[0]
-            await self._shutdown()
-            self._kill_active_processes()
-            self._clean_cache()
-            self._clean_session()
-            os.makedirs(self._cache_dir, exist_ok=True)
-            os.makedirs(self._session_dir, exist_ok=True)
-            self._stats = {"completed": 0, "errors": 0}
-            self._queue_items.clear()
-            self._processed_buttons.clear()
-            self._edit_state.clear()
-            self._download_queue = asyncio.Queue()
-            self._current_downloads.clear()
-            self._og_cache.clear()
-            await self._install_and_check()
-            tkn = self.config["BOT_TOKEN"]
-            if tkn:
-                try:
-                    await self._launch(tkn)
-                    self.config["AUTORUNNER"] = True
-                    await self._safe_edit(msg, self.strings["reboot_done"])
-                except Exception as e:
-                    await self._safe_edit(msg, self.strings["start_failed"].format(
-                        error=str(e)[:200], prefix=prefix))
-            else:
-                await self._safe_edit(msg, self.strings["reboot_no_token"])
-
-        elif cmd == "clear":
-            await self._shutdown()
-            self._clean_all()
-            os.makedirs(self._cache_dir, exist_ok=True)
-            os.makedirs(self._session_dir, exist_ok=True)
+            self._db.set("Grabber", "cookies_content", cookie_content)
             os.makedirs(self._cookie_dir, exist_ok=True)
-            self._stats = {"completed": 0, "errors": 0}
-            self._queue_items.clear()
-            self._processed_buttons.clear()
-            self._edit_state.clear()
-            self._download_queue = asyncio.Queue()
-            self._current_downloads.clear()
-            await utils.answer(message, self.strings["clear_done"])
+            with open(self._cookie_path, "w", encoding="utf-8") as f:
+                f.write(cookie_content)
+            os.remove(dl)
+            await utils.answer(message, self.strings["cookie_saved"])
+            await self._create_backup()
+        except Exception as e:
+            await utils.answer(message, self.strings["cookie_err"].format(str(e)))
 
+    async def _do_set_token_msg(self, message, token: str):
+        msg = await utils.answer(message, self.strings["installing"])
+        if isinstance(msg, list):
+            msg = msg[0]
+        dep_log = await self._install_and_check()
+        self.config["BOT_TOKEN"] = token
+        prefix = self.get_prefix()
+        try:
+            await self._launch(token)
+            bot_me = await self._bot.get_me()
+            connect_line = f"bot: @{bot_me.username} ({bot_me.id}): OK"
+            self.config["AUTORUNNER"] = True
+            await self._create_backup()
+            full_log = connect_line + "\n" + dep_log
+            await self._safe_edit(msg, self.strings["token_started"].format(
+                log=_escape_html(full_log[-3700:])), parse_mode="html")
+        except Exception as e:
+            await self._safe_edit(msg, self.strings["start_failed"].format(
+                error=str(e)[:200], prefix=prefix))
 
-        elif cmd == "cookies":
-            if len(args) >= 2:
-                action = args[1].lower()
-                if action == "add":
-                    reply = await message.get_reply_message()
-                    if not reply or not reply.media:
-                        await utils.answer(message, self.strings["no_reply_file"])
-                        return
-                    fname = getattr(reply.file, "name", "") or ""
-                    if not fname.endswith(".txt"):
-                        await utils.answer(message, self.strings["invalid_ext"])
-                        return
-                    try:
-                        temp_path = os.path.join(self._root, "temp_cookies.txt")
-                        dl = await reply.download_media(file=temp_path)
-                        with open(dl, "r", encoding="utf-8") as f:
-                            content = f.read()
-                        if not self._validate_cookies(content):
-                            os.remove(dl)
-                            await utils.answer(message, self.strings["cookie_invalid_format"])
-                            return
-                        self._db.set("Grabber", "cookies_content", content)
-                        os.makedirs(self._cookie_dir, exist_ok=True)
-                        with open(self._cookie_path, "w", encoding="utf-8") as f:
-                            f.write(content)
-                        os.remove(dl)
-                        await utils.answer(message, self.strings["cookie_saved"])
-                        await self._create_backup()
-                    except Exception as e:
-                        await utils.answer(message, self.strings["cookie_err"].format(str(e)))
-                elif action == "remove":
-                    self._clean_cookies()
-                    os.makedirs(self._cookie_dir, exist_ok=True)
-                    await utils.answer(message, self.strings["cookie_cleared"])
-                else:
-                    await utils.answer(message, self.strings["usage"].format(prefix=prefix))
-            else:
-                await utils.answer(message, self.strings["usage"].format(prefix=prefix))
+    async def _cb_status(self, call):
+        await call.edit(
+            text=self._fmt_main_menu(),
+            reply_markup=self._get_main_markup(),
+        )
+
+    async def _cb_token_menu(self, call):
+        await call.edit(
+            text=self.strings["token_menu"],
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_set_token"], "input": self.strings["input_token"], "handler": self._cb_set_token, "style": "success"},
+                ],
+                [
+                    {"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"},
+                ],
+            ],
+        )
+
+    async def _cb_set_token(self, call, token_input: str):
+        token = self._extract_bot_token(token_input.strip())
+        if not token:
+            await call.answer(self.strings["need_token"], show_alert=True)
+            return
+        await call.edit(text=self.strings["installing"])
+        dep_log = await self._install_and_check()
+        self.config["BOT_TOKEN"] = token
+        prefix = self.get_prefix()
+        try:
+            await self._launch(token)
+            bot_me = await self._bot.get_me()
+            connect_line = f"bot: @{bot_me.username} ({bot_me.id}): OK"
+            self.config["AUTORUNNER"] = True
+            await self._create_backup()
+            full_log = connect_line + "\n" + dep_log
+            await call.edit(
+                text=self.strings["token_started"].format(log=_escape_html(full_log[-3700:])),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "primary"}]],
+            )
+        except Exception as e:
+            await call.edit(
+                text=self.strings["start_failed"].format(error=str(e)[:200], prefix=prefix),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"}]],
+            )
+
+    async def _cb_cookies_menu(self, call):
+        has_cookies = bool(self._cookie_path and os.path.exists(self._cookie_path))
+        markup = []
+        if has_cookies:
+            markup.append([
+                {"text": self.strings["btn_remove_cookies"], "callback": self._cb_remove_cookies, "style": "danger"},
+            ])
+        markup.append([
+            {"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"},
+        ])
+        await call.edit(
+            text=self.strings["cookies_menu"].format(
+                status=self.strings["cookie_ok"] if has_cookies else self.strings["cookie_empty"]
+            ),
+            reply_markup=markup,
+        )
+
+    async def _cb_remove_cookies(self, call):
+        self._clean_cookies()
+        os.makedirs(self._cookie_dir, exist_ok=True)
+        await call.answer(self.strings["cookie_cleared_short"], show_alert=True)
+        await self._cb_cookies_menu(call)
+
+    async def _cb_reboot(self, call):
+        await call.edit(
+            text=self.strings["reboot_start"],
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_confirm_reboot"], "callback": self._cb_do_reboot, "style": "danger"},
+                    {"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "primary"},
+                ],
+            ],
+        )
+
+    async def _cb_do_reboot(self, call):
+        await call.edit(text=self.strings["reboot_start"])
+        await self._shutdown()
+        self._kill_active_processes()
+        self._clean_cache()
+        self._clean_session()
+        os.makedirs(self._cache_dir, exist_ok=True)
+        os.makedirs(self._session_dir, exist_ok=True)
+        self._stats = {"completed": 0, "errors": 0}
+        self._queue_items.clear()
+        self._processed_buttons.clear()
+        self._edit_state.clear()
+        self._download_queue = asyncio.Queue()
+        self._current_downloads.clear()
+        self._og_cache.clear()
+        await self._install_and_check()
+        tkn = self.config["BOT_TOKEN"]
+        prefix = self.get_prefix()
+        if tkn:
+            try:
+                await self._launch(tkn)
+                self.config["AUTORUNNER"] = True
+                await call.edit(
+                    text=self.strings["reboot_done"],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "success"}]],
+                )
+            except Exception as e:
+                await call.edit(
+                    text=self.strings["start_failed"].format(error=str(e)[:200], prefix=prefix),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"}]],
+                )
         else:
-            await utils.answer(message, self.strings["usage"].format(prefix=prefix))
+            await call.edit(
+                text=self.strings["reboot_no_token"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"}]],
+            )
+
+    async def _cb_clear_confirm(self, call):
+        await call.edit(
+            text=self.strings["clear_confirm"],
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_confirm_clear"], "callback": self._cb_do_clear, "style": "danger"},
+                    {"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "primary"},
+                ],
+            ],
+        )
+
+    async def _cb_do_clear(self, call):
+        await self._shutdown()
+        self._clean_all()
+        os.makedirs(self._cache_dir, exist_ok=True)
+        os.makedirs(self._session_dir, exist_ok=True)
+        os.makedirs(self._cookie_dir, exist_ok=True)
+        self._stats = {"completed": 0, "errors": 0}
+        self._queue_items.clear()
+        self._processed_buttons.clear()
+        self._edit_state.clear()
+        self._download_queue = asyncio.Queue()
+        self._current_downloads.clear()
+        await call.edit(
+            text=self.strings["clear_done"],
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "success"}]],
+        )
+
+    async def _cb_start(self, call):
+        tkn = self.config["BOT_TOKEN"]
+        if not tkn:
+            await call.answer(self.strings["need_token"], show_alert=True)
+            return
+        await call.edit(text=self.strings["installing"])
+        prefix = self.get_prefix()
+        try:
+            await self._launch(tkn)
+            self.config["AUTORUNNER"] = True
+        except Exception as e:
+            await call.edit(
+                text=self.strings["start_failed"].format(error=str(e)[:200], prefix=prefix),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"}]],
+            )
+            return
+        await call.edit(text=self._fmt_main_menu(), reply_markup=self._get_main_markup())
+
+    async def _cb_stop(self, call):
+        await self._shutdown()
+        await call.edit(text=self._fmt_main_menu(), reply_markup=self._get_main_markup())
+
+    async def _cb_back_main(self, call):
+        await call.edit(
+            text=self._fmt_main_menu(),
+            reply_markup=self._get_main_markup(),
+        )
+
+    async def _cb_close(self, call):
+        await call.delete()
 
     async def _launch(self, tkn):
         await self._shutdown()
@@ -2118,7 +2308,7 @@ class Grabber(loader.Module):
             chat_id, input_doc,
             caption=caption, parse_mode="html",
             force_document=False, supports_streaming=(not is_audio),
-            attributes=attrs, thumb=send_thumb, reply_to=reply_to_topic,
+            attributes=attrs,
         )
 
     async def _process_download(
