@@ -1,26 +1,37 @@
-__version__ = (2, 0, 0)
-# meta developer: I_execute.t.me 
+__version__ = (4, 0, 0)
+# meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/MetaBanner.jpeg
 
 import os
 import io
+import re
+import time
+import json
 import asyncio
 import logging
 import shutil
-import time
-import re
-import threading
-import subprocess
+import tempfile
+import sys
 import concurrent.futures
+import threading
+
 from telethon import TelegramClient, events, Button
-from telethon.tl.types import DocumentAttributeVideo, DocumentAttributeAudio, DocumentAttributeFilename
+from telethon.tl import functions, types
+from telethon.tl.types import (
+    DocumentAttributeVideo,
+    DocumentAttributeAudio,
+    DocumentAttributeFilename,
+    ReactionEmoji,
+)
 from telethon.tl.functions.messages import SendReactionRequest
-from telethon.tl.types import ReactionEmoji
-from telethon.errors import MessageNotModifiedError, FloodWaitError
+from telethon.errors import (
+    MessageNotModifiedError,
+    FloodWaitError,
+)
 from .. import loader, utils
 
 try:
-    import cryptg
+    import TgCrypto
 except ImportError:
     pass
 
@@ -37,19 +48,81 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 _URL_PATTERN = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
-_BOT_TOKEN_PATTERN = re.compile(r'\b\d{8,10}:[A-Za-z0-9_-]{35}\b')
+_BOT_TOKEN_RE = re.compile(r'\b\d{8,10}:[A-Za-z0-9_-]{35}\b')
+
+OG_IMAGE_RE = re.compile(
+    r'<meta\s+(?:property|name)=["\']og:image["\']\s+content=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+OG_IMAGE_RE2 = re.compile(
+    r'<meta\s+content=["\']([^"\']+)["\']\s+(?:property|name)=["\']og:image["\']',
+    re.IGNORECASE,
+)
+
+GRABBER_TOPIC_ICON = 5188466187448650036
 
 
-def normalize_cover(raw_data, max_size=None, force_jpeg=False):
+def _escape_html(t):
+    if not t:
+        return ""
+    return str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    if not raw_data or len(raw_data) < 100:
+
+def _sanitize_fn(n):
+    return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", n).strip(". ")[:180] or "track"
+
+
+def _fmt_dur(s):
+    if not s or s <= 0:
+        return "0:00"
+    s = int(s)
+    if s < 3600:
+        m, sec = divmod(s, 60)
+        return f"{m}:{sec:02d}"
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h}:{m:02d}:{sec:02d}"
+
+
+def _fmt_speed(b):
+    if not b:
+        return "..."
+    if b < 1024:
+        return f"{b:.0f} B/s"
+    if b < 1024 * 1024:
+        return f"{b / 1024:.1f} KB/s"
+    return f"{b / 1024 / 1024:.1f} MB/s"
+
+
+def _fmt_elapsed(s):
+    if not s or s <= 0:
+        return "0s"
+    s = int(s)
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        m, sec = divmod(s, 60)
+        return f"{m}m {sec}s" if sec else f"{m}m"
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    parts = [f"{h}h"]
+    if m:
+        parts.append(f"{m}m")
+    if sec:
+        parts.append(f"{sec}s")
+    return " ".join(parts)
+
+
+
+def normalize_cover(raw, max_size=None, force_jpeg=False):
+    if not raw or len(raw) < 100:
         return None
     if not Image:
-        return raw_data
+        return raw
     try:
-        img = Image.open(io.BytesIO(raw_data))
+        img = Image.open(io.BytesIO(raw))
         w, h = img.size
-        needs_resize = max_size is not None and (w > max_size or h > max_size)
+        needs_resize = max_size and (w > max_size or h > max_size)
         if force_jpeg:
             img = img.convert("RGB")
             if needs_resize:
@@ -59,9 +132,9 @@ def normalize_cover(raw_data, max_size=None, force_jpeg=False):
             img.save(buf, format="JPEG", quality=95)
             result = buf.getvalue()
             return result if len(result) >= 100 else None
-        is_png = raw_data[:8] == b'\x89PNG\r\n\x1a\n'
+        is_png = raw[:8] == b'\x89PNG\r\n\x1a\n'
         if is_png and not needs_resize:
-            return raw_data
+            return raw
         img = img.convert("RGB")
         if needs_resize:
             ratio = min(max_size / w, max_size / h)
@@ -71,138 +144,238 @@ def normalize_cover(raw_data, max_size=None, force_jpeg=False):
         result = buf.getvalue()
         return result if len(result) >= 100 else None
     except Exception:
-        return raw_data
+        return raw
 
 
-async def download_thumbnail_hq(url):
-
+async def _download_url(url, timeout=20):
     if not url or not aiohttp:
         return None
     try:
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status != 200:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as r:
+                if r.status != 200:
                     return None
-                data = await resp.read()
-                return data if len(data) >= 1000 else None
+                data = await r.read()
+                return data if data and len(data) >= 100 else None
     except Exception:
         return None
 
 
-def get_best_thumbnail_url(info):
+async def _upload_to_x0(data, filename, content_type="application/octet-stream"):
+    if not aiohttp:
+        return ""
+    try:
+        form = aiohttp.FormData()
+        form.add_field("file", data, filename=filename, content_type=content_type)
+        async with aiohttp.ClientSession() as s:
+            async with s.post(
+                "https://x0.at",
+                data=form,
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as r:
+                text = (await r.text()).strip()
+                return text if text.startswith("http") else ""
+    except Exception:
+        return ""
 
+
+async def _fetch_og_image(url):
+    if not aiohttp:
+        return None
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                url,
+                headers={"User-Agent": "facebookexternalhit/1.1"},
+                timeout=aiohttp.ClientTimeout(total=15),
+                allow_redirects=True,
+            ) as r:
+                if r.status != 200:
+                    return None
+                html = await r.text(errors="replace")
+        for pat in [OG_IMAGE_RE, OG_IMAGE_RE2]:
+            m = pat.search(html)
+            if m:
+                return m.group(1).replace("&amp;", "&")
+    except Exception:
+        pass
+    return None
+
+
+def _get_best_thumb_url(info):
     if not info:
         return None
-
-    thumbnails = info.get('thumbnails')
-    if thumbnails and isinstance(thumbnails, list):
+    thumbs = info.get("thumbnails")
+    if thumbs and isinstance(thumbs, list):
         best_url = None
-        best_preference = -9999
-        best_resolution = 0
-        for t in thumbnails:
-            url = t.get('url')
+        best_pref = -9999
+        best_res = 0
+        for t in thumbs:
+            url = t.get("url")
             if not url:
                 continue
-            w = t.get('width') or 0
-            h = t.get('height') or 0
-            pref = t.get('preference') or 0
-            resolution = w * h
-            if pref > best_preference or (pref == best_preference and resolution > best_resolution):
-                best_preference = pref
-                best_resolution = resolution
+            w = t.get("width") or 0
+            h = t.get("height") or 0
+            pref = t.get("preference") or 0
+            res = w * h
+            if pref > best_pref or (pref == best_pref and res > best_res):
+                best_pref = pref
+                best_res = res
                 best_url = url
         if best_url:
             return best_url
-
-    return info.get('thumbnail') or None
+    return info.get("thumbnail")
 
 
 class SafeList:
     def __init__(self):
         self._list = []
         self._lock = threading.Lock()
-    
+
     def append(self, item):
         with self._lock:
             self._list.append(item)
-    
+
     def pop_first(self):
         with self._lock:
-            if self._list:
-                return self._list.pop(0)
-            return None
-    
+            return self._list.pop(0) if self._list else None
+
     def clear(self):
         with self._lock:
             self._list.clear()
-    
+
     def __len__(self):
         with self._lock:
             return len(self._list)
-    
-    def to_list(self):
-        with self._lock:
-            return self._list.copy()
 
 
 class SafeSet:
     def __init__(self):
         self._set = set()
         self._lock = threading.Lock()
-    
-    def add(self, item) -> bool:
+
+    def add(self, item):
         with self._lock:
             if item in self._set:
                 return False
             self._set.add(item)
             return True
-    
+
     def remove(self, item):
         with self._lock:
             self._set.discard(item)
-    
+
     def clear(self):
         with self._lock:
             self._set.clear()
 
 
+async def _embed_cover_ffmpeg(audio_path, cover_path, output_path):
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", audio_path,
+        "-i", cover_path,
+        "-map", "0:a",
+        "-map", "1:0",
+        "-c", "copy",
+        "-id3v2_version", "3",
+        "-metadata:s:v", "title=Album cover",
+        "-metadata:s:v", "comment=Cover (front)",
+        output_path,
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
+DEPS = ["yt-dlp", "Pillow", "aiohttp", "mutagen", "TgCrypto-pyrofork"]
+
+
+def _install_deps():
+    import importlib, subprocess
+    pip = __import__('os').path.join(__import__('os').path.dirname(sys.executable), "pip")
+    if not __import__('os').path.exists(pip):
+        pip = "pip"
+    in_venv = sys.prefix != sys.base_prefix
+    imp_map = {
+        "yt-dlp": "yt_dlp", "Pillow": "PIL",
+        "aiohttp": "aiohttp", "mutagen": "mutagen", "TgCrypto-pyrofork": "TgCrypto",
+    }
+    ver_attr = {
+        "yt_dlp": "version.__version__",
+        "mutagen": "version.version_string",
+    }
+    lines = [f"venv: {'yes' if in_venv else 'no'} ({sys.prefix})"]
+    for pkg in DEPS:
+        try:
+            subprocess.run([pip, "install", "-U", pkg, "--break-system-packages", "-q"],
+                capture_output=True, text=True, timeout=120)
+            try:
+                imp_name = imp_map.get(pkg, pkg)
+                importlib.invalidate_caches()
+                mod = importlib.import_module(imp_name)
+                if imp_name in ver_attr:
+                    parts = ver_attr[imp_name].split(".")
+                    obj = mod
+                    for part in parts:
+                        obj = getattr(obj, part, None)
+                        if obj is None:
+                            break
+                    ver = str(obj) if obj else getattr(mod, "__version__", "?")
+                else:
+                    ver = getattr(mod, "__version__", "?")
+                lines.append(f"{pkg}: OK ({ver})")
+            except ImportError:
+                lines.append(f"{pkg}: FAIL (import error)")
+        except Exception as e:
+            lines.append(f"{pkg}: FAIL ({e})")
+    return lines
+
+
+
 @loader.tds
 class Grabber(loader.Module):
-    """Universal media downloader via bot. Need asess to .session files."""
+    """Universal media downloader"""
 
     strings = {
         "name": "Grabber",
-    }
-
-    strings_en = {
-        "line": "----------------",
-        
         "btn_video": "Video",
         "btn_audio": "Audio (MP3)",
         "btn_cancel": "Cancel",
         "btn_back": "Back",
-        
-        "btn_orig_thumb": "With preview",
-        "btn_orig_clean": "Without preview",
+        "btn_orig_thumb": "With cover",
+        "btn_orig_clean": "Without cover",
         "btn_custom": "Editor",
         "btn_no_cover": "No cover",
         "btn_confirm": "Download",
         "btn_retry": "Retry",
-        
-        "no_token": "<b>Token not specified!</b>\nUse: <code>{prefix}grabber token [token]</code>",
-        "token_stored": "<b>Token saved!</b>\nStart: <code>{prefix}grabber on</code>",
+        "no_token": (
+            "<b>Bot token not set!</b>\n"
+            "Use: <code>{prefix}grab token [token]</code>"
+        ),
+        "token_stored": (
+            "<b>Token saved!</b>\n"
+            "<blockquote expandable>Startup log:\n{log}</blockquote>"
+        ),
+        "token_started": (
+            "<b>Grabber started!</b>\n"
+            "<blockquote expandable>Startup log:\n{log}</blockquote>"
+        ),
         "need_token": "<b>Specify token or reply to message with it!</b>",
         "already_running": "<b>Already running!</b>",
         "not_running": "<b>Bot not running!</b>",
-        "started": "<b>Grabber started!</b>",
-        "stopped": "<b>Grabber stopped!</b>",
-        "start_failed": "<b>Start error:</b>\n<code>{error}</code>",
-        
+        "start_failed": "<b>Start error:</b>\n<code>{error}</code>\nUse <code>{prefix}unextarnal Grabber</code> to reload.",
         "reboot_start": "<b>REBOOT...</b>",
-        "reboot_done": "<b>Reboot complete, bot restarted!</b>",
+        "reboot_done": "<b>Reboot complete!</b>",
         "reboot_no_token": "<b>No token for restart!</b>",
-        "clear_done": "<b>Factory reset complete!</b>\nToken, cookies, cache - all deleted.",
-        
+        "clear_done": "<b>Factory reset complete!</b>",
         "cookie_saved": "<b>Cookies saved!</b>",
         "cookie_cleared": "<b>Cookies deleted!</b>",
         "cookie_empty": "<b>Cookies not set.</b>",
@@ -211,104 +384,64 @@ class Grabber(loader.Module):
         "invalid_ext": "<b>File must have .txt extension!</b>",
         "cookie_err": "<b>Cookie save error:</b>\n<code>{}</code>",
         "cookie_invalid_format": "<b>Invalid cookie format! Expected Netscape format.</b>",
-        
-        "topic_enabled": "<b>Bot enabled in this topic!</b>",
-        "topic_disabled": "<b>Bot disabled in this topic!</b>",
-        "topic_not_active": "<b>This topic is not active! First send /start in this topic.</b>",
-        "topic_not_in_group": "<b>This command only works in groups!</b>",
-        "topic_not_forum": "<b>This group doesn't have topics enabled!</b>",
-        "topic_usage": "<b>Usage:</b> <code>{prefix}grabber topic on/off</code>",
-        
-        "deps_processing": "<b>Installing dependencies...</b>",
-        "deps_result": "<b>Dependencies check:</b>\n\n{results}",
-        
-        "logs_empty": "<b>No download logs yet.</b>",
-        "logs_generated": "<b>Last {count} downloads log.</b>",
-        
-        "usage": (
-            "<b>Grabber - Universal media downloader</b>\n\n"
-            "<code>{prefix}grabber on</code> - Start\n"
-            "<code>{prefix}grabber off</code> - Stop\n"
-            "<code>{prefix}grabber token [token]</code> - Set bot token\n"
-            "<code>{prefix}grabber start</code> - Install dependencies\n"
-            "<code>{prefix}grabber reboot</code> - Clear cache and restart\n"
-            "<code>{prefix}grabber clear</code> - Factory reset\n"
-            "<code>{prefix}grabber cookies add</code> - Add cookies (reply to .txt)\n"
-            "<code>{prefix}grabber cookies remove</code> - Remove cookies\n"
-            "<code>{prefix}grabber topic on/off</code> - Enable/disable bot in topic\n"
-            "<code>{prefix}grabber status</code> - Status\n"
-            "<code>{prefix}grabber process</code> - Current process\n"
-            "<code>{prefix}grabber logs</code> - Download logs\n"
-        ),
-        
         "status_template": (
             "<b>Grabber Status</b>\n\n"
             "Status: {status}\n"
             "Cookies: {cookies}\n"
             "In queue: {pending}\n"
-            "Active: {active}\n"
+            "Active tasks: {active}\n"
             "Completed: {completed}\n"
             "Errors: {errors}"
         ),
         "status_running": "Running",
         "status_stopped": "Stopped",
-        
         "no_active_process": "<b>No active process</b>",
         "analyzing": "<b>Analyzing...</b>",
         "found_media": "<b>{title}</b>\n\nDuration: {duration}\nSelect format:",
         "found_media_group": "<b>{title}</b>\n\nDuration: {duration}",
-        "grab_failed": "<b>Error:</b>\n<code>{error}</code>",
-        "no_link": "<b>No link found!</b>",
+        "grab_failed": "<b>ATTENTION:</b>\n<code>{error}</code>",
         "queue_pos": "<b>Queue: #{pos}</b>",
         "starting": "<b>Starting download!</b>",
-        "too_large": "<b>File too large!</b>\nMax: {max_mb}MB, File: {size_mb:.1f}MB",
+        "too_large_bot": "<b>File too large for bot API ({size_mb:.1f} MB). Uploading via userbot...</b>",
+        "too_large_no_premium": "<b>File too large ({size_mb:.1f} MB). Telegram Premium required on userbot account.</b>",
+        "too_large_over_limit": "<b>File too large ({size_mb:.1f} MB). Max is 4096 MB.</b>",
         "cancelled": "<b>Cancelled</b>",
         "already_processing": "Already processing!",
-        
-        "hello": "<b>Hello, {user_link}!</b>\n\nSend video link!",
-        "hello_fallback": "<b>Hello!</b>\n\nSend video link!",
-        "hello_group": "<b>Bot activated in this group!</b>\n\nSend video links - I will offer to download.",
-        "hello_topic": "<b>Bot activated in this topic!</b>\n\nSend video links - I will offer to download.",
-        
-        "file_caption": "<b>{title}</b>\n{size_mb:.1f} MB | {width}x{height}",
-        "audio_caption": "<b>{title}</b>\n{size_mb:.1f} MB",
-        
-        "progress_header": "<b>Downloading...</b>\n",
-        "progress_title": "<code>{title}</code>",
-        
-        "video_waiting": "Video: waiting...",
-        "video_done": "Video: done {size:.1f} MB",
-        "video_progress": "Video: {pct:.1f}% ({size:.1f}/{total:.1f} MB) | {speed}",
-        
-        "audio_waiting": "Audio: waiting...",
-        "audio_done": "Audio: done {size:.1f} MB",
-        "audio_progress": "Audio: {pct:.1f}% ({size:.1f}/{total:.1f} MB) | {speed}",
-        
+        "hello": "<b>Hello, {user_link}!</b>\n\nSend a video link!",
+        "hello_fallback": "<b>Hello!</b>\n\nSend a video link!",
+        "hello_group": "<b>Bot activated in this group!</b>\n\nSend video links.",
+        "hello_topic": "<b>Bot activated in this topic!</b>\n\nSend video links.",
+        "hello_group_off": "<b>Bot deactivated in this group.</b>",
+        "hello_topic_off": "<b>Bot deactivated in this topic.</b>",
+        "file_caption": (
+            "<blockquote><b>{title}</b></blockquote>\n"
+            "<pre><code class=\"language-grabber\">{size_mb:.1f} MB | {width}x{height} | {elapsed}</code></pre>"
+        ),
+        "audio_caption": (
+            "<blockquote><b>{title}</b></blockquote>\n"
+            "<pre><code class=\"language-grabber\">{size_mb:.1f} MB</code></pre>"
+        ),
+        "progress_title": "<b>{title}</b>",
+        "dl_waiting": "Downloading: waiting...",
+        "dl_progress": "Downloading: {pct:.1f}% ({size:.1f}/{total:.1f} MB)",
+        "dl_done": "Downloading: done {size:.1f} MB",
         "merge_waiting": "Merge: waiting...",
         "merge_done": "Merge: done {size:.1f} MB",
         "merge_active": "Merge: FFmpeg working...",
-        "merge_starting": "Merge: starting...",
-        
         "convert_waiting": "Convert: waiting...",
         "convert_done": "Convert: done {size:.1f} MB",
         "convert_active": "Convert: FFmpeg...",
-        
         "upload_waiting": "Telegram: waiting...",
-        "upload_done": "Telegram: sent!",
-        "upload_progress": "Telegram: {elapsed:.1f}s",
-        "upload_success": "Telegram: {elapsed:.1f}s",
-        
+        "upload_progress": "Telegram: {pct:.1f}% ({cur:.1f}/{total:.1f} MB)",
+        "upload_success": "Telegram: done {elapsed:.1f}s",
         "stage_init": "Initializing...",
         "stage_video": "Downloading video...",
         "stage_audio": "Downloading audio...",
         "stage_ffmpeg": "FFmpeg processing...",
         "stage_probe": "Analyzing file...",
         "stage_upload": "Uploading to Telegram...",
-        "stage_done": "Done!",
         "stage_done_success": "Successfully uploaded!",
-        
         "time_stage": "Time: {elapsed:.1f}s | {stage_text}",
-        
         "audio_menu": "<b>Select option:</b>",
         "editor_mode": "<b>Editor mode!</b>\n\nSend TRACK NAME:",
         "edit_title_done": "Title: <b>{}</b>\n\nNow enter ARTIST name:",
@@ -328,44 +461,56 @@ class Grabber(loader.Module):
         "op_cancelled": "<b>Operation cancelled.</b>",
         "not_your_editor": "<b>This is not your editor!</b>",
         "session_expired": "Session expired",
-        
-        "group_added": "<b>Group added to monitoring.</b>",
-        
+        "quality_menu": "<b>Select quality:</b>",
         "react_ok": "\U0001F44C",
         "react_fail": "\U0001F971",
-        
-        "quality_menu": "<b>Select quality:</b>",
+        "usage": (
+            "<b>Grabber - Universal media downloader</b>\n\n"
+            "<code>{prefix}grab token [token]</code> - Set bot token\n"
+            "<code>{prefix}grab reboot</code> - Clear cache and restart\n"
+            "<code>{prefix}grab clear</code> - Factory reset\n"
+            "<code>{prefix}grab cookies add</code> - Add cookies (reply to .txt)\n"
+            "<code>{prefix}grab cookies remove</code> - Remove cookies\n"
+            "<code>{prefix}grab status</code> - Status\n"
+        ),
+        "log_processing": "<b>Processing:</b> {title}\nFrom: {user}\nURL: <code>{url}</code>",
+        "log_done": "<b>Done:</b> {title} | {size_mb:.1f} MB",
+        "log_error": "<b>Error:</b> {title}\n<code>{error}</code>",
+        "log_large": "<b>Large file ({size_mb:.1f} MB), uploading via userbot...</b>",
     }
 
     strings_ru = {
-        "line": "----------------",
-        
+        "name": "Grabber",
         "btn_video": "Видео",
         "btn_audio": "Аудио (MP3)",
         "btn_cancel": "Отмена",
         "btn_back": "Назад",
-        
-        "btn_orig_thumb": "С превью",
-        "btn_orig_clean": "Без превью",
+        "btn_orig_thumb": "С обложкой",
+        "btn_orig_clean": "Без обложки",
         "btn_custom": "Редактор",
         "btn_no_cover": "Без обложки",
         "btn_confirm": "Скачать",
         "btn_retry": "Заново",
-        
-        "no_token": "<b>Токен не указан!</b>\nИспользуй: <code>{prefix}grabber token [токен]</code>",
-        "token_stored": "<b>Токен сохранён!</b>\nЗапуск: <code>{prefix}grabber on</code>",
+        "no_token": (
+            "<b>Токен бота не задан!</b>\n"
+            "Используй: <code>{prefix}grab token [токен]</code>"
+        ),
+        "token_stored": (
+            "<b>Токен сохранён!</b>\n"
+            "<blockquote expandable>Лог запуска:\n{log}</blockquote>"
+        ),
+        "token_started": (
+            "<b>Grabber запущен!</b>\n"
+            "<blockquote expandable>Лог запуска:\n{log}</blockquote>"
+        ),
         "need_token": "<b>Укажи токен или ответь на сообщение с ним!</b>",
         "already_running": "<b>Уже запущен!</b>",
         "not_running": "<b>Бот не запущен!</b>",
-        "started": "<b>Grabber запущен!</b>",
-        "stopped": "<b>Grabber остановлен!</b>",
-        "start_failed": "<b>Ошибка запуска:</b>\n<code>{error}</code>",
-        
+        "start_failed": "<b>Ошибка запуска:</b>\n<code>{error}</code>\nИспользуй <code>{prefix}unextarnal Grabber</code>.",
         "reboot_start": "<b>ПЕРЕЗАГРУЗКА...</b>",
-        "reboot_done": "<b>Перезагрузка завершена, бот перезапущен!</b>",
+        "reboot_done": "<b>Перезагрузка завершена!</b>",
         "reboot_no_token": "<b>Нет токена для перезапуска!</b>",
-        "clear_done": "<b>Сброс к заводским настройкам!</b>\nТокен, куки, кэш - всё удалено.",
-        
+        "clear_done": "<b>Сброс к заводским настройкам!</b>",
         "cookie_saved": "<b>Куки сохранены!</b>",
         "cookie_cleared": "<b>Куки удалены!</b>",
         "cookie_empty": "<b>Куки не установлены.</b>",
@@ -374,104 +519,68 @@ class Grabber(loader.Module):
         "invalid_ext": "<b>Файл должен иметь расширение .txt!</b>",
         "cookie_err": "<b>Ошибка сохранения куки:</b>\n<code>{}</code>",
         "cookie_invalid_format": "<b>Неверный формат куки! Ожидается формат Netscape.</b>",
-        
-        "topic_enabled": "<b>Бот включён в этом топике!</b>",
-        "topic_disabled": "<b>Бот отключён в этом топике!</b>",
-        "topic_not_active": "<b>Этот топик не активен! Сначала отправьте /start в этом топике.</b>",
-        "topic_not_in_group": "<b>Эта команда работает только в группах!</b>",
-        "topic_not_forum": "<b>В этой группе не включены топики!</b>",
-        "topic_usage": "<b>Использование:</b> <code>{prefix}grabber topic on/off</code>",
-        
-        "deps_processing": "<b>Установка зависимостей...</b>",
-        "deps_result": "<b>Проверка зависимостей:</b>\n\n{results}",
-        
-        "logs_empty": "<b>Логов скачиваний пока нет.</b>",
-        "logs_generated": "<b>Лог последних {count} скачиваний.</b>",
-        
-        "usage": (
-            "<b>Grabber - Универсальный загрузчик медиа</b>\n\n"
-            "<code>{prefix}grabber on</code> - Запуск\n"
-            "<code>{prefix}grabber off</code> - Остановка\n"
-            "<code>{prefix}grabber token [токен]</code> - Установить токен бота\n"
-            "<code>{prefix}grabber start</code> - Установить зависимости\n"
-            "<code>{prefix}grabber reboot</code> - Очистить кэш и перезапустить\n"
-            "<code>{prefix}grabber clear</code> - Сброс к заводским\n"
-            "<code>{prefix}grabber cookies add</code> - Добавить куки (реплай на .txt)\n"
-            "<code>{prefix}grabber cookies remove</code> - Удалить куки\n"
-            "<code>{prefix}grabber topic on/off</code> - Вкл/выкл бота в топике\n"
-            "<code>{prefix}grabber status</code> - Статус\n"
-            "<code>{prefix}grabber process</code> - Текущий процесс\n"
-            "<code>{prefix}grabber logs</code> - Логи скачиваний\n"
-        ),
-        
         "status_template": (
             "<b>Статус Grabber</b>\n\n"
             "Статус: {status}\n"
             "Куки: {cookies}\n"
             "В очереди: {pending}\n"
-            "Активно: {active}\n"
+            "Активно задач: {active}\n"
             "Завершено: {completed}\n"
             "Ошибки: {errors}"
         ),
         "status_running": "Работает",
         "status_stopped": "Остановлен",
-        
         "no_active_process": "<b>Нет активного процесса</b>",
         "analyzing": "<b>Анализ...</b>",
-        "found_media": "<b>{title}</b>\n\nДлительность: {duration}\nВыберите формат:",
-        "found_media_group": "<b>{title}</b>\n\nДлительность: {duration}",
-        "grab_failed": "<b>Ошибка:</b>\n<code>{error}</code>",
-        "no_link": "<b>Ссылка не найдена!</b>",
+        "found_media": "<blockquote><b>{title}</b></blockquote>\nДлительность: {duration}\nВыберите формат:",
+        "found_media_group": "<blockquote><b>{title}</b></blockquote>\nДлительность: {duration}",
+        "grab_failed": "<b>ATTENTION:</b>\n<code>{error}</code>",
         "queue_pos": "<b>Очередь: #{pos}</b>",
         "starting": "<b>Начинаю загрузку!</b>",
-        "too_large": "<b>Файл слишком большой!</b>\nМакс: {max_mb}MB, Файл: {size_mb:.1f}MB",
+        "too_large_bot": "<b>Файл слишком большой для bot API ({size_mb:.1f} МБ). Загружаю через юзербот...</b>",
+        "too_large_no_premium": "<b>Файл слишком большой ({size_mb:.1f} МБ). Нужен Telegram Premium на аккаунте юзербота.</b>",
+        "too_large_over_limit": "<b>Файл слишком большой ({size_mb:.1f} МБ). Максимум 4096 МБ.</b>",
         "cancelled": "<b>Отменено</b>",
         "already_processing": "Уже обрабатывается!",
-        
         "hello": "<b>Привет, {user_link}!</b>\n\nОтправь ссылку на видео!",
         "hello_fallback": "<b>Привет!</b>\n\nОтправь ссылку на видео!",
-        "hello_group": "<b>Бот активирован в этой группе!</b>\n\nОтправляйте ссылки на видео - я предложу скачать.",
-        "hello_topic": "<b>Бот активирован в этом топике!</b>\n\nОтправляйте ссылки на видео - я предложу скачать.",
-        
-        "file_caption": "<b>{title}</b>\n{size_mb:.1f} MB | {width}x{height}",
-        "audio_caption": "<b>{title}</b>\n{size_mb:.1f} MB",
-        
-        "progress_header": "<b>Загрузка...</b>\n",
-        "progress_title": "<code>{title}</code>",
-        
+        "hello_group": "<b>Бот активирован в этой группе!</b>\n\nОтправляйте ссылки на видео.",
+        "hello_topic": "<b>Бот активирован в этом топике!</b>\n\nОтправляйте ссылки на видео.",
+        "hello_group_off": "<b>Бот деактивирован в этой группе.</b>",
+        "hello_topic_off": "<b>Бот деактивирован в этом топике.</b>",
+        "file_caption": (
+            "<blockquote><b>{title}</b></blockquote>\n"
+            "<pre><code class=\"language-grabber\">{size_mb:.1f} MB | {width}x{height} | {elapsed}</code></pre>"
+        ),
+        "audio_caption": (
+            "<blockquote><b>{title}</b></blockquote>\n"
+            "<pre><code class=\"language-grabber\">{size_mb:.1f} MB</code></pre>"
+        ),
+        "progress_title": "<b>{title}</b>",
         "video_waiting": "Видео: ожидание...",
         "video_done": "Видео: готово {size:.1f} MB",
         "video_progress": "Видео: {pct:.1f}% ({size:.1f}/{total:.1f} MB) | {speed}",
-        
         "audio_waiting": "Аудио: ожидание...",
         "audio_done": "Аудио: готово {size:.1f} MB",
         "audio_progress": "Аудио: {pct:.1f}% ({size:.1f}/{total:.1f} MB) | {speed}",
-        
         "merge_waiting": "Слияние: ожидание...",
         "merge_done": "Слияние: готово {size:.1f} MB",
         "merge_active": "Слияние: FFmpeg работает...",
         "merge_starting": "Слияние: запуск...",
-        
         "convert_waiting": "Конвертация: ожидание...",
         "convert_done": "Конвертация: готово {size:.1f} MB",
         "convert_active": "Конвертация: FFmpeg...",
-        
         "upload_waiting": "Telegram: ожидание...",
-        "upload_done": "Telegram: отправлено!",
-        "upload_progress": "Telegram: {elapsed:.1f}с",
-        "upload_success": "Telegram: {elapsed:.1f}с",
-        
+        "upload_progress": "Telegram: {pct:.1f}% ({cur:.1f}/{total:.1f} MB)",
+        "upload_success": "Telegram: готово {elapsed:.1f}с",
         "stage_init": "Инициализация...",
         "stage_video": "Загрузка видео...",
         "stage_audio": "Загрузка аудио...",
         "stage_ffmpeg": "Обработка FFmpeg...",
         "stage_probe": "Анализ файла...",
         "stage_upload": "Загрузка в Telegram...",
-        "stage_done": "Готово!",
         "stage_done_success": "Успешно загружено!",
-        
         "time_stage": "Время: {elapsed:.1f}с | {stage_text}",
-        
         "audio_menu": "<b>Выберите вариант:</b>",
         "editor_mode": "<b>Режим редактора!</b>\n\nОтправьте НАЗВАНИЕ ТРЕКА:",
         "edit_title_done": "Название: <b>{}</b>\n\nТеперь введите ИМЯ АРТИСТА:",
@@ -491,332 +600,241 @@ class Grabber(loader.Module):
         "op_cancelled": "<b>Операция отменена.</b>",
         "not_your_editor": "<b>Это не ваш редактор!</b>",
         "session_expired": "Сессия истекла",
-        
-        "group_added": "<b>Группа добавлена в мониторинг.</b>",
-        
+        "quality_menu": "<b>Выберите качество:</b>",
         "react_ok": "\U0001F44C",
         "react_fail": "\U0001F971",
-        
-        "quality_menu": "<b>Выберите качество:</b>",
+        "usage": (
+            "<b>Grabber - Универсальный загрузчик медиа</b>\n\n"
+            "<code>{prefix}grab token [токен]</code> - Установить токен бота\n"
+            "<code>{prefix}grab reboot</code> - Очистить кеш и перезапустить\n"
+            "<code>{prefix}grab clear</code> - Сброс к заводским\n"
+            "<code>{prefix}grab cookies add</code> - Добавить куки (реплай на .txt)\n"
+            "<code>{prefix}grab cookies remove</code> - Удалить куки\n"
+            "<code>{prefix}grab status</code> - Статус\n"
+        ),
+        "log_processing": "<b>Обработка:</b> {title}\nОт: {user}\nURL: <code>{url}</code>",
+        "log_done": "<b>Готово:</b> {title} | {size_mb:.1f} MB",
+        "log_error": "<b>Ошибка:</b> {title}\n<code>{error}</code>",
+        "log_large": "<b>Большой файл ({size_mb:.1f} МБ), загружаю через юзербот...</b>",
     }
 
     def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "BOT_TOKEN",
+                "",
+                "Bot token for Grabber",
+                validator=loader.validators.Hidden(),
+            ),
+            loader.ConfigValue(
+                "AUTORUNNER",
+                False,
+                "Auto-start bot on module load",
+                validator=loader.validators.Boolean(),
+            ),
+            loader.ConfigValue(
+                "MAX_FILE_MB",
+                2000,
+                "Max file size in MB (>2000 sent via userbot if premium)",
+                validator=loader.validators.Integer(minimum=50, maximum=4096),
+            ),
+            loader.ConfigValue(
+                "MAX_WORKERS",
+                1,
+                "Number of parallel download workers",
+                validator=loader.validators.Integer(minimum=1, maximum=10),
+            ),
+            loader.ConfigValue(
+                "ACTION_DELAY",
+                3,
+                "Progress message update interval in seconds",
+                validator=loader.validators.Integer(minimum=1, maximum=30),
+            ),
+            loader.ConfigValue(
+                "ACTIVE_GROUPS",
+                [],
+                "Groups where bot is active (managed automatically)",
+                validator=loader.validators.Series(loader.validators.Integer()),
+            ),
+            loader.ConfigValue(
+                "ACTIVE_TOPICS",
+                {},
+                "Topics where bot is active (managed automatically)",
+            ),
+        )
+
         self._bot = None
         self._running = False
         self._download_queue = asyncio.Queue()
         self._queue_items = SafeList()
         self._processed_buttons = SafeSet()
-        self._worker_task = None
+        self._worker_tasks = []
         self._stats = {"completed": 0, "errors": 0}
-        
+
         self._root = None
         self._cache_dir = None
         self._session_dir = None
         self._cookie_dir = None
         self._cookie_path = None
-        
+
         self._lock = asyncio.Lock()
         self._edit_lock = asyncio.Lock()
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
         self._active_processes = []
-        
+
         self._edit_state = {}
         self._active_groups = set()
         self._active_topics = {}
-        
-        self._current_download = self._empty_progress()
-        self._download_logs = []
+
+        self._current_downloads = {}
+        self._og_cache = {}
+        self._grabber_topic_id = None
 
     def _empty_progress(self):
         return {
-            'active': False,
-            'title': '',
-            'start_time': 0,
-            'is_audio_only': False,
-            'video_percent': 0.0,
-            'video_size': 0.0,
-            'video_total': 0.0,
-            'video_speed': '',
-            'video_done': False,
-            'audio_percent': 0.0,
-            'audio_size': 0.0,
-            'audio_total': 0.0,
-            'audio_speed': '',
-            'audio_done': False,
-            'audio_started': False,
-            'ffmpeg_active': False,
-            'ffmpeg_done': False,
-            'upload_started': False,
-            'upload_elapsed': 0.0,
-            'final_size': 0.0,
-            'stage': 'init',
+            "active": False, "title": "", "start_time": 0, "is_audio_only": False,
+            "dl_percent": 0.0, "dl_size": 0.0, "dl_total": 0.0, "dl_speed_bytes": 0.0, "dl_done": False,
+            "ffmpeg_active": False, "ffmpeg_done": False,
+            "upload_started": False, "upload_elapsed": 0.0,
+            "upload_current": 0.0, "upload_total": 0.0, "upload_speed": "N/A",
+            "final_size": 0.0, "stage": "init", "og_url": None,
         }
 
-    def _add_download_log(self, title: str, url: str, mode: str, success: bool, error: str = None):
-        log_entry = {
-            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
-            'title': title[:100],
-            'url': url[:200],
-            'mode': mode,
-            'success': success,
-            'error': error[:200] if error else None
-        }
-        self._download_logs.append(log_entry)
-        if len(self._download_logs) > 100:
-            self._download_logs = self._download_logs[-100:]
+    def _get_elapsed(self, task_id):
+        start = self._current_downloads.get(task_id, {}).get("start_time", 0)
+        return time.time() - start if start > 0 else 0.0
 
-    def _build_status_message(self):
-        d = self._current_download
-        elapsed = self._get_elapsed()
-        stage = d.get('stage', 'init')
-        is_audio_only = d.get('is_audio_only', False)
-        
-        title = d.get('title', 'Unknown')[:60]
-        
-        lines = [
-            self.strings["progress_header"],
-            self.strings["progress_title"].format(title=title),
-            self.strings["line"],
-        ]
-        
-        if not is_audio_only:
-            if stage == 'init':
-                lines.append(self.strings["video_waiting"])
-            elif d.get('video_done'):
-                lines.append(self.strings["video_done"].format(size=d.get('video_total', 0)))
-            elif stage == 'video':
-                lines.append(self.strings["video_progress"].format(
-                    pct=d.get('video_percent', 0),
-                    size=d.get('video_size', 0),
-                    total=d.get('video_total', 0),
-                    speed=d.get('video_speed', 'N/A')
-                ))
+    def _build_status_message(self, task_id):
+        d = self._current_downloads.get(task_id, self._empty_progress())
+        stage = d.get("stage", "init")
+        is_audio = d.get("is_audio_only", False)
+        title = _escape_html(d.get("title", "Unknown")[:80])
+        elapsed = self._get_elapsed(task_id)
+
+        inner = ["----------------"]
+
+        if d.get("dl_done"):
+            dl_display = d.get("final_size") or d.get("dl_total") or d.get("dl_size", 0)
+            inner.append(self.strings["dl_done"].format(size=dl_display))
+        elif d.get("dl_percent", 0) > 0 or d.get("dl_size", 0) > 0:
+            pct = d.get("dl_percent", 0)
+            sz = d.get("dl_size", 0)
+            total = d.get("dl_total", 0)
+            inner.append(self.strings["dl_progress"].format(pct=pct, size=sz, total=total if total > 0 else sz))
+        else:
+            inner.append(self.strings["dl_waiting"])
+
+        if not is_audio:
+            if d.get("ffmpeg_done"):
+                inner.append(self.strings["merge_done"].format(size=d.get("final_size", 0)))
+            elif d.get("ffmpeg_active") or stage == "ffmpeg":
+                inner.append(self.strings["merge_active"])
             else:
-                lines.append(self.strings["video_waiting"])
-        
-        if d.get('audio_done'):
-            lines.append(self.strings["audio_done"].format(size=d.get('audio_total', 0)))
-        elif stage == 'audio' or d.get('audio_started'):
-            lines.append(self.strings["audio_progress"].format(
-                pct=d.get('audio_percent', 0),
-                size=d.get('audio_size', 0),
-                total=d.get('audio_total', 0),
-                speed=d.get('audio_speed', 'N/A')
-            ))
+                inner.append(self.strings["merge_waiting"])
         else:
-            lines.append(self.strings["audio_waiting"])
-        
-        if not is_audio_only:
-            if d.get('ffmpeg_done'):
-                lines.append(self.strings["merge_done"].format(size=d.get('final_size', 0)))
-            elif d.get('ffmpeg_active') or stage == 'ffmpeg':
-                lines.append(self.strings["merge_active"])
-            elif d.get('video_done') and d.get('audio_done'):
-                lines.append(self.strings["merge_starting"])
+            if d.get("ffmpeg_done"):
+                inner.append(self.strings["convert_done"].format(size=d.get("final_size", 0)))
+            elif d.get("ffmpeg_active") or stage == "ffmpeg":
+                inner.append(self.strings["convert_active"])
             else:
-                lines.append(self.strings["merge_waiting"])
-        else:
-            if d.get('ffmpeg_done'):
-                lines.append(self.strings["convert_done"].format(size=d.get('final_size', 0)))
-            elif d.get('ffmpeg_active') or stage == 'ffmpeg':
-                lines.append(self.strings["convert_active"])
-            else:
-                lines.append(self.strings["convert_waiting"])
-        
-        if stage == 'done':
-            lines.append(self.strings["upload_success"].format(elapsed=d.get('upload_elapsed', 0)))
-        elif stage == 'upload' or d.get('upload_started'):
-            lines.append(self.strings["upload_progress"].format(elapsed=d.get('upload_elapsed', 0)))
-        else:
-            lines.append(self.strings["upload_waiting"])
-        
-        lines.append(self.strings["line"])
-        
-        stage_map = {
-            'init': self.strings["stage_init"],
-            'video': self.strings["stage_video"],
-            'audio': self.strings["stage_audio"],
-            'ffmpeg': self.strings["stage_ffmpeg"],
-            'probe': self.strings["stage_probe"],
-            'upload': self.strings["stage_upload"],
-            'done': self.strings["stage_done_success"],
-        }
-        stage_text = stage_map.get(stage, self.strings["stage_init"])
-        
-        lines.append(self.strings["time_stage"].format(elapsed=elapsed, stage_text=stage_text))
-        
-        return "\n".join(lines)
+                inner.append(self.strings["convert_waiting"])
 
-    def _get_elapsed(self):
-        start = self._current_download.get('start_time', 0)
-        if start > 0:
-            return time.time() - start
-        return 0.0
-
-    def _format_speed(self, speed_bytes):
-        if not speed_bytes or speed_bytes == 0:
-            return "..."
-        if speed_bytes < 1024:
-            return f"{speed_bytes:.0f} B/s"
-        elif speed_bytes < 1024 * 1024:
-            return f"{speed_bytes / 1024:.1f} KB/s"
+        if stage == "done":
+            inner.append(self.strings["upload_success"].format(elapsed=d.get("upload_elapsed", 0)))
+        elif stage == "upload" or d.get("upload_started"):
+            cur = d.get("upload_current", 0.0)
+            total = d.get("upload_total", 0.0)
+            pct = (cur / total * 100) if total > 0 else 0.0
+            inner.append(self.strings["upload_progress"].format(
+                pct=pct, cur=cur, total=total if total > 0 else cur))
         else:
-            return f"{speed_bytes / 1024 / 1024:.1f} MB/s"
+            inner.append(self.strings["upload_waiting"])
 
-    def _format_duration(self, seconds):
-        if not seconds:
-            return "N/A"
-        seconds = int(seconds)
-        if seconds < 60:
-            return f"{seconds}s"
-        elif seconds < 3600:
-            m, s = divmod(seconds, 60)
-            return f"{m}m {s}s"
+        inner.append("----------------")
+
+        if stage in ("ffmpeg", "probe"):
+            speed_str = "N/A"
+        elif stage == "upload" or d.get("upload_started"):
+            speed_str = d.get("upload_speed", "N/A")
         else:
-            h, rem = divmod(seconds, 3600)
-            m, s = divmod(rem, 60)
-            return f"{h}h {m}m"
+            speed_str = _fmt_speed(d.get("dl_speed_bytes", 0))
 
-    def _escape_html(self, text: str) -> str:
+        inner.append(self.strings["time_stage"].format(elapsed=elapsed, stage_text=f"Speed: {speed_str}"))
+
+        title_block = f"<b>{title}</b>"
+        debug_block = f'<pre><code class="language-grabber">{chr(10).join(inner)}</code></pre>'
+        return f"{title_block}\n{debug_block}"
+    def _make_progress_hook(self, task_id):
+        def _hook(d):
+            dl = self._current_downloads.get(task_id)
+            if not dl:
+                return
+            status = d.get("status")
+            if status == "downloading":
+                total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+                downloaded = d.get("downloaded_bytes", 0)
+                speed = d.get("speed") or 0
+                dl["dl_percent"] = (downloaded / total * 100) if total > 0 else 0
+                dl["dl_size"] = downloaded / 1024 / 1024
+                dl["dl_total"] = total / 1024 / 1024 if total > 0 else dl["dl_size"]
+                dl["dl_speed_bytes"] = speed
+                dl["stage"] = "dl"
+                dl["active"] = True
+            elif status == "finished":
+                total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+                size_mb = total / 1024 / 1024
+                dl["dl_done"] = True
+                dl["dl_percent"] = 100.0
+                if size_mb > 0:
+                    dl["dl_total"] = dl.get("dl_total", 0) + size_mb
+                    dl["dl_size"] = dl["dl_total"]
+        return _hook
+    def _make_pp_hook(self, task_id):
+        def _hook(d):
+            dl = self._current_downloads.get(task_id)
+            if not dl:
+                return
+            if d.get("status") == "started":
+                dl["ffmpeg_active"] = True
+                dl["stage"] = "ffmpeg"
+            elif d.get("status") == "finished":
+                dl["ffmpeg_done"] = True
+                dl["ffmpeg_active"] = False
+        return _hook
+
+    def _extract_url(self, text):
         if not text:
-            return ""
-        return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            return None
+        m = _URL_PATTERN.search(text)
+        return m.group(0) if m else None
 
-    def _validate_cookies_content(self, content):
-        if not content:
-            return False
-        lower_content = content.lower()
-        if "# netscape" in lower_content or "youtube.com" in lower_content or "TRUE" in content:
-            return True
-        return False
+    def _extract_bot_token(self, text):
+        if not text:
+            return None
+        m = _BOT_TOKEN_RE.search(text)
+        return m.group(0) if m else None
 
     def _get_topic_id(self, event):
-        reply_to = getattr(event, 'reply_to', None)
+        reply_to = getattr(event, "reply_to", None)
         if reply_to:
-            return getattr(reply_to, 'reply_to_top_id', None) or getattr(reply_to, 'reply_to_msg_id', None)
+            return getattr(reply_to, "reply_to_top_id", None) or getattr(reply_to, "reply_to_msg_id", None)
         return None
 
     def _is_forum(self, chat):
-        return getattr(chat, 'forum', False)
+        return getattr(chat, "forum", False)
 
-    def _save_active_topics(self):
-        save_data = {str(k): list(v) for k, v in self._active_topics.items()}
-        self._db.set("Grabber", "active_topics", save_data)
+    def _make_workdir(self):
+        name = f"job_{int(time.time() * 1000)}_{os.getpid()}"
+        path = os.path.join(self._cache_dir, name)
+        os.makedirs(path, exist_ok=True)
+        return path
 
-    def _load_active_topics(self):
-        saved = self._db.get("Grabber", "active_topics", {})
-        self._active_topics = {int(k): set(v) for k, v in saved.items()}
-
-    async def _install_dependencies(self):
-        deps = {
-            'yt-dlp': 'yt_dlp',
-            'cryptg': 'cryptg',
-            'Pillow': 'PIL',
-            'hachoir': 'hachoir',
-            'aiohttp': 'aiohttp',
-        }
-        
-        results = {}
-        
-        for pkg, import_name in deps.items():
+    def _clean_workdir(self, path):
+        if path and os.path.exists(path):
             try:
-                proc = await asyncio.create_subprocess_shell(
-                    f"pip install -U {pkg}",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-                
-                if stdout:
-                    logger.warning(f"[GRABBER] pip {pkg}: {stdout.decode()}")
-                if stderr:
-                    logger.warning(f"[GRABBER] pip {pkg} stderr: {stderr.decode()}")
-                
-            except Exception as e:
-                logger.warning(f"[GRABBER] Failed to install {pkg}: {e}")
-        
-        for pkg, import_name in deps.items():
-            try:
-                __import__(import_name)
-                results[pkg] = "OK"
-            except ImportError:
-                results[pkg] = "FAIL"
-        
-        try:
-            proc = await asyncio.create_subprocess_shell(
-                "ffmpeg -version",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode == 0:
-                results['ffmpeg'] = "OK"
-                if stdout:
-                    logger.warning(f"[GRABBER] ffmpeg: {stdout.decode()[:100]}")
-            else:
-                results['ffmpeg'] = "FAIL"
-        except Exception:
-            results['ffmpeg'] = "FAIL"
-        
-        try:
-            proc = await asyncio.create_subprocess_shell(
-                "ffprobe -version",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await proc.communicate()
-            results['ffprobe'] = "OK" if proc.returncode == 0 else "FAIL"
-        except Exception:
-            results['ffprobe'] = "FAIL"
-        
-        return results
-
-    async def client_ready(self, client, db):
-        self._client = client
-        self._db = db
-        
-        self._root = "/tmp/grabber_data"
-        self._cache_dir = os.path.join(self._root, "cache")
-        self._session_dir = os.path.join(self._root, "session")
-        self._cookie_dir = os.path.join(self._root, "cookies")
-        self._cookie_path = os.path.join(self._cookie_dir, "cookies.txt")
-        
-        self._clean_cache()
-        
-        os.makedirs(self._cache_dir, exist_ok=True)
-        os.makedirs(self._session_dir, exist_ok=True)
-        os.makedirs(self._cookie_dir, exist_ok=True)
-        
-        self._active_groups = set(self._db.get("Grabber", "active_groups", []))
-        self._load_active_topics()
-        
-        saved_cookies = self._db.get("Grabber", "cookies_content")
-        if saved_cookies:
-            try:
-                with open(self._cookie_path, "w", encoding="utf-8") as f:
-                    f.write(saved_cookies)
-                logger.info(f"[GRABBER] Cookies restored to {self._cookie_path}")
-            except Exception as e:
-                logger.error(f"[GRABBER] Failed to restore cookies: {e}")
-        
-        await self._ensure_ytdlp()
-        
-        if self._db.get("Grabber", "autorun", False):
-            tkn = self._db.get("Grabber", "tkn")
-            if tkn:
-                try:
-                    await self._launch(tkn)
-                    logger.info("[GRABBER] Autorun successful")
-                except Exception as e:
-                    logger.error(f"[GRABBER] Autorun failed: {e}")
-
-    async def _ensure_ytdlp(self):
-        proc = await asyncio.create_subprocess_shell(
-            "pip install -U yt-dlp 2>/dev/null || pip install yt-dlp",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL
-        )
-        await proc.wait()
+                shutil.rmtree(path)
+            except Exception:
+                pass
 
     def _clean_cache(self):
         if self._cache_dir and os.path.exists(self._cache_dir):
@@ -840,23 +858,33 @@ class Grabber(loader.Module):
                 pass
         self._db.set("Grabber", "cookies_content", None)
 
-    def _clean_workdir(self, path):
-        if path and os.path.exists(path):
-            try:
-                shutil.rmtree(path)
-            except Exception:
-                pass
-
     def _clean_all(self):
         self._clean_cache()
         self._clean_session()
         self._clean_cookies()
-        self._db.set("Grabber", "tkn", None)
-        self._db.set("Grabber", "autorun", False)
-        self._db.set("Grabber", "active_groups", [])
-        self._db.set("Grabber", "active_topics", {})
+        self.config["BOT_TOKEN"] = ""
+        self.config["AUTORUNNER"] = False
+        self.config["ACTIVE_GROUPS"] = []
+        self.config["ACTIVE_TOPICS"] = {}
         self._active_groups.clear()
         self._active_topics.clear()
+
+    def _save_active_groups(self):
+        self.config["ACTIVE_GROUPS"] = list(self._active_groups)
+
+    def _save_active_topics(self):
+        self.config["ACTIVE_TOPICS"] = {str(k): list(v) for k, v in self._active_topics.items()}
+
+    def _load_active_groups(self):
+        saved = self.config.get("ACTIVE_GROUPS") or []
+        self._active_groups = set(saved)
+
+    def _load_active_topics(self):
+        saved = self.config.get("ACTIVE_TOPICS") or {}
+        if isinstance(saved, dict):
+            self._active_topics = {int(k): set(v) for k, v in saved.items()}
+        else:
+            self._active_topics = {}
 
     def _kill_active_processes(self):
         for proc in self._active_processes:
@@ -871,243 +899,481 @@ class Grabber(loader.Module):
                     pass
         self._active_processes.clear()
 
-    def _extract_url(self, text):
-        if not text:
-            return None
-        match = _URL_PATTERN.search(text)
-        return match.group(0) if match else None
+    def _validate_cookies(self, content):
+        if not content:
+            return False
+        lower = content.lower()
+        return "# netscape" in lower or "youtube.com" in lower or "TRUE" in content
 
-    def _extract_token(self, text):
-        if not text:
-            return None
-        match = _BOT_TOKEN_PATTERN.search(text)
-        return match.group(0) if match else None
+    def _format_duration(self, seconds):
+        if not seconds:
+            return "N/A"
+        return _fmt_dur(seconds)
 
-    def _make_workdir(self):
-        name = f"job_{int(time.time() * 1000)}_{os.getpid()}"
-        path = os.path.join(self._cache_dir, name)
-        os.makedirs(path, exist_ok=True)
-        return path
-
-    def _save_active_groups(self):
-        self._db.set("Grabber", "active_groups", list(self._active_groups))
-
-    def _get_video_info_ffprobe(self, filepath):
+    async def _get_grabber_topic_id(self):
         try:
-            cmd = [
-                'ffprobe', '-v', 'error',
-                '-select_streams', 'v:0',
-                '-show_entries', 'stream=width,height,duration,codec_name',
-                '-of', 'json',
-                filepath
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            
-            if result.returncode == 0:
-                import json
-                data = json.loads(result.stdout)
-                streams = data.get('streams', [])
-                if streams:
-                    stream = streams[0]
-                    return {
-                        'width': int(stream.get('width', 0)),
-                        'height': int(stream.get('height', 0)),
-                        'duration': float(stream.get('duration', 0)) if stream.get('duration') else 0,
-                        'codec': stream.get('codec_name', 'unknown'),
-                    }
+            forums_cache = self._db.get("heroku.forums", "forums_cache", {})
+            tid = forums_cache.get("heroku-userbot", {}).get("Grabber")
+            if tid:
+                return tid
+            asset_channel = self._db.get("heroku.forums", "channel_id", None)
+            if not asset_channel:
+                return None
+            topic = await utils.asset_forum_topic(
+                self._client, self._db, asset_channel,
+                "Grabber", description="Grabber downloads log.",
+                icon_emoji_id=GRABBER_TOPIC_ICON,
+            )
+            return topic.id if topic else None
         except Exception as e:
-            logger.error(f"[GRABBER] ffprobe error: {e}")
-        return None
+            logger.error(f"[GRABBER] topic init failed: {e}")
+            return None
 
-    def _get_audio_info_ffprobe(self, filepath):
+    async def _log_to_topic(self, text):
+        if not self._grabber_topic_id:
+            return
+        asset_channel = self._db.get("heroku.forums", "channel_id", None)
+        if not asset_channel:
+            return
         try:
-            cmd = [
-                'ffprobe', '-v', 'error',
-                '-select_streams', 'a:0',
-                '-show_entries', 'stream=duration,codec_name',
-                '-of', 'json',
-                filepath
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            
-            if result.returncode == 0:
-                import json
-                data = json.loads(result.stdout)
-                streams = data.get('streams', [])
-                if streams:
-                    stream = streams[0]
-                    return {
-                        'duration': float(stream.get('duration', 0)) if stream.get('duration') else 0,
-                        'codec': stream.get('codec_name', 'unknown'),
-                    }
-        except Exception as e:
-            logger.error(f"[GRABBER] ffprobe audio error: {e}")
-        return None
+            await self.inline.bot.send_message(
+                int(f"-100{asset_channel}"),
+                text,
+                parse_mode="HTML",
+                message_thread_id=self._grabber_topic_id,
+                disable_web_page_preview=True,
+            )
+        except Exception:
+            pass
 
-    def _get_available_formats(self, info):
-        formats = info.get('formats', [])
-        heights = set()
-        
-        for fmt in formats:
-            h = fmt.get('height')
-            vcodec = fmt.get('vcodec', 'none')
-            if h and vcodec != 'none':
-                heights.add(h)
-        
-        standard = [2160, 1440, 1080, 720, 480, 360, 240, 144]
-        available = sorted([h for h in standard if h in heights], reverse=True)
-        
-        if not available:
-            available = [720, 480, 360]
-        
-        return available
+    async def client_ready(self, client, db):
+        self._client = client
+        self._db = db
 
-    def _build_format_string(self, height):
-        return f'bestvideo[height<={height}][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<={height}]+bestaudio/best[height<={height}][ext=mp4]/best[height<={height}]'
+        me = await client.get_me()
+        tg_id = me.id
+        self._root = os.path.join(tempfile.gettempdir(), f"grabber_{tg_id}")
+        self._cache_dir = os.path.join(self._root, "cache")
+        self._session_dir = os.path.join(self._root, "session")
+        self._cookie_dir = os.path.join(self._root, "cookies")
+        self._cookie_path = os.path.join(self._cookie_dir, "cookies.txt")
 
-    def _detect_stream_type(self, d):
-        info = d.get('info_dict', {})
-        vcodec = info.get('vcodec', 'none') or 'none'
-        acodec = info.get('acodec', 'none') or 'none'
-        
-        is_video_only = vcodec != 'none' and acodec == 'none'
-        is_audio_only = vcodec == 'none' and acodec != 'none'
-        is_combined = vcodec != 'none' and acodec != 'none'
-        
-        return is_video_only, is_audio_only, is_combined
+        self._clean_cache()
+        os.makedirs(self._cache_dir, exist_ok=True)
+        os.makedirs(self._session_dir, exist_ok=True)
+        os.makedirs(self._cookie_dir, exist_ok=True)
 
-    def _progress_hook(self, d):
-        status = d.get('status')
-        is_audio_mode = self._current_download.get('is_audio_only', False)
-        
-        is_video_stream, is_audio_stream, is_combined = self._detect_stream_type(d)
-        
-        if status == 'downloading':
-            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-            downloaded = d.get('downloaded_bytes', 0)
-            speed = d.get('speed') or 0
-            
-            percent = (downloaded / total * 100) if total > 0 else 0
-            total_mb = total / 1024 / 1024 if total > 0 else 0
-            size_mb = downloaded / 1024 / 1024
-            speed_str = self._format_speed(speed)
-            
-            self._current_download['active'] = True
-            
-            if is_audio_mode:
-                self._current_download.update({
-                    'stage': 'audio',
-                    'audio_started': True,
-                    'audio_percent': percent,
-                    'audio_size': size_mb,
-                    'audio_total': total_mb,
-                    'audio_speed': speed_str,
-                })
-            elif is_audio_stream:
-                self._current_download.update({
-                    'stage': 'audio',
-                    'audio_started': True,
-                    'audio_percent': percent,
-                    'audio_size': size_mb,
-                    'audio_total': total_mb,
-                    'audio_speed': speed_str,
-                })
-            elif is_video_stream:
-                self._current_download.update({
-                    'stage': 'video',
-                    'video_percent': percent,
-                    'video_size': size_mb,
-                    'video_total': total_mb,
-                    'video_speed': speed_str,
-                })
-            elif is_combined:
-                self._current_download.update({
-                    'stage': 'video',
-                    'video_percent': percent,
-                    'video_size': size_mb,
-                    'video_total': total_mb,
-                    'video_speed': speed_str,
-                })
-            else:
-                if self._current_download.get('video_done') and not self._current_download.get('audio_done'):
-                    self._current_download.update({
-                        'stage': 'audio',
-                        'audio_started': True,
-                        'audio_percent': percent,
-                        'audio_size': size_mb,
-                        'audio_total': total_mb,
-                        'audio_speed': speed_str,
-                    })
-                elif not self._current_download.get('video_done'):
-                    self._current_download.update({
-                        'stage': 'video',
-                        'video_percent': percent,
-                        'video_size': size_mb,
-                        'video_total': total_mb,
-                        'video_speed': speed_str,
-                    })
-                else:
-                    self._current_download.update({
-                        'stage': 'audio',
-                        'audio_started': True,
-                        'audio_percent': percent,
-                        'audio_size': size_mb,
-                        'audio_total': total_mb,
-                        'audio_speed': speed_str,
-                    })
-            
-        elif status == 'finished':
-            if is_audio_mode:
-                self._current_download['audio_done'] = True
-                self._current_download['audio_percent'] = 100.0
-            elif is_audio_stream:
-                self._current_download['audio_done'] = True
-                self._current_download['audio_percent'] = 100.0
-            elif is_video_stream:
-                self._current_download['video_done'] = True
-                self._current_download['video_percent'] = 100.0
-            elif is_combined:
-                self._current_download['video_done'] = True
-                self._current_download['video_percent'] = 100.0
-                self._current_download['audio_done'] = True
-                self._current_download['audio_percent'] = 100.0
-            else:
-                if not self._current_download.get('video_done'):
-                    self._current_download['video_done'] = True
-                    self._current_download['video_percent'] = 100.0
-                elif not self._current_download.get('audio_done'):
-                    self._current_download['audio_done'] = True
-                    self._current_download['audio_percent'] = 100.0
+        self._load_active_groups()
+        self._load_active_topics()
 
-    def _postprocessor_hook(self, d):
-        status = d.get('status')
-        
-        if status == 'started':
-            self._current_download['ffmpeg_active'] = True
-            self._current_download['stage'] = 'ffmpeg'
-        elif status == 'finished':
-            self._current_download['ffmpeg_done'] = True
-            self._current_download['ffmpeg_active'] = False
-
-    async def _edit_message(self, chat_id: int, msg_id: int, text: str, **kwargs):
-        for attempt in range(3):
+        saved_cookies = self._db.get("Grabber", "cookies_content")
+        if saved_cookies:
             try:
-                if self._bot:
-                    await self._bot.edit_message(chat_id, msg_id, text, **kwargs)
-                return True
-            except MessageNotModifiedError:
-                return True
-            except FloodWaitError as e:
-                await asyncio.sleep(min(e.seconds, 5))
+                with open(self._cookie_path, "w", encoding="utf-8") as f:
+                    f.write(saved_cookies)
+            except Exception:
+                pass
+
+        self._grabber_topic_id = await self._get_grabber_topic_id()
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(self._executor, _install_deps)
+        if self.config["AUTORUNNER"] and self.config["BOT_TOKEN"]:
+            try:
+                await self._launch(self.config["BOT_TOKEN"])
             except Exception as e:
-                if attempt < 2:
-                    await asyncio.sleep(0.5)
-        return False
+                logger.error(f"[GRABBER] Autorunner failed: {e}")
+
+    async def _check_deps(self):
+        deps = {"yt-dlp": "yt_dlp", "TgCrypto-pyrofork": "TgCrypto",
+                "Pillow": "PIL", "aiohttp": "aiohttp", "mutagen": "mutagen"}
+        lines = []
+        for pkg, imp in deps.items():
+            try:
+                __import__(imp)
+                lines.append(f"{pkg}: OK")
+            except ImportError:
+                lines.append(f"{pkg}: FAIL")
+        for name in ["ffmpeg", "ffprobe"]:
+            try:
+                proc = await asyncio.create_subprocess_shell(
+                    f"{name} -version",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await proc.communicate()
+                lines.append(f"{name}: {'OK' if proc.returncode == 0 else 'FAIL'}")
+            except Exception:
+                lines.append(f"{name}: FAIL")
+        return "\n".join(lines)
+
+    async def _install_and_check(self):
+        loop = asyncio.get_event_loop()
+        dep_lines = await loop.run_in_executor(self._executor, _install_deps)
+        for name in ["ffmpeg", "ffprobe"]:
+            try:
+                proc = await asyncio.create_subprocess_shell(
+                    f"{name} -version", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                await proc.communicate()
+                dep_lines.append(f"{name}: {'OK' if proc.returncode == 0 else 'FAIL'}")
+            except Exception:
+                dep_lines.append(f"{name}: FAIL")
+        dep_lines.reverse()
+        return "\n".join(dep_lines)
+
+
+    async def _create_backup(self):
+        data = {
+            "version": 4,
+            "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "bot": {"BOT_TOKEN": self.config["BOT_TOKEN"]},
+            "settings": {
+                "AUTORUNNER": self.config["AUTORUNNER"],
+                "MAX_FILE_MB": self.config["MAX_FILE_MB"],
+                "MAX_WORKERS": self.config["MAX_WORKERS"],
+                "ACTION_DELAY": self.config["ACTION_DELAY"],
+            },
+            "groups": {
+                "active_groups": list(self._active_groups),
+                "active_topics": {str(k): list(v) for k, v in self._active_topics.items()},
+            },
+        }
+        backup_path = os.path.join(self._cache_dir, "Grabber_backup.json")
+        with open(backup_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return backup_path
+
+    async def _restore_from_backup(self, raw_content):
+        try:
+            data = json.loads(raw_content)
+            bot_data = data.get("bot", {})
+            settings = data.get("settings", {})
+            groups = data.get("groups", {})
+            if bot_data.get("BOT_TOKEN"):
+                self.config["BOT_TOKEN"] = bot_data["BOT_TOKEN"]
+            for k, t in [("AUTORUNNER", bool), ("MAX_FILE_MB", int),
+                          ("MAX_WORKERS", int), ("ACTION_DELAY", int)]:
+                if k in settings:
+                    self.config[k] = t(settings[k])
+            if "active_groups" in groups:
+                self._active_groups = set(groups["active_groups"])
+                self._save_active_groups()
+            if "active_topics" in groups:
+                self._active_topics = {int(k): set(v) for k, v in groups["active_topics"].items()}
+                self._save_active_topics()
+            return True
+        except Exception as e:
+            return False, str(e)
+
+    @loader.command(ru_doc="Управление Grabber", en_doc="Grabber management")
+    async def grab(self, message):
+        """Grabber management"""
+        args = utils.get_args(message)
+        cmd = args[0].lower() if args else None
+        prefix = self.get_prefix()
+
+        if not cmd:
+            await utils.answer(message, self.strings["usage"].format(prefix=prefix))
+            return
+
+        if cmd == "status":
+            st = self.strings["status_running"] if self._running else self.strings["status_stopped"]
+            cookies_st = (
+                self.strings["cookie_ok"]
+                if self._cookie_path and os.path.exists(self._cookie_path)
+                else self.strings["cookie_empty"]
+            )
+            await utils.answer(
+                message,
+                self.strings["status_template"].format(
+                    status=st,
+                    cookies=cookies_st,
+                    pending=len(self._queue_items),
+                    active=len(self._current_downloads),
+                    completed=self._stats["completed"],
+                    errors=self._stats["errors"],
+                ),
+            )
+
+        elif cmd == "token":
+            token = None
+            if len(args) >= 2:
+                token = self._extract_bot_token(args[1])
+            if not token:
+                reply = await message.get_reply_message()
+                if reply and reply.text:
+                    token = self._extract_bot_token(reply.text)
+            if not token:
+                await utils.answer(message, self.strings["need_token"])
+                return
+            msg = await utils.answer(message, "<b>Installing dependencies...</b>")
+            if isinstance(msg, list):
+                msg = msg[0]
+            dep_log = await self._install_and_check()
+            self.config["BOT_TOKEN"] = token
+            try:
+                await self._launch(token)
+                bot_me = await self._bot.get_me()
+                connect_line = f"bot: @{bot_me.username} ({bot_me.id}): OK"
+                self.config["AUTORUNNER"] = True
+                await self._create_backup()
+                full_log = connect_line + "\n" + dep_log
+                await self._safe_edit(msg, self.strings["token_started"].format(
+                    log=_escape_html(full_log[-3700:])), parse_mode="html")
+            except Exception as e:
+                await self._safe_edit(msg, self.strings["start_failed"].format(
+                    error=str(e)[:200], prefix=prefix))
+
+        elif cmd == "reboot":
+            msg = await utils.answer(message, self.strings["reboot_start"])
+            if isinstance(msg, list):
+                msg = msg[0]
+            await self._shutdown()
+            self._kill_active_processes()
+            self._clean_cache()
+            self._clean_session()
+            os.makedirs(self._cache_dir, exist_ok=True)
+            os.makedirs(self._session_dir, exist_ok=True)
+            self._stats = {"completed": 0, "errors": 0}
+            self._queue_items.clear()
+            self._processed_buttons.clear()
+            self._edit_state.clear()
+            self._download_queue = asyncio.Queue()
+            self._current_downloads.clear()
+            self._og_cache.clear()
+            await self._install_and_check()
+            tkn = self.config["BOT_TOKEN"]
+            if tkn:
+                try:
+                    await self._launch(tkn)
+                    self.config["AUTORUNNER"] = True
+                    await self._safe_edit(msg, self.strings["reboot_done"])
+                except Exception as e:
+                    await self._safe_edit(msg, self.strings["start_failed"].format(
+                        error=str(e)[:200], prefix=prefix))
+            else:
+                await self._safe_edit(msg, self.strings["reboot_no_token"])
+
+        elif cmd == "clear":
+            await self._shutdown()
+            self._clean_all()
+            os.makedirs(self._cache_dir, exist_ok=True)
+            os.makedirs(self._session_dir, exist_ok=True)
+            os.makedirs(self._cookie_dir, exist_ok=True)
+            self._stats = {"completed": 0, "errors": 0}
+            self._queue_items.clear()
+            self._processed_buttons.clear()
+            self._edit_state.clear()
+            self._download_queue = asyncio.Queue()
+            self._current_downloads.clear()
+            await utils.answer(message, self.strings["clear_done"])
+
+
+        elif cmd == "cookies":
+            if len(args) >= 2:
+                action = args[1].lower()
+                if action == "add":
+                    reply = await message.get_reply_message()
+                    if not reply or not reply.media:
+                        await utils.answer(message, self.strings["no_reply_file"])
+                        return
+                    fname = getattr(reply.file, "name", "") or ""
+                    if not fname.endswith(".txt"):
+                        await utils.answer(message, self.strings["invalid_ext"])
+                        return
+                    try:
+                        temp_path = os.path.join(self._root, "temp_cookies.txt")
+                        dl = await reply.download_media(file=temp_path)
+                        with open(dl, "r", encoding="utf-8") as f:
+                            content = f.read()
+                        if not self._validate_cookies(content):
+                            os.remove(dl)
+                            await utils.answer(message, self.strings["cookie_invalid_format"])
+                            return
+                        self._db.set("Grabber", "cookies_content", content)
+                        os.makedirs(self._cookie_dir, exist_ok=True)
+                        with open(self._cookie_path, "w", encoding="utf-8") as f:
+                            f.write(content)
+                        os.remove(dl)
+                        await utils.answer(message, self.strings["cookie_saved"])
+                        await self._create_backup()
+                    except Exception as e:
+                        await utils.answer(message, self.strings["cookie_err"].format(str(e)))
+                elif action == "remove":
+                    self._clean_cookies()
+                    os.makedirs(self._cookie_dir, exist_ok=True)
+                    await utils.answer(message, self.strings["cookie_cleared"])
+                else:
+                    await utils.answer(message, self.strings["usage"].format(prefix=prefix))
+            else:
+                await utils.answer(message, self.strings["usage"].format(prefix=prefix))
+        else:
+            await utils.answer(message, self.strings["usage"].format(prefix=prefix))
+
+    async def _launch(self, tkn):
+        await self._shutdown()
+        os.makedirs(self._session_dir, exist_ok=True)
+        sess_file = os.path.join(self._session_dir, "grabber_bot")
+        for ext in ["", ".session", ".session-journal"]:
+            path = sess_file + ext
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+        await asyncio.sleep(0.5)
+        self._bot = TelegramClient(
+            sess_file,
+            api_id=self._client.api_id,
+            api_hash=self._client.api_hash,
+            connection_retries=3,
+            retry_delay=1,
+            request_retries=3,
+        )
+        await self._bot.start(bot_token=tkn)
+        self._running = True
+
+        asset_channel = self._db.get("heroku.forums", "channel_id", None)
+        if asset_channel:
+            try:
+                me = await self._client.get_me()
+                if getattr(me, "premium", False):
+                    from telethon.tl.functions.channels import InviteToChannelRequest, EditAdminRequest
+                    from telethon.tl.types import ChatAdminRights
+                    from telethon.errors import UserAlreadyParticipantError
+                    log_chat = await self._client.get_entity(int(f"-100{asset_channel}"))
+                    bot_me = await self._bot.get_me()
+                    bot_username = f"@{bot_me.username}"
+                    try:
+                        await self._client(InviteToChannelRequest(log_chat, [bot_username]))
+                    except UserAlreadyParticipantError:
+                        pass
+                    except Exception:
+                        pass
+                    try:
+                        await self._client(EditAdminRequest(
+                            log_chat, bot_username,
+                            ChatAdminRights(post_messages=True, edit_messages=True, delete_messages=True),
+                            rank="Grabber",
+                        ))
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug(f"[GRABBER] Bot invite to log group failed: {e}")
+
+        self._bot.add_event_handler(self._h_start, events.NewMessage(pattern="/start"))
+        self._bot.add_event_handler(self._h_msg, events.NewMessage())
+        self._bot.add_event_handler(self._h_btn, events.CallbackQuery())
+        num_workers = max(1, self.config["MAX_WORKERS"])
+        self._worker_tasks = [asyncio.create_task(self._queue_worker()) for _ in range(num_workers)]
+        bot_me = await self._bot.get_me()
+        logger.info(f"[GRABBER] Started as @{bot_me.username}, workers={num_workers}")
+
+    async def _shutdown(self):
+        self._running = False
+        self._kill_active_processes()
+        for t in self._worker_tasks:
+            t.cancel()
+            try:
+                await t
+            except Exception:
+                pass
+        self._worker_tasks.clear()
+        if self._bot:
+            try:
+                self._bot.remove_event_handler(self._h_start)
+                self._bot.remove_event_handler(self._h_msg)
+                self._bot.remove_event_handler(self._h_btn)
+            except Exception:
+                pass
+            try:
+                await self._bot.disconnect()
+            except Exception:
+                pass
+            await asyncio.sleep(1.0)
+            self._bot = None
+        self._download_queue = asyncio.Queue()
+        self._queue_items.clear()
+        self._processed_buttons.clear()
+        self._edit_state.clear()
+        self._current_downloads.clear()
+
+    async def _queue_worker(self):
+        while self._running:
+            try:
+                try:
+                    task = await asyncio.wait_for(self._download_queue.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+
+                (task_id, chat_id, msg_id, url, mode, workdir,
+                 info, meta_dict, reply_to_topic, orig_msg_id) = task
+                self._queue_items.pop_first()
+                title = (info.get("title") or "Unknown")[:100]
+
+                try:
+                    await self._process_download(
+                        task_id, chat_id, msg_id, url, mode,
+                        workdir, info, meta_dict, reply_to_topic, orig_msg_id,
+                    )
+                    self._stats["completed"] += 1
+                except Exception as e:
+                    self._stats["errors"] += 1
+                    err_text = str(e)[:150]
+                    try:
+                        await self._bot.edit_message(
+                            chat_id, msg_id,
+                            self.strings["grab_failed"].format(error=err_text[:1024]),
+                            parse_mode="html",
+                        )
+                    except Exception:
+                        pass
+                    await self._log_to_topic(self.strings["log_error"].format(
+                        title=_escape_html(title[:60]), error=_escape_html(err_text)))
+                finally:
+                    self._current_downloads.pop(task_id, None)
+                    self._clean_workdir(workdir)
+                    self._download_queue.task_done()
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[GRABBER] Worker error: {e}")
+                await asyncio.sleep(1)
+
+    async def _edit_progress(self, task_id, chat_id, msg_id):
+        dl = self._current_downloads.get(task_id)
+        if not dl:
+            return
+        og_url = dl.get("og_url")
+        text = self._build_status_message(task_id)
+        try:
+            if og_url:
+                from telethon.tl.functions.messages import EditMessageRequest
+                from telethon.tl.types import InputMediaWebPage
+                msg_text, entities = await self._bot._parse_message_text(text, "html")
+                peer = await self._bot.get_input_entity(chat_id)
+                current_msg = await self._bot.get_messages(chat_id, ids=msg_id)
+                reply_markup = current_msg.reply_markup if current_msg else None
+                await self._bot(EditMessageRequest(
+                    peer=peer,
+                    id=msg_id,
+                    message=msg_text,
+                    media=InputMediaWebPage(url=og_url, optional=True, force_large_media=True),
+                    invert_media=True,
+                    reply_markup=reply_markup,
+                    entities=entities,
+                    no_webpage=False,
+                ))
+            else:
+                await self._bot.edit_message(chat_id, msg_id, text, parse_mode="html")
+        except Exception:
+            pass
 
     async def _safe_edit(self, target, text, **kwargs):
         for attempt in range(3):
             try:
-                if hasattr(target, 'edit'):
+                if hasattr(target, "edit"):
                     await target.edit(text, **kwargs)
                 elif self._bot and isinstance(target, tuple):
                     chat_id, msg_id = target
@@ -1117,7 +1383,7 @@ class Grabber(loader.Module):
                 return True
             except FloodWaitError as e:
                 await asyncio.sleep(min(e.seconds, 5))
-            except Exception as e:
+            except Exception:
                 if attempt < 2:
                     await asyncio.sleep(0.5)
         return False
@@ -1129,994 +1395,228 @@ class Grabber(loader.Module):
         except Exception:
             pass
 
+    async def _try_delete_orig(self, chat_id, orig_msg_id):
+        if not orig_msg_id:
+            return
+        try:
+            if self._bot:
+                await self._bot.delete_messages(chat_id, orig_msg_id)
+        except Exception:
+            pass
+
     async def _set_reaction(self, event, emoticon):
         try:
             peer = await event.get_input_chat()
             await self._bot(SendReactionRequest(
-                peer=peer,
-                msg_id=event.id,
-                reaction=[ReactionEmoji(emoticon=emoticon)]
+                peer=peer, msg_id=event.id,
+                reaction=[ReactionEmoji(emoticon=emoticon)],
             ))
-        except Exception as e:
-            logger.debug(f"[GRABBER] Reaction failed: {e}")
-
-    async def _cancel_task_safe(self, task):
-        if task is None:
-            return
-        task.cancel()
-        try:
-            await task
-        except BaseException:
-            pass
-
-    async def _embed_cover_ffmpeg(self, audio_path, thumb_path, output_path):
-        cmd = [
-            'ffmpeg', '-y',
-            '-i', audio_path,
-            '-i', thumb_path,
-            '-map', '0:a',
-            '-map', '1:0',
-            '-c', 'copy',
-            '-id3v2_version', '3',
-            '-metadata:s:v', 'title=Album cover',
-            '-metadata:s:v', 'comment=Cover (front)',
-            output_path
-        ]
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await proc.communicate()
-            return proc.returncode == 0
-        except Exception as e:
-            logger.error(f"[GRABBER] FFmpeg cover error: {e}")
-            return False
-
-    async def _download_and_prepare_yt_cover(self, info, workdir):
-        
-        thumbnail_url = get_best_thumbnail_url(info)
-        if not thumbnail_url:
-            return None, None
-        
-        raw_data = await download_thumbnail_hq(thumbnail_url)
-        if not raw_data:
-            return None, None
-        
-        cover_data = normalize_cover(raw_data, force_jpeg=True)
-        if not cover_data:
-            return None, None
-        
-        thumb_path = os.path.join(workdir, "yt_cover_hq.jpg")
-        try:
-            with open(thumb_path, "wb") as f:
-                f.write(cover_data)
         except Exception:
-            return None, None
-        
-        if not os.path.exists(thumb_path) or os.path.getsize(thumb_path) < 100:
-            return None, None
-        
-        return thumb_path, cover_data
-
-    @loader.command(
-        ru_doc="Управление медиа-загрузчиком",
-        en_doc="Media downloader management",
-    )
-    async def grabber(self, message):
-        """Media downloader management"""
-        args = utils.get_args(message)
-        cmd = args[0].lower() if args else None
-        prefix = self.get_prefix()
-
-        if not cmd:
-            await utils.answer(
-                message,
-                self.strings["usage"].format(prefix=prefix),
-            )
-            return
-
-        if cmd == "status":
-            st = self.strings["status_running"] if self._running else self.strings["status_stopped"]
-            cookies_st = self.strings["cookie_ok"] if os.path.exists(self._cookie_path) else self.strings["cookie_empty"]
-            active = "Yes" if self._current_download.get('active') else "No"
-            
-            await utils.answer(message, self.strings["status_template"].format(
-                status=st,
-                cookies=cookies_st,
-                pending=len(self._queue_items),
-                active=active,
-                completed=self._stats["completed"],
-                errors=self._stats["errors"]
-            ))
-
-        elif cmd == "process":
-            if not self._current_download.get('active'):
-                await utils.answer(message, self.strings["no_active_process"])
-                return
-            await utils.answer(message, self._build_status_message(), parse_mode='html')
-
-        elif cmd == "token":
-            token = None
-            if len(args) >= 2:
-                token = self._extract_token(args[1])
-            if not token:
-                reply = await message.get_reply_message()
-                if reply and reply.text:
-                    token = self._extract_token(reply.text)
-            if not token:
-                await utils.answer(message, self.strings["need_token"])
-                return
-            self._db.set("Grabber", "tkn", token)
-            await utils.answer(
-                message,
-                self.strings["token_stored"].format(prefix=prefix),
-            )
-
-        elif cmd == "start":
-            msg = await utils.answer(message, self.strings["deps_processing"])
-            
-            results = await self._install_dependencies()
-            
-            results_text = "\n".join([f"<code>{pkg}</code>: <b>{status}</b>" for pkg, status in results.items()])
-            
-            if isinstance(msg, list):
-                msg = msg[0]
-            await self._safe_edit(msg, self.strings["deps_result"].format(results=results_text), parse_mode='html')
-
-        elif cmd == "logs":
-            if not self._download_logs:
-                await utils.answer(message, self.strings["logs_empty"])
-                return
-            
-            logs_to_show = self._download_logs[-30:]
-            
-            content_lines = ["Grabber Download Logs", "=" * 50, ""]
-            
-            for i, log in enumerate(logs_to_show, 1):
-                status = "SUCCESS" if log['success'] else "FAILED"
-                content_lines.append(f"#{i} [{log['timestamp']}]")
-                content_lines.append(f"Title: {log['title']}")
-                content_lines.append(f"URL: {log['url']}")
-                content_lines.append(f"Mode: {log['mode']}")
-                content_lines.append(f"Status: {status}")
-                if log.get('error'):
-                    content_lines.append(f"Error: {log['error']}")
-                content_lines.append("-" * 30)
-                content_lines.append("")
-            
-            content = "\n".join(content_lines)
-            
-            file_path = os.path.join(self._cache_dir, "Grabber_logs.txt")
-            try:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                
-                await self._client.send_file(
-                    message.chat_id,
-                    file_path,
-                    caption=self.strings["logs_generated"].format(count=len(logs_to_show)),
-                    parse_mode='html'
-                )
-            finally:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-
-        elif cmd == "on":
-            if self._running:
-                await utils.answer(message, self.strings["already_running"])
-                return
-            tkn = self._db.get("Grabber", "tkn")
-            if not tkn:
-                await utils.answer(
-                    message,
-                    self.strings["no_token"].format(prefix=prefix),
-                )
-                return
-            try:
-                await self._launch(tkn)
-                self._db.set("Grabber", "autorun", True)
-                await utils.answer(message, self.strings["started"])
-            except Exception as e:
-                logger.exception("[GRABBER] Launch failed")
-                await utils.answer(message, self.strings["start_failed"].format(error=str(e)[:200]))
-
-        elif cmd == "off":
-            if not self._running:
-                await utils.answer(message, self.strings["not_running"])
-                return
-            await self._shutdown()
-            self._db.set("Grabber", "autorun", False)
-            await utils.answer(message, self.strings["stopped"])
-
-        elif cmd == "reboot":
-            msg = await utils.answer(message, self.strings["reboot_start"])
-            
-            await self._shutdown()
-            self._clean_cache()
-            self._clean_session()
-            
-            os.makedirs(self._cache_dir, exist_ok=True)
-            os.makedirs(self._session_dir, exist_ok=True)
-            
-            self._stats = {"completed": 0, "errors": 0}
-            self._queue_items.clear()
-            self._processed_buttons.clear()
-            self._edit_state.clear()
-            self._download_queue = asyncio.Queue()
-            
-            tkn = self._db.get("Grabber", "tkn")
-            if tkn:
-                try:
-                    await self._launch(tkn)
-                    self._db.set("Grabber", "autorun", True)
-                    if isinstance(msg, list):
-                        msg = msg[0]
-                    await self._safe_edit(msg, self.strings["reboot_done"])
-                except Exception as e:
-                    if isinstance(msg, list):
-                        msg = msg[0]
-                    await self._safe_edit(msg, self.strings["start_failed"].format(error=str(e)[:200]))
-            else:
-                if isinstance(msg, list):
-                    msg = msg[0]
-                await self._safe_edit(msg, self.strings["reboot_no_token"])
-
-        elif cmd == "clear":
-            await self._shutdown()
-            self._clean_all()
-            
-            os.makedirs(self._cache_dir, exist_ok=True)
-            os.makedirs(self._session_dir, exist_ok=True)
-            os.makedirs(self._cookie_dir, exist_ok=True)
-            
-            self._stats = {"completed": 0, "errors": 0}
-            self._queue_items.clear()
-            self._processed_buttons.clear()
-            self._edit_state.clear()
-            self._download_queue = asyncio.Queue()
-            self._download_logs.clear()
-            
-            await utils.answer(message, self.strings["clear_done"])
-
-        elif cmd == "topic":
-            if len(args) < 2:
-                await utils.answer(
-                    message,
-                    self.strings["topic_usage"].format(prefix=prefix),
-                )
-                return
-            
-            action = args[1].lower()
-            if action not in ("on", "off"):
-                await utils.answer(
-                    message,
-                    self.strings["topic_usage"].format(prefix=prefix),
-                )
-                return
-            
-            if message.is_private:
-                await utils.answer(message, self.strings["topic_not_in_group"])
-                return
-            
-            chat = await message.get_chat()
-            if not self._is_forum(chat):
-                await utils.answer(message, self.strings["topic_not_forum"])
-                return
-            
-            topic_id = self._get_topic_id(message)
-            if topic_id is None:
-                topic_id = message.id
-            
-            chat_id = message.chat_id
-            
-            if chat_id not in self._active_topics:
-                self._active_topics[chat_id] = set()
-            
-            if action == "on":
-                if topic_id not in self._active_topics[chat_id]:
-                    await utils.answer(message, self.strings["topic_not_active"])
-                    return
-                self._save_active_topics()
-                await utils.answer(message, self.strings["topic_enabled"])
-            else:
-                if topic_id in self._active_topics[chat_id]:
-                    self._active_topics[chat_id].discard(topic_id)
-                    self._save_active_topics()
-                await utils.answer(message, self.strings["topic_disabled"])
-
-        elif cmd == "cookies":
-            if len(args) >= 2:
-                action = args[1].lower()
-                
-                if action == "add":
-                    reply = await message.get_reply_message()
-                    if not reply or not reply.media:
-                        await utils.answer(message, self.strings["no_reply_file"])
-                        return
-                    
-                    if not reply.file.name.endswith(".txt"):
-                        await utils.answer(message, self.strings["invalid_ext"])
-                        return
-                    
-                    try:
-                        temp_path = os.path.join(self._root, "temp_cookies.txt")
-                        dl = await reply.download_media(file=temp_path)
-                        
-                        with open(dl, "r", encoding="utf-8") as f:
-                            content = f.read()
-                        
-                        if not self._validate_cookies_content(content):
-                            os.remove(dl)
-                            await utils.answer(message, self.strings["cookie_invalid_format"])
-                            return
-                        
-                        self._db.set("Grabber", "cookies_content", content)
-                        
-                        os.makedirs(self._cookie_dir, exist_ok=True)
-                        with open(self._cookie_path, "w", encoding="utf-8") as f:
-                            f.write(content)
-                        
-                        os.remove(dl)
-                        await utils.answer(message, self.strings["cookie_saved"])
-                    except Exception as e:
-                        logger.error(f"[GRABBER] Cookie save error: {e}")
-                        await utils.answer(message, self.strings["cookie_err"].format(str(e)))
-                
-                elif action == "remove":
-                    self._clean_cookies()
-                    os.makedirs(self._cookie_dir, exist_ok=True)
-                    await utils.answer(message, self.strings["cookie_cleared"])
-                
-                else:
-                    await utils.answer(
-                        message,
-                        self.strings["usage"].format(prefix=prefix),
-                    )
-            else:
-                await utils.answer(
-                    message,
-                    self.strings["usage"].format(prefix=prefix),
-                )
-
-        else:
-            await utils.answer(
-                message,
-                self.strings["usage"].format(prefix=prefix),
-            )
-
-    async def _launch(self, tkn):
-        await self._shutdown()
-        os.makedirs(self._session_dir, exist_ok=True)
-        
-        sess_file = os.path.join(self._session_dir, "grabber_bot")
-        for ext in ['', '.session', '.session-journal']:
-            path = sess_file + ext
-            if os.path.exists(path):
-                try:
-                    os.remove(path)
-                except Exception:
-                    pass
-        
-        await asyncio.sleep(0.5)
-        
-        self._bot = TelegramClient(
-            sess_file,
-            api_id=self._client.api_id,
-            api_hash=self._client.api_hash,
-            connection_retries=3,
-            retry_delay=1,
-            request_retries=3,
-        )
-        
-        await self._bot.start(bot_token=tkn)
-        self._running = True
-        
-        self._bot.add_event_handler(self._h_start, events.NewMessage(pattern='/start'))
-        self._bot.add_event_handler(self._h_msg, events.NewMessage())
-        self._bot.add_event_handler(self._h_btn, events.CallbackQuery())
-        
-        self._worker_task = asyncio.create_task(self._queue_worker())
-        logger.info("[GRABBER] Bot started, worker task created")
-
-    async def _shutdown(self):
-        logger.info("[GRABBER] Shutting down...")
-        self._running = False
-        self._kill_active_processes()
-        
-        if self._worker_task:
-            await self._cancel_task_safe(self._worker_task)
-            self._worker_task = None
-        
-        if self._bot:
-            try:
-                await self._bot.disconnect()
-            except Exception:
-                pass
-            await asyncio.sleep(0.3)
-            self._bot = None
-        
-        self._download_queue = asyncio.Queue()
-        self._queue_items.clear()
-        self._processed_buttons.clear()
-        self._edit_state.clear()
-        self._current_download = self._empty_progress()
-        logger.info("[GRABBER] Shutdown complete")
-
-    async def _queue_worker(self):
-        logger.info("[GRABBER] Queue worker started...")
-        
-        while self._running:
-            try:
-                try:
-                    task = await asyncio.wait_for(self._download_queue.get(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    continue
-                
-                chat_id, msg_id, url, mode, workdir, info, meta_dict, reply_to_topic = task
-                self._queue_items.pop_first()
-                
-                title = (info.get('title') or 'Unknown')[:100]
-                logger.info(f"[GRABBER] Worker got task: {url[:60]}...")
-                
-                try:
-                    await self._process_download(chat_id, msg_id, url, mode, workdir, info, meta_dict, reply_to_topic)
-                    self._stats["completed"] += 1
-                    self._add_download_log(title, url, mode, True)
-                except Exception as e:
-                    logger.exception("[GRABBER] Task failed")
-                    self._stats["errors"] += 1
-                    self._add_download_log(title, url, mode, False, str(e))
-                    try:
-                        await self._edit_message(
-                            chat_id, msg_id,
-                            self.strings["grab_failed"].format(error=str(e)[:150]),
-                            parse_mode='html'
-                        )
-                    except Exception:
-                        pass
-                finally:
-                    self._current_download = self._empty_progress()
-                    self._clean_workdir(workdir)
-                    self._download_queue.task_done()
-                    
-            except asyncio.CancelledError:
-                logger.info("[GRABBER] Queue worker cancelled")
-                break
-            except Exception as e:
-                logger.exception(f"[GRABBER] Worker error: {e}")
-                await asyncio.sleep(1)
-        
-        logger.info("[GRABBER] Queue worker stopped")
-
-    async def _process_download(self, chat_id: int, msg_id: int, url: str, mode: str, workdir: str, info: dict, meta_dict: dict = None, reply_to_topic: int = None):
-        import yt_dlp
-        
-        if not self._bot or not self._running:
-            return
-        
-        title = (info.get('title') or 'media')[:100]
-        orig_width = info.get('width', 0) or 0
-        orig_height = info.get('height', 0) or 0
-        orig_duration = info.get('duration', 0) or 0
-        
-        is_audio = mode == 'mp3'
-        
-        logger.info(f"[GRABBER] Processing: '{title[:50]}', mode={mode}, is_audio={is_audio}")
-        
-        self._current_download = self._empty_progress()
-        self._current_download.update({
-            'active': True,
-            'title': title,
-            'start_time': time.time(),
-            'stage': 'init',
-            'is_audio_only': is_audio,
-        })
-        
-        await self._edit_message(chat_id, msg_id, self._build_status_message(), parse_mode='html')
-        
-        safe_title = re.sub(r'[\\/*?:"<>|]', '', title).replace(" ", "_")[:50]
-        out_tmpl = os.path.join(workdir, f"{safe_title}.%(ext)s")
-        
-        final_opts = {
-            'outtmpl': out_tmpl,
-            'quiet': True,
-            'no_warnings': True,
-            'restrictfilenames': True,
-            'progress_hooks': [self._progress_hook],
-            'postprocessor_hooks': [self._postprocessor_hook],
-        }
-        
-        if os.path.exists(self._cookie_path):
-            final_opts['cookiefile'] = self._cookie_path
-            logger.info(f"[GRABBER] Using cookies: {self._cookie_path}")
-        
-        if is_audio:
-            final_opts['format'] = 'bestaudio/best'
-            final_opts['postprocessors'] = [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '320',
-            }]
-        else:
-            height = int(mode)
-            final_opts['format'] = self._build_format_string(height)
-            final_opts['postprocessors'] = [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',
-            }]
-        
-        loop = asyncio.get_event_loop()
-        download_done = asyncio.Event()
-        download_error = [None]
-        
-        def do_download():
-            try:
-                logger.info("[GRABBER] yt-dlp starting...")
-                with yt_dlp.YoutubeDL(final_opts) as ydl:
-                    ydl.download([url])
-                logger.info("[GRABBER] yt-dlp completed!")
-            except Exception as e:
-                logger.error(f"[GRABBER] yt-dlp error: {e}")
-                download_error[0] = e
-            finally:
-                loop.call_soon_threadsafe(download_done.set)
-        
-        future = loop.run_in_executor(self._executor, do_download)
-        update_task = asyncio.create_task(self._update_progress_loop(chat_id, msg_id, download_done))
-        
-        await download_done.wait()
-        await future
-        await self._cancel_task_safe(update_task)
-        
-        if download_error[0]:
-            raise download_error[0]
-        
-        if is_audio:
-            extensions = ('.mp3', '.m4a', '.opus', '.ogg', '.wav')
-        else:
-            extensions = ('.mp4', '.mkv', '.webm', '.mov', '.avi')
-        
-        all_files = os.listdir(workdir)
-        files = [f for f in all_files if f.endswith(extensions) and os.path.isfile(os.path.join(workdir, f))]
-        
-        if not files:
-            raise Exception(f"File not found. Files: {all_files}")
-        
-        filepath = os.path.join(workdir, files[0])
-        filesize = os.path.getsize(filepath) / (1024 * 1024)
-        
-        self._current_download['final_size'] = filesize
-        self._current_download['ffmpeg_done'] = True
-        self._current_download['video_done'] = True
-        self._current_download['audio_done'] = True
-        
-        logger.info(f"[GRABBER] Output: {files[0]}, size: {filesize:.1f} MB")
-        
-        send_thumb = None
-        final_title = title
-        final_artist = info.get('uploader', 'Unknown')
-        
-        if is_audio and meta_dict:
-            if meta_dict.get('title'):
-                final_title = meta_dict['title']
-            if meta_dict.get('artist'):
-                final_artist = meta_dict['artist']
-            
-            if meta_dict.get('thumb_path') and os.path.exists(meta_dict['thumb_path']):
-                thumb_path = meta_dict['thumb_path']
-                
-                try:
-                    with open(thumb_path, "rb") as f:
-                        raw_thumb_data = f.read()
-                    normalized = normalize_cover(raw_thumb_data, force_jpeg=True)
-                    if normalized:
-                        norm_path = os.path.join(workdir, "normalized_custom_cover.jpg")
-                        with open(norm_path, "wb") as f:
-                            f.write(normalized)
-                        thumb_path = norm_path
-                except Exception as e:
-                    logger.error(f"[GRABBER] Custom thumb normalize error: {e}")
-                
-                temp_output = os.path.join(workdir, "temp_with_cover.mp3")
-                success = await self._embed_cover_ffmpeg(filepath, thumb_path, temp_output)
-                
-                if success and os.path.exists(temp_output):
-                    os.remove(filepath)
-                    os.rename(temp_output, filepath)
-                    filesize = os.path.getsize(filepath) / (1024 * 1024)
-                
-                send_thumb = thumb_path
-            
-            elif meta_dict.get('use_yt_thumb'):
-                thumb_path, cover_data = await self._download_and_prepare_yt_cover(info, workdir)
-                
-                if thumb_path and os.path.exists(thumb_path):
-                    temp_output = os.path.join(workdir, "temp_with_yt_cover.mp3")
-                    success = await self._embed_cover_ffmpeg(filepath, thumb_path, temp_output)
-                    
-                    if success and os.path.exists(temp_output):
-                        os.remove(filepath)
-                        os.rename(temp_output, filepath)
-                        filesize = os.path.getsize(filepath) / (1024 * 1024)
-                    
-                    send_thumb = thumb_path
-        
-        self._current_download['stage'] = 'probe'
-        await self._edit_message(chat_id, msg_id, self._build_status_message(), parse_mode='html')
-        
-        real_width, real_height, real_duration = orig_width, orig_height, orig_duration
-        
-        if not is_audio:
-            probe = self._get_video_info_ffprobe(filepath)
-            if probe:
-                real_width = probe['width']
-                real_height = probe['height']
-                if probe['duration'] > 0:
-                    real_duration = probe['duration']
-        else:
-            probe = self._get_audio_info_ffprobe(filepath)
-            if probe and probe['duration'] > 0:
-                real_duration = probe['duration']
-        
-        self._current_download['stage'] = 'upload'
-        self._current_download['upload_started'] = True
-        upload_start = time.time()
-        
-        upload_done = asyncio.Event()
-        upload_update_task = asyncio.create_task(self._update_upload_loop(chat_id, msg_id, upload_start, upload_done))
-        
-        fname = os.path.basename(filepath)
-        attrs = [DocumentAttributeFilename(file_name=fname)]
-        
-        if not is_audio:
-            attrs.append(DocumentAttributeVideo(
-                duration=int(real_duration),
-                w=int(real_width),
-                h=int(real_height),
-                supports_streaming=True
-            ))
-            caption = self.strings["file_caption"].format(
-                title=final_title[:80],
-                size_mb=filesize,
-                width=real_width,
-                height=real_height
-            )
-        else:
-            attrs.append(DocumentAttributeAudio(
-                duration=int(real_duration),
-                title=final_title[:64],
-                performer=final_artist[:64]
-            ))
-            caption = self.strings["audio_caption"].format(
-                title=final_title[:80],
-                size_mb=filesize
-            )
-        
-        try:
-            await self._bot.send_file(
-                chat_id,
-                filepath,
-                caption=caption,
-                parse_mode='html',
-                force_document=False,
-                supports_streaming=(not is_audio),
-                attributes=attrs,
-                thumb=send_thumb,
-                reply_to=reply_to_topic
-            )
-        finally:
-            upload_done.set()
-            await self._cancel_task_safe(upload_update_task)
-        
-        upload_elapsed = time.time() - upload_start
-        self._current_download['upload_elapsed'] = upload_elapsed
-        
-        self._current_download['stage'] = 'done'
-        await self._edit_message(chat_id, msg_id, self._build_status_message(), parse_mode='html')
-        
-        await asyncio.sleep(3)
-        await self._safe_delete(chat_id, msg_id)
-
-    async def _update_progress_loop(self, chat_id: int, msg_id: int, done_event: asyncio.Event):
-        while not done_event.is_set():
-            try:
-                await asyncio.sleep(1.5)
-                if not done_event.is_set():
-                    await self._edit_message(chat_id, msg_id, self._build_status_message(), parse_mode='html')
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                pass
-
-    async def _update_upload_loop(self, chat_id: int, msg_id: int, start_time: float, done_event: asyncio.Event):
-        while not done_event.is_set():
-            try:
-                await asyncio.sleep(1.5)
-                if not done_event.is_set():
-                    self._current_download['upload_elapsed'] = time.time() - start_time
-                    await self._edit_message(chat_id, msg_id, self._build_status_message(), parse_mode='html')
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                pass
-
-    async def _get_info(self, url):
-        import yt_dlp
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'socket_timeout': 30
-        }
-        if os.path.exists(self._cookie_path):
-            ydl_opts['cookiefile'] = self._cookie_path
-        
-        loop = asyncio.get_event_loop()
-        def extract():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                return ydl.extract_info(url, download=False)
-        return await loop.run_in_executor(self._executor, extract)
+            pass
 
     async def _h_start(self, ev):
         if not self._running:
             return
-        
         if ev.is_private:
             try:
                 user = await self._bot.get_entity(ev.sender_id)
-                name = f"{getattr(user, 'first_name', '') or ''} {getattr(user, 'last_name', '') or ''}".strip() or "friend"
-                name = self._escape_html(name)
-                user_link = f'<a href="tg://user?id={ev.sender_id}">{name}</a>'
-                greeting = self.strings["hello"].format(user_link=user_link)
+                name = (
+                    f"{getattr(user, 'first_name', '') or ''} "
+                    f"{getattr(user, 'last_name', '') or ''}"
+                ).strip() or "friend"
+                user_link = f'<a href="tg://user?id={ev.sender_id}">{_escape_html(name)}</a>'
+                await ev.reply(self.strings["hello"].format(user_link=user_link), parse_mode="html")
             except Exception:
-                greeting = self.strings["hello_fallback"]
-            await ev.reply(greeting, parse_mode='html')
+                await ev.reply(self.strings["hello_fallback"], parse_mode="html")
         else:
             chat_id = ev.chat_id
             topic_id = self._get_topic_id(ev)
-            
             try:
                 chat = await self._bot.get_entity(chat_id)
                 is_forum = self._is_forum(chat)
             except Exception:
                 is_forum = False
-            
+
             if is_forum and topic_id:
-                if chat_id not in self._active_topics:
-                    self._active_topics[chat_id] = set()
-                self._active_topics[chat_id].add(topic_id)
-                self._save_active_topics()
-                await ev.reply(self.strings["hello_topic"], parse_mode='html')
+                if chat_id in self._active_topics and topic_id in self._active_topics.get(chat_id, set()):
+                    self._active_topics[chat_id].discard(topic_id)
+                    if not self._active_topics[chat_id]:
+                        del self._active_topics[chat_id]
+                    self._save_active_topics()
+                    await ev.reply(self.strings["hello_topic_off"], parse_mode="html")
+                else:
+                    if chat_id not in self._active_topics:
+                        self._active_topics[chat_id] = set()
+                    self._active_topics[chat_id].add(topic_id)
+                    self._save_active_topics()
+                    await ev.reply(self.strings["hello_topic"], parse_mode="html")
             else:
-                if chat_id not in self._active_groups:
+                if chat_id in self._active_groups:
+                    self._active_groups.discard(chat_id)
+                    self._save_active_groups()
+                    await ev.reply(self.strings["hello_group_off"], parse_mode="html")
+                else:
                     self._active_groups.add(chat_id)
                     self._save_active_groups()
-                await ev.reply(self.strings["hello_group"], parse_mode='html')
+                    await ev.reply(self.strings["hello_group"], parse_mode="html")
 
     async def _h_msg(self, ev):
         if not self._running or not self._bot:
             return
-        
-        if ev.text and ev.text.startswith('/'):
+        if ev.text and ev.text.startswith("/"):
             return
-        
+
         user_id = ev.sender_id
         is_private = ev.is_private
-        
+
         if is_private and user_id in self._edit_state:
             await self._handle_editor_input(ev)
             return
-        
+
+        text = ev.text or ""
+
         if is_private:
-            if not ev.text:
+            if not text:
                 return
-            
-            link = self._extract_url(ev.text)
+            link = self._extract_url(text)
             if not link:
                 await self._set_reaction(ev, self.strings["react_fail"])
                 return
         else:
             chat_id = ev.chat_id
             topic_id = self._get_topic_id(ev)
-            
             try:
                 chat = await self._bot.get_entity(chat_id)
                 is_forum = self._is_forum(chat)
             except Exception:
                 is_forum = False
-            
             if is_forum:
                 if chat_id not in self._active_topics:
                     return
-                if topic_id not in self._active_topics[chat_id]:
+                if topic_id not in self._active_topics.get(chat_id, set()):
                     return
             else:
                 if chat_id not in self._active_groups:
                     return
-            
-            if not ev.text:
+            if not text:
                 return
-            
-            link = self._extract_url(ev.text)
+            link = self._extract_url(text)
             if not link:
                 return
-        
-        logger.info(f"[GRABBER] New URL: {link[:50]}...")
-        
+
         await self._set_reaction(ev, self.strings["react_ok"])
-        
         topic_id = self._get_topic_id(ev) if not is_private else None
-        msg = await ev.reply(self.strings["analyzing"], parse_mode='html')
-        
+        msg = await ev.reply(self.strings["analyzing"], parse_mode="html")
+
         try:
             info = await self._get_info(link)
-            
-            title = (info.get('title') or 'Media')[:80]
-            duration = info.get('duration', 0) or 0
+            title = (info.get("title") or "Media")[:120]
+            duration = info.get("duration", 0) or 0
             duration_str = self._format_duration(duration)
-            
+
             if is_private:
                 buttons = [
                     [
                         Button.inline(self.strings["btn_video"], data=f"menu:video:{ev.id}"),
-                        Button.inline(self.strings["btn_audio"], data=f"menu:audio:{ev.id}")
+                        Button.inline(self.strings["btn_audio"], data=f"menu:audio:{ev.id}"),
                     ],
-                    [Button.inline(self.strings["btn_cancel"], data=f"g:cancel:{ev.id}")]
+                    [Button.inline(self.strings["btn_cancel"], data=f"g:cancel:{ev.id}")],
                 ]
-                text = self.strings["found_media"].format(title=title, duration=duration_str)
+                t = self.strings["found_media"].format(title=title, duration=duration_str)
             else:
                 buttons = [
                     [Button.inline(self.strings["btn_video"], data=f"menu:video:{ev.id}:{topic_id or 0}")],
-                    [Button.inline(self.strings["btn_cancel"], data=f"g:cancel:{ev.id}")]
+                    [Button.inline(self.strings["btn_cancel"], data=f"g:cancel:{ev.id}")],
                 ]
-                text = self.strings["found_media_group"].format(title=title, duration=duration_str)
-            
-            await msg.edit(text, buttons=buttons, parse_mode='html')
+                t = self.strings["found_media_group"].format(title=title, duration=duration_str)
+
+            await msg.edit(t, buttons=buttons, parse_mode="html")
+
+            asyncio.ensure_future(self._apply_og_preview(msg, link))
         except Exception as e:
-            logger.error(f"[GRABBER] Get info failed: {e}")
-            await self._safe_edit(msg, self.strings["grab_failed"].format(error=str(e)[:150]), parse_mode='html')
+            try:
+                await msg.edit(self.strings["grab_failed"].format(error=str(e)[:1024]), parse_mode="html")
+            except Exception:
+                pass
 
-    async def _handle_editor_input(self, ev):
-        user_id = ev.sender_id
-        state = self._edit_state.get(user_id)
-        
-        if not state:
-            return
-        
-        msg = state.get('msg_event')
-        step = state.get('step')
-        
-        if step == 'waiting_thumb':
-            if ev.document:
-                mime = getattr(ev.document, 'mime_type', '') or ''
-                if mime in ('image/png', 'image/jpeg'):
-                    try:
-                        await ev.delete()
-                    except Exception:
-                        pass
-                    
-                    dl_msg = await ev.respond(self.strings["downloading_image"], parse_mode='html')
-                    
-                    temp_thumb_dir = os.path.join(self._cache_dir, f"thumb_{user_id}_{int(time.time())}")
-                    os.makedirs(temp_thumb_dir, exist_ok=True)
-                    
-                    try:
-                        downloaded = await ev.download_media(file=temp_thumb_dir)
-                        logger.info(f"[GRABBER] Downloaded to: {downloaded}")
-                        
-                        if not downloaded or not os.path.exists(downloaded):
-                            logger.error("[GRABBER] Download failed - file not exists")
-                            await dl_msg.delete()
-                            return
-                        
-                        async with self._edit_lock:
-                            state['custom_thumb'] = downloaded
-                            state['step'] = 'confirm'
-                        
-                        await dl_msg.delete()
-                        await self._show_confirmation(msg, state, user_id)
-                        
-                    except Exception as e:
-                        logger.error(f"[GRABBER] Thumb processing error: {e}")
-                        try:
-                            await dl_msg.delete()
-                        except Exception:
-                            pass
-                        self._clean_workdir(temp_thumb_dir)
-                    return
-                else:
-                    await ev.respond(self.strings["only_image"], parse_mode='html')
-                    return
-            
-            elif ev.photo:
-                await ev.respond(self.strings["only_image"], parse_mode='html')
-                return
-            
-            elif ev.text and not ev.text.startswith("/"):
-                await ev.respond(self.strings["text_needed_image"], parse_mode='html')
-                return
-            
-            return
-        
-        if not ev.text:
-            return
-        
+    async def _apply_og_preview(self, msg, url):
         try:
-            await ev.delete()
-        except Exception:
-            pass
-        
-        if step == 'waiting_title':
-            async with self._edit_lock:
-                state['custom_title'] = ev.text
-                state['step'] = 'waiting_artist'
-            
-            await msg.edit(
-                self.strings["edit_title_done"].format(self._escape_html(ev.text)),
-                parse_mode='html',
-                buttons=[[Button.inline(self.strings["btn_cancel"], data=f"edit:cancel:{user_id}")]]
-            )
-        
-        elif step == 'waiting_artist':
-            async with self._edit_lock:
-                state['custom_artist'] = ev.text
-                state['step'] = 'waiting_thumb'
-            
-            await msg.edit(
-                self.strings["edit_artist_done"].format(self._escape_html(ev.text)),
-                parse_mode='html',
-                buttons=[
-                    [Button.inline(self.strings["btn_no_cover"], data=f"edit:skipthumb:{user_id}")],
-                    [Button.inline(self.strings["btn_cancel"], data=f"edit:cancel:{user_id}")]
-                ]
-            )
+            if url in self._og_cache:
+                x0_url = self._og_cache[url]
+            else:
+                og_url = await _fetch_og_image(url)
+                if not og_url:
+                    return None
+                img_data = await _download_url(og_url, timeout=15)
+                if not img_data:
+                    return None
+                normalized = normalize_cover(img_data, force_jpeg=True)
+                if not normalized:
+                    return None
+                filename = f"preview_{int(time.time())}.jpg"
+                x0_url = await _upload_to_x0(normalized, filename, "image/jpeg")
+                if not x0_url:
+                    return None
+                self._og_cache[url] = x0_url
 
-    async def _show_confirmation(self, msg, state, user_id):
-        title = self._escape_html(state.get('custom_title', 'Unknown'))
-        artist = self._escape_html(state.get('custom_artist', 'Unknown'))
-        has_thumb = self.strings["thumb_yes"] if state.get('custom_thumb') else self.strings["thumb_no"]
-        
-        await msg.edit(
-            self.strings["confirm_menu"].format(title=title, artist=artist, thumb=has_thumb),
-            parse_mode='html',
-            buttons=[
-                [Button.inline(self.strings["btn_confirm"], data=f"edit:confirm:{user_id}")],
-                [Button.inline(self.strings["btn_retry"], data=f"edit:retry:{user_id}")],
-                [Button.inline(self.strings["btn_cancel"], data=f"edit:cancel:{user_id}")]
-            ]
-        )
+            try:
+                await self._bot(functions.messages.GetWebPageRequest(url=x0_url, hash=0))
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+
+            try:
+                from telethon.tl.functions.messages import EditMessageRequest
+                from telethon.tl.types import InputMediaWebPage
+                current_msg = await self._bot.get_messages(msg.chat_id, ids=msg.id)
+                if not current_msg:
+                    return None
+                current_text = current_msg.message or self.strings["analyzing"]
+                current_entities = current_msg.entities or []
+                current_buttons = current_msg.reply_markup
+                peer = await self._bot.get_input_entity(msg.chat_id)
+                await self._bot(EditMessageRequest(
+                    peer=peer,
+                    id=msg.id,
+                    message=current_text,
+                    media=InputMediaWebPage(url=x0_url, optional=True, force_large_media=True),
+                    invert_media=True,
+                    reply_markup=current_buttons,
+                    entities=current_entities,
+                    no_webpage=False,
+                ))
+                return x0_url
+            except Exception as e:
+                logger.debug(f"[GRABBER] og preview apply failed: {e}")
+        except Exception as e:
+            logger.debug(f"[GRABBER] og preview pipeline failed: {e}")
+        return None
 
     async def _h_btn(self, ev):
         if not self._running or not self._bot:
             return
-        
         data = ev.data.decode()
         parts = data.split(":")
-        
         if len(parts) < 2:
             return
-        
+
         prefix = parts[0]
         action = parts[1]
-        
-        button_key = (ev.chat_id, ev.message_id)
         is_private = ev.is_private
-        
         current_topic_id = self._get_topic_id(ev) if not is_private else None
-        
+
         if prefix == "g" and action == "cancel":
-            self._processed_buttons.add(button_key)
-            await self._safe_edit(ev, self.strings["cancelled"], parse_mode='html')
+            self._processed_buttons.add((ev.chat_id, ev.message_id))
+            try:
+                await ev.edit(self.strings["cancelled"], parse_mode="html")
+            except Exception:
+                pass
             return
-        
+
         if prefix == "menu":
             orig_id = int(parts[2]) if len(parts) > 2 else 0
-            stored_topic_id = int(parts[3]) if len(parts) > 3 and parts[3] != '0' else None
-            
+            stored_topic_id = int(parts[3]) if len(parts) > 3 and parts[3] != "0" else None
             topic_id = stored_topic_id or current_topic_id
-            
             try:
                 orig = await self._bot.get_messages(ev.chat_id, ids=orig_id)
                 if not orig or not orig.text:
@@ -2126,49 +1626,42 @@ class Grabber(loader.Module):
                     return
             except Exception:
                 return
-            
+
             if action == "video":
                 try:
                     info = await self._get_info(link)
                     available = self._get_available_formats(info)
                 except Exception:
                     available = [720, 480, 360]
-                
-                buttons = []
-                for h in available:
-                    buttons.append([Button.inline(f"{h}p", data=f"dl:video:{h}:{orig_id}:{topic_id or 0}")])
+                buttons = [
+                    [Button.inline(f"{h}p", data=f"dl:video:{h}:{orig_id}:{topic_id or 0}")]
+                    for h in available
+                ]
                 buttons.append([Button.inline(self.strings["btn_back"], data=f"back:main:{orig_id}:{topic_id or 0}")])
-                
-                await ev.edit(
-                    self.strings["quality_menu"],
-                    buttons=buttons,
-                    parse_mode='html'
-                )
-            
+                try:
+                    await ev.edit(self.strings["quality_menu"], buttons=buttons, parse_mode="html")
+                except Exception:
+                    pass
+
             elif action == "audio":
                 if not is_private:
                     return
-                
                 buttons = [
                     [Button.inline(self.strings["btn_orig_thumb"], data=f"dl:audio:thumb:{orig_id}")],
                     [Button.inline(self.strings["btn_orig_clean"], data=f"dl:audio:clean:{orig_id}")],
                     [Button.inline(self.strings["btn_custom"], data=f"edit:start:{orig_id}:{ev.sender_id}")],
-                    [Button.inline(self.strings["btn_back"], data=f"back:main:{orig_id}:0")]
+                    [Button.inline(self.strings["btn_back"], data=f"back:main:{orig_id}:0")],
                 ]
-                
-                await ev.edit(
-                    self.strings["audio_menu"],
-                    buttons=buttons,
-                    parse_mode='html'
-                )
+                try:
+                    await ev.edit(self.strings["audio_menu"], buttons=buttons, parse_mode="html")
+                except Exception:
+                    pass
             return
-        
+
         if prefix == "back":
             orig_id = int(parts[2]) if len(parts) > 2 else 0
-            stored_topic_id = int(parts[3]) if len(parts) > 3 and parts[3] != '0' else None
-            
+            stored_topic_id = int(parts[3]) if len(parts) > 3 and parts[3] != "0" else None
             topic_id = stored_topic_id or current_topic_id
-            
             try:
                 orig = await self._bot.get_messages(ev.chat_id, ids=orig_id)
                 if not orig or not orig.text:
@@ -2179,38 +1672,35 @@ class Grabber(loader.Module):
                 info = await self._get_info(link)
             except Exception:
                 return
-            
-            title = (info.get('title') or 'Media')[:80]
-            duration = info.get('duration', 0) or 0
-            duration_str = self._format_duration(duration)
-            
+            title = (info.get("title") or "Media")[:120]
+            duration_str = self._format_duration(info.get("duration", 0) or 0)
             if is_private:
                 buttons = [
                     [
                         Button.inline(self.strings["btn_video"], data=f"menu:video:{orig_id}"),
-                        Button.inline(self.strings["btn_audio"], data=f"menu:audio:{orig_id}")
+                        Button.inline(self.strings["btn_audio"], data=f"menu:audio:{orig_id}"),
                     ],
-                    [Button.inline(self.strings["btn_cancel"], data=f"g:cancel:{orig_id}")]
+                    [Button.inline(self.strings["btn_cancel"], data=f"g:cancel:{orig_id}")],
                 ]
-                text = self.strings["found_media"].format(title=title, duration=duration_str)
+                t = self.strings["found_media"].format(title=title, duration=duration_str)
             else:
                 buttons = [
                     [Button.inline(self.strings["btn_video"], data=f"menu:video:{orig_id}:{topic_id or 0}")],
-                    [Button.inline(self.strings["btn_cancel"], data=f"g:cancel:{orig_id}")]
+                    [Button.inline(self.strings["btn_cancel"], data=f"g:cancel:{orig_id}")],
                 ]
-                text = self.strings["found_media_group"].format(title=title, duration=duration_str)
-            
-            await ev.edit(text, buttons=buttons, parse_mode='html')
+                t = self.strings["found_media_group"].format(title=title, duration=duration_str)
+            try:
+                await ev.edit(t, buttons=buttons, parse_mode="html")
+            except Exception:
+                pass
             return
-        
+
         if prefix == "edit":
             if not is_private:
                 return
-            
             if action == "start":
                 orig_id = int(parts[2]) if len(parts) > 2 else 0
                 owner_id = int(parts[3]) if len(parts) > 3 else ev.sender_id
-                
                 try:
                     orig = await self._bot.get_messages(ev.chat_id, ids=orig_id)
                     if not orig or not orig.text:
@@ -2220,115 +1710,95 @@ class Grabber(loader.Module):
                         return
                 except Exception:
                     return
-                
                 async with self._edit_lock:
                     self._edit_state[ev.sender_id] = {
-                        'step': 'waiting_title',
-                        'url': link,
-                        'msg_event': ev,
-                        'orig_id': orig_id,
-                        'owner_id': owner_id,
-                        'custom_title': None,
-                        'custom_artist': None,
-                        'custom_thumb': None,
+                        "step": "waiting_title", "url": link,
+                        "msg_event": ev, "orig_id": orig_id, "owner_id": owner_id,
+                        "custom_title": None, "custom_artist": None, "custom_thumb": None,
                     }
-                
-                await ev.edit(
-                    self.strings["editor_mode"],
-                    buttons=[[Button.inline(self.strings["btn_cancel"], data=f"edit:cancel:{ev.sender_id}")]],
-                    parse_mode='html'
-                )
-            
+                try:
+                    await ev.edit(self.strings["editor_mode"],
+                                  buttons=[[Button.inline(self.strings["btn_cancel"], data=f"edit:cancel:{ev.sender_id}")]],
+                                  parse_mode="html")
+                except Exception:
+                    pass
+
             elif action == "cancel":
                 target_id = int(parts[2]) if len(parts) > 2 else ev.sender_id
-                
                 if ev.sender_id != target_id:
                     await ev.answer(self.strings["not_your_editor"], alert=True)
                     return
-                
                 async with self._edit_lock:
                     if target_id in self._edit_state:
                         state = self._edit_state[target_id]
-                        if state.get('custom_thumb'):
-                            thumb_dir = os.path.dirname(state['custom_thumb'])
-                            self._clean_workdir(thumb_dir)
+                        if state.get("custom_thumb"):
+                            self._clean_workdir(os.path.dirname(state["custom_thumb"]))
                         del self._edit_state[target_id]
-                
-                await ev.edit(self.strings["op_cancelled"], buttons=None, parse_mode='html')
-            
+                try:
+                    await ev.edit(self.strings["op_cancelled"], buttons=None, parse_mode="html")
+                except Exception:
+                    pass
+
             elif action == "skipthumb":
                 target_id = int(parts[2]) if len(parts) > 2 else ev.sender_id
-                
                 if ev.sender_id != target_id:
                     await ev.answer(self.strings["not_your_editor"], alert=True)
                     return
-                
                 async with self._edit_lock:
                     if target_id in self._edit_state:
-                        self._edit_state[target_id]['step'] = 'confirm'
+                        self._edit_state[target_id]["step"] = "confirm"
                         state = self._edit_state[target_id]
                         await self._show_confirmation(ev, state, target_id)
-            
+
             elif action == "confirm":
                 target_id = int(parts[2]) if len(parts) > 2 else ev.sender_id
-                
                 if ev.sender_id != target_id:
                     await ev.answer(self.strings["not_your_editor"], alert=True)
                     return
-                
                 async with self._edit_lock:
                     if target_id not in self._edit_state:
                         await ev.answer(self.strings["session_expired"], alert=True)
                         return
-                    
                     state = self._edit_state[target_id]
-                    url = state['url']
+                    url = state["url"]
                     meta_dict = {
-                        'title': state.get('custom_title'),
-                        'artist': state.get('custom_artist'),
-                        'thumb_path': state.get('custom_thumb'),
+                        "title": state.get("custom_title"),
+                        "artist": state.get("custom_artist"),
+                        "thumb_path": state.get("custom_thumb"),
                     }
                     del self._edit_state[target_id]
-                
-                await self._queue_download(ev, url, 'mp3', meta_dict, None)
-            
+                await self._queue_download(ev, url, "mp3", meta_dict, None)
+
             elif action == "retry":
                 target_id = int(parts[2]) if len(parts) > 2 else ev.sender_id
-                
                 if ev.sender_id != target_id:
                     await ev.answer(self.strings["not_your_editor"], alert=True)
                     return
-                
                 async with self._edit_lock:
                     if target_id in self._edit_state:
                         state = self._edit_state[target_id]
-                        if state.get('custom_thumb'):
-                            thumb_dir = os.path.dirname(state['custom_thumb'])
-                            self._clean_workdir(thumb_dir)
-                        state['step'] = 'waiting_title'
-                        state['custom_title'] = None
-                        state['custom_artist'] = None
-                        state['custom_thumb'] = None
-                
-                await ev.edit(
-                    self.strings["editor_mode"],
-                    buttons=[[Button.inline(self.strings["btn_cancel"], data=f"edit:cancel:{target_id}")]],
-                    parse_mode='html'
-                )
+                        if state.get("custom_thumb"):
+                            self._clean_workdir(os.path.dirname(state["custom_thumb"]))
+                        state.update({"step": "waiting_title", "custom_title": None,
+                                      "custom_artist": None, "custom_thumb": None})
+                try:
+                    await ev.edit(self.strings["editor_mode"],
+                                  buttons=[[Button.inline(self.strings["btn_cancel"], data=f"edit:cancel:{target_id}")]],
+                                  parse_mode="html")
+                except Exception:
+                    pass
             return
-        
+
         if prefix == "dl":
+            button_key = (ev.chat_id, ev.message_id)
             if not self._processed_buttons.add(button_key):
                 await ev.answer(self.strings["already_processing"], alert=True)
                 return
-            
             media_type = parts[1]
             param = parts[2] if len(parts) > 2 else None
             orig_id = int(parts[3]) if len(parts) > 3 else 0
-            stored_topic_id = int(parts[4]) if len(parts) > 4 and parts[4] != '0' else None
-            
+            stored_topic_id = int(parts[4]) if len(parts) > 4 and parts[4] != "0" else None
             topic_id = stored_topic_id or current_topic_id
-            
             try:
                 orig = await self._bot.get_messages(ev.chat_id, ids=orig_id)
                 if not orig or not orig.text:
@@ -2338,9 +1808,7 @@ class Grabber(loader.Module):
                     return
             except Exception:
                 return
-            
             meta_dict = None
-            
             if media_type == "video":
                 mode = param
             elif media_type == "audio":
@@ -2348,48 +1816,787 @@ class Grabber(loader.Module):
                     return
                 mode = "mp3"
                 if param == "thumb":
-                    meta_dict = {'use_yt_thumb': True}
+                    meta_dict = {"use_yt_thumb": True}
             else:
                 return
-            
-            await self._queue_download(ev, link, mode, meta_dict, topic_id)
+            await self._queue_download(ev, link, mode, meta_dict, topic_id, orig_id=orig_id)
 
-    async def _queue_download(self, ev, url, mode, meta_dict=None, topic_id=None):
+    async def _handle_editor_input(self, ev):
+        user_id = ev.sender_id
+        state = self._edit_state.get(user_id)
+        if not state:
+            return
+        msg = state.get("msg_event")
+        step = state.get("step")
+
+        if step == "waiting_thumb":
+            if ev.document:
+                mime = getattr(ev.document, "mime_type", "") or ""
+                if mime in ("image/png", "image/jpeg"):
+                    try:
+                        await ev.delete()
+                    except Exception:
+                        pass
+                    dl_msg = await ev.respond(self.strings["downloading_image"], parse_mode="html")
+                    temp_dir = os.path.join(self._cache_dir, f"thumb_{user_id}_{int(time.time())}")
+                    os.makedirs(temp_dir, exist_ok=True)
+                    try:
+                        downloaded = await ev.download_media(file=temp_dir)
+                        if downloaded and os.path.exists(downloaded):
+                            async with self._edit_lock:
+                                state["custom_thumb"] = downloaded
+                                state["step"] = "confirm"
+                            await dl_msg.delete()
+                            await self._show_confirmation(msg, state, user_id)
+                    except Exception:
+                        try:
+                            await dl_msg.delete()
+                        except Exception:
+                            pass
+                        self._clean_workdir(temp_dir)
+                    return
+                else:
+                    await ev.respond(self.strings["only_image"], parse_mode="html")
+                    return
+            elif ev.photo:
+                await ev.respond(self.strings["only_image"], parse_mode="html")
+                return
+            elif ev.text and not ev.text.startswith("/"):
+                await ev.respond(self.strings["text_needed_image"], parse_mode="html")
+                return
+            return
+
+        if not ev.text:
+            return
+        try:
+            await ev.delete()
+        except Exception:
+            pass
+
+        if step == "waiting_title":
+            async with self._edit_lock:
+                state["custom_title"] = ev.text
+                state["step"] = "waiting_artist"
+            await msg.edit(
+                self.strings["edit_title_done"].format(_escape_html(ev.text)),
+                parse_mode="html",
+                buttons=[[Button.inline(self.strings["btn_cancel"], data=f"edit:cancel:{user_id}")]],
+            )
+        elif step == "waiting_artist":
+            async with self._edit_lock:
+                state["custom_artist"] = ev.text
+                state["step"] = "waiting_thumb"
+            await msg.edit(
+                self.strings["edit_artist_done"].format(_escape_html(ev.text)),
+                parse_mode="html",
+                buttons=[
+                    [Button.inline(self.strings["btn_no_cover"], data=f"edit:skipthumb:{user_id}")],
+                    [Button.inline(self.strings["btn_cancel"], data=f"edit:cancel:{user_id}")],
+                ],
+            )
+
+    async def _show_confirmation(self, msg, state, user_id):
+        title = _escape_html(state.get("custom_title", "Unknown"))
+        artist = _escape_html(state.get("custom_artist", "Unknown"))
+        has_thumb = self.strings["thumb_yes"] if state.get("custom_thumb") else self.strings["thumb_no"]
+        await msg.edit(
+            self.strings["confirm_menu"].format(title=title, artist=artist, thumb=has_thumb),
+            parse_mode="html",
+            buttons=[
+                [Button.inline(self.strings["btn_confirm"], data=f"edit:confirm:{user_id}")],
+                [Button.inline(self.strings["btn_retry"], data=f"edit:retry:{user_id}")],
+                [Button.inline(self.strings["btn_cancel"], data=f"edit:cancel:{user_id}")],
+            ],
+        )
+
+    async def _queue_download(self, ev, url, mode, meta_dict=None, topic_id=None, orig_id=None):
         try:
             info = await self._get_info(url)
         except Exception as e:
-            logger.error(f"[GRABBER] Get info failed: {e}")
-            await self._safe_edit(ev, self.strings["grab_failed"].format(error=str(e)[:150]), parse_mode='html')
+            try:
+                await ev.edit(self.strings["grab_failed"].format(error=str(e)[:1024]), parse_mode="html")
+            except Exception:
+                pass
             return
-        
+
         workdir = self._make_workdir()
-        title = (info.get('title') or 'Media')[:50]
-        
-        self._queue_items.append({'title': title, 'url': url})
-        
-        is_active = self._current_download.get('active', False)
+        title = (info.get("title") or "Media")[:50]
+        task_id = f"{ev.chat_id}_{ev.message_id}_{int(time.time() * 1000)}"
+        self._queue_items.append({"title": title, "url": url})
+
+        is_active = bool(self._current_downloads)
         pending = len(self._queue_items)
-        
+
         if is_active or pending > 1:
-            txt = self.strings["queue_pos"].format(pos=pending)
+            try:
+                await ev.edit(self.strings["queue_pos"].format(pos=pending), parse_mode="html")
+            except Exception:
+                pass
         else:
-            txt = self.strings["starting"]
-        
-        await self._safe_edit(ev, txt, parse_mode='html')
-        
-        await self._download_queue.put((
-            ev.chat_id,
-            ev.message_id,
-            url,
-            mode,
-            workdir,
-            info,
-            meta_dict,
-            topic_id
+            dl = self._empty_progress()
+            dl.update({
+                "active": True, "title": title,
+                "start_time": time.time(), "stage": "init",
+                "is_audio_only": mode == "mp3",
+                "og_url": self._og_cache.get(url),
+            })
+            self._current_downloads[task_id] = dl
+            try:
+                await ev.edit(self._build_status_message(task_id), parse_mode="html")
+            except Exception:
+                pass
+
+        await self._download_queue.put(
+            (task_id, ev.chat_id, ev.message_id, url, mode, workdir, info, meta_dict, topic_id, orig_id)
+        )
+
+    def _yt_extract_info(self, url):
+        try:
+            import yt_dlp
+            opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "socket_timeout": 30,
+                "skip_download": True,
+            }
+            if os.path.exists(self._cookie_path):
+                opts["cookiefile"] = self._cookie_path
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                return ydl.extract_info(url, download=False)
+        except Exception as e:
+            return None, str(e)
+
+    async def _get_info(self, url):
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(self._executor, self._yt_extract_info, url)
+        if isinstance(result, tuple):
+            _, err = result
+            raise Exception(err[:1024])
+        if result is None:
+            raise Exception("Could not extract media info")
+        return result
+
+    def _get_available_formats(self, info):
+        formats = info.get("formats", [])
+        heights = set()
+        for fmt in formats:
+            h = fmt.get("height")
+            vcodec = fmt.get("vcodec", "none")
+            if h and vcodec != "none":
+                heights.add(h)
+        standard = [2160, 1440, 1080, 720, 480, 360, 240, 144]
+        available = sorted([h for h in standard if h in heights], reverse=True)
+        return available or [720, 480, 360]
+
+    def _is_combined_format(self, info, height):
+        for fmt in info.get("formats", []):
+            h = fmt.get("height") or 0
+            vcodec = fmt.get("vcodec", "none") or "none"
+            acodec = fmt.get("acodec", "none") or "none"
+            if h <= height and vcodec != "none" and acodec != "none":
+                return True
+        return False
+
+    def _build_format_string(self, height):
+        return (
+            f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[ext=m4a]"
+            f"/bestvideo[height<={height}]+bestaudio"
+            f"/best[height<={height}][ext=mp4]/best[height<={height}]"
+        )
+
+    def _build_video_only_format(self, height):
+        return (
+            f"bestvideo[height<={height}][vcodec^=avc1]"
+            f"/bestvideo[height<={height}]"
+            f"/best[height<={height}]"
+        )
+
+    async def _progress_loop(self, task_id, chat_id, msg_id, done_event):
+        delay = max(1, self.config["ACTION_DELAY"])
+        while not done_event.is_set():
+            try:
+                await asyncio.sleep(delay)
+                if not done_event.is_set():
+                    await self._edit_progress(task_id, chat_id, msg_id)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
+    async def _upload_progress_loop(self, task_id, chat_id, msg_id, start_time):
+        delay = max(1, self.config["ACTION_DELAY"])
+        while True:
+            try:
+                await asyncio.sleep(delay)
+                dl = self._current_downloads.get(task_id)
+                if dl:
+                    dl["upload_elapsed"] = time.time() - start_time
+                await self._edit_progress(task_id, chat_id, msg_id)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
+    def _make_upload_callback(self, task_id, start_time):
+        def _cb(current, total):
+            dl = self._current_downloads.get(task_id)
+            if not dl:
+                return
+            cur_mb = current / 1024 / 1024
+            total_mb = total / 1024 / 1024 if total else cur_mb
+            elapsed = time.time() - start_time
+            speed_bytes = current / elapsed if elapsed > 0 else 0
+            dl["upload_current"] = cur_mb
+            dl["upload_total"] = total_mb
+            dl["upload_speed"] = _fmt_speed(speed_bytes)
+            dl["upload_elapsed"] = elapsed
+        return _cb
+
+    async def _send_or_forward(
+        self, task_id, chat_id, filepath, caption, attrs,
+        filesize, reply_to_topic, is_audio, send_thumb=None,
+    ):
+        BOT_LIMIT = 2000.0
+        USER_LIMIT = 4096.0
+
+        upload_start = time.time()
+        cb = self._make_upload_callback(task_id, upload_start)
+
+        if filesize <= BOT_LIMIT:
+            await self._bot.send_file(
+                chat_id, filepath,
+                caption=caption, parse_mode="html",
+                force_document=False, supports_streaming=(not is_audio),
+                attributes=attrs, thumb=send_thumb, reply_to=reply_to_topic,
+                progress_callback=cb,
+            )
+            return
+
+        if filesize > USER_LIMIT:
+            await self._bot.send_message(
+                chat_id, self.strings["too_large_over_limit"].format(size_mb=filesize),
+                parse_mode="html",
+            )
+            return
+
+        me = await self._client.get_me()
+        if not getattr(me, "premium", False):
+            await self._bot.send_message(
+                chat_id, self.strings["too_large_no_premium"].format(size_mb=filesize),
+                parse_mode="html",
+            )
+            return
+
+        asset_channel = self._db.get("heroku.forums", "channel_id", None)
+        if not asset_channel or not self._grabber_topic_id:
+            await self._bot.send_message(
+                chat_id, self.strings["too_large_no_premium"].format(size_mb=filesize),
+                parse_mode="html",
+            )
+            return
+
+        await self._log_to_topic(self.strings["log_large"].format(size_mb=filesize))
+        log_chat_id = int(f"-100{asset_channel}")
+
+        sent = await self._client.send_file(
+            log_chat_id, filepath,
+            caption=caption, parse_mode="html",
+            force_document=False, supports_streaming=(not is_audio),
+            attributes=attrs, reply_to=self._grabber_topic_id,
+            progress_callback=cb,
+        )
+
+        from telethon.tl.types import InputDocument
+        bot_msg = await self._bot.get_messages(log_chat_id, ids=sent.id)
+        doc = bot_msg.media.document
+        input_doc = InputDocument(
+            id=doc.id,
+            access_hash=doc.access_hash,
+            file_reference=doc.file_reference,
+        )
+        await self._bot.send_file(
+            chat_id, input_doc,
+            caption=caption, parse_mode="html",
+            force_document=False, supports_streaming=(not is_audio),
+            attributes=attrs, thumb=send_thumb, reply_to=reply_to_topic,
+        )
+
+    async def _process_download(
+        self,
+        task_id,
+        chat_id,
+        msg_id,
+        url,
+        mode,
+        workdir,
+        info,
+        meta_dict=None,
+        reply_to_topic=None,
+        orig_msg_id=None,
+    ):
+        try:
+            import yt_dlp
+        except ImportError:
+            raise Exception("yt-dlp not installed")
+
+        if not self._bot or not self._running:
+            return
+
+        title = (info.get("title") or "media")[:100]
+        orig_width = info.get("width", 0) or 0
+        orig_height = info.get("height", 0) or 0
+        orig_duration = info.get("duration", 0) or 0
+        is_audio = mode == "mp3"
+
+        task_start = time.time()
+        if task_id not in self._current_downloads:
+            dl = self._empty_progress()
+            self._current_downloads[task_id] = dl
+        else:
+            dl = self._current_downloads[task_id]
+        dl.update({
+            "active": True, "title": title,
+            "start_time": task_start, "stage": "init",
+            "is_audio_only": is_audio,
+        })
+        if not dl.get("og_url"):
+            dl["og_url"] = self._og_cache.get(url)
+
+        await self._log_to_topic(self.strings["log_processing"].format(
+            title=_escape_html(title[:60]),
+            user=str(chat_id),
+            url=url[:120],
         ))
+        await self._edit_progress(task_id, chat_id, msg_id)
+
+        safe_title = re.sub(r'[\\/*?:"<>|]', "", title).replace(" ", "_")[:50]
+        loop = asyncio.get_event_loop()
+        base_opts = {"quiet": True, "no_warnings": True, "restrictfilenames": True}
+        if os.path.exists(self._cookie_path):
+            base_opts["cookiefile"] = self._cookie_path
+
+        if is_audio:
+            out_tmpl = os.path.join(workdir, f"{safe_title}.%(ext)s")
+            dl_opts = {
+                **base_opts,
+                "outtmpl": out_tmpl,
+                "format": "bestaudio/best",
+                "progress_hooks": [self._make_progress_hook(task_id)],
+                "postprocessor_hooks": [self._make_pp_hook(task_id)],
+                "postprocessors": [{"key": "FFmpegExtractAudio",
+                                    "preferredcodec": "mp3", "preferredquality": "320"}],
+            }
+            done_event = asyncio.Event()
+            dl_error = [None]
+
+            def do_audio():
+                try:
+                    with yt_dlp.YoutubeDL(dl_opts) as ydl:
+                        ydl.download([url])
+                except Exception as e:
+                    dl_error[0] = e
+                finally:
+                    loop.call_soon_threadsafe(done_event.set)
+
+            fut = loop.run_in_executor(self._executor, do_audio)
+            up_task = asyncio.create_task(self._progress_loop(task_id, chat_id, msg_id, done_event))
+            await done_event.wait()
+            await fut
+            up_task.cancel()
+            try:
+                await up_task
+            except Exception:
+                pass
+            if dl_error[0]:
+                raise dl_error[0]
+
+        else:
+            height = int(mode)
+            is_combined = self._is_combined_format(info, height)
+            dl["is_combined"] = is_combined
+
+            if is_combined:
+                dl["audio_done"] = True
+                dl["audio_percent"] = 100.0
+                out_tmpl = os.path.join(workdir, f"{safe_title}.%(ext)s")
+                dl_opts = {
+                    **base_opts,
+                    "outtmpl": out_tmpl,
+                    "format": self._build_format_string(height),
+                    "progress_hooks": [self._make_progress_hook(task_id)],
+                    "postprocessor_hooks": [self._make_pp_hook(task_id)],
+                    "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}],
+                }
+                done_event = asyncio.Event()
+                dl_error = [None]
+
+                def do_combined():
+                    try:
+                        with yt_dlp.YoutubeDL(dl_opts) as ydl:
+                            ydl.download([url])
+                    except Exception as e:
+                        dl_error[0] = e
+                    finally:
+                        loop.call_soon_threadsafe(done_event.set)
+
+                fut = loop.run_in_executor(self._executor, do_combined)
+                up_task = asyncio.create_task(self._progress_loop(task_id, chat_id, msg_id, done_event))
+                await done_event.wait()
+                await fut
+                up_task.cancel()
+                try:
+                    await up_task
+                except Exception:
+                    pass
+                if dl_error[0]:
+                    raise dl_error[0]
+
+            else:
+                video_out = os.path.join(workdir, f"{safe_title}_video.%(ext)s")
+                video_opts = {
+                    **base_opts,
+                    "outtmpl": video_out,
+                    "format": self._build_video_only_format(height),
+                    "progress_hooks": [self._make_progress_hook(task_id)],
+                }
+                done_v = asyncio.Event()
+                dl_error = [None]
+
+                def do_video():
+                    try:
+                        with yt_dlp.YoutubeDL(video_opts) as ydl:
+                            ydl.download([url])
+                    except Exception as e:
+                        dl_error[0] = e
+                    finally:
+                        loop.call_soon_threadsafe(done_v.set)
+
+                fut_v = loop.run_in_executor(self._executor, do_video)
+                up_task_v = asyncio.create_task(self._progress_loop(task_id, chat_id, msg_id, done_v))
+                await done_v.wait()
+                await fut_v
+                up_task_v.cancel()
+                try:
+                    await up_task_v
+                except Exception:
+                    pass
+                if dl_error[0]:
+                    raise dl_error[0]
+
+                dl["video_done"] = True
+                dl["video_percent"] = 100.0
+
+                audio_out = os.path.join(workdir, f"{safe_title}_audio.%(ext)s")
+                audio_opts = {
+                    **base_opts,
+                    "outtmpl": audio_out,
+                    "format": "bestaudio[ext=m4a]/bestaudio",
+                    "progress_hooks": [self._make_progress_hook(task_id)],
+                }
+                done_a = asyncio.Event()
+                dl_error_a = [None]
+
+                def do_audio_sep():
+                    try:
+                        with yt_dlp.YoutubeDL(audio_opts) as ydl:
+                            ydl.download([url])
+                    except Exception as e:
+                        dl_error_a[0] = e
+                    finally:
+                        loop.call_soon_threadsafe(done_a.set)
+
+                fut_a = loop.run_in_executor(self._executor, do_audio_sep)
+                up_task_a = asyncio.create_task(self._progress_loop(task_id, chat_id, msg_id, done_a))
+                await done_a.wait()
+                await fut_a
+                up_task_a.cancel()
+                try:
+                    await up_task_a
+                except Exception:
+                    pass
+
+                dl["audio_done"] = True
+                dl["audio_percent"] = 100.0
+
+                video_files = [
+                    f for f in os.listdir(workdir)
+                    if f.startswith(f"{safe_title}_video") and os.path.isfile(os.path.join(workdir, f))
+                ]
+                audio_files = [
+                    f for f in os.listdir(workdir)
+                    if f.startswith(f"{safe_title}_audio") and os.path.isfile(os.path.join(workdir, f))
+                ]
+                if not video_files:
+                    raise Exception("Video file not found after download")
+
+                vf = os.path.join(workdir, video_files[0])
+
+                if audio_files and not dl_error_a[0]:
+                    af = os.path.join(workdir, audio_files[0])
+                    merged = os.path.join(workdir, f"{safe_title}_merged.mp4")
+                    dl["stage"] = "ffmpeg"
+                    dl["ffmpeg_active"] = True
+                    await self._edit_progress(task_id, chat_id, msg_id)
+                    merge_cmd = [
+                        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                        "-i", vf, "-i", af, "-c:v", "copy", "-c:a", "aac", merged,
+                    ]
+                    proc = await asyncio.create_subprocess_exec(
+                        *merge_cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    await proc.communicate()
+                    dl["ffmpeg_active"] = False
+                    dl["ffmpeg_done"] = True
+                    if proc.returncode == 0 and os.path.exists(merged) and os.path.getsize(merged) > 0:
+                        try:
+                            os.remove(vf)
+                            os.remove(af)
+                        except Exception:
+                            pass
+                        final_path = merged
+                    else:
+                        final_path = vf
+                else:
+                    dl["ffmpeg_done"] = True
+                    final_path = vf
+
+                filesize = os.path.getsize(final_path) / (1024 * 1024)
+                dl["final_size"] = filesize
+                dl["stage"] = "probe"
+                await self._edit_progress(task_id, chat_id, msg_id)
+
+                probe = self._get_video_info_ffprobe(final_path)
+                real_width = probe["width"] if probe else orig_width
+                real_height = probe["height"] if probe else orig_height
+                real_duration = probe["duration"] if probe and probe["duration"] > 0 else orig_duration
+
+                dl["stage"] = "upload"
+                dl["upload_started"] = True
+                upload_start = time.time()
+                await self._edit_progress(task_id, chat_id, msg_id)
+
+                caption = self.strings["file_caption"].format(
+                    title=_escape_html(title[:120]),
+                    size_mb=filesize, width=real_width, height=real_height, elapsed=_fmt_elapsed(time.time()-task_start),
+                )
+                fname = os.path.basename(final_path)
+                attrs = [
+                    DocumentAttributeFilename(file_name=fname),
+                    DocumentAttributeVideo(
+                        duration=int(real_duration), w=int(real_width), h=int(real_height),
+                        supports_streaming=True,
+                    ),
+                ]
+
+                up_loop = asyncio.create_task(self._upload_progress_loop(task_id, chat_id, msg_id, upload_start))
+                next_task = asyncio.ensure_future(self._prefetch_next())
+                try:
+                    await self._send_or_forward(
+                        task_id, chat_id, final_path, caption, attrs,
+                        filesize, reply_to_topic, False,
+                    )
+                finally:
+                    up_loop.cancel()
+                    try:
+                        await up_loop
+                    except Exception:
+                        pass
+
+                await self._log_to_topic(self.strings["log_done"].format(
+                    title=_escape_html(title[:60]), size_mb=filesize))
+                upload_elapsed = time.time() - upload_start
+                dl["upload_elapsed"] = upload_elapsed
+                dl["stage"] = "done"
+                await self._edit_progress(task_id, chat_id, msg_id)
+                await asyncio.sleep(3)
+                await self._safe_delete(chat_id, msg_id)
+                await self._try_delete_orig(chat_id, orig_msg_id)
+                return
+
+        extensions = (
+            (".mp3", ".m4a", ".opus", ".ogg", ".wav")
+            if is_audio
+            else (".mp4", ".mkv", ".webm", ".mov", ".avi")
+        )
+        all_files = os.listdir(workdir)
+        files = [f for f in all_files if f.endswith(extensions) and os.path.isfile(os.path.join(workdir, f))]
+        if not files:
+            raise Exception(f"File not found after download. Files: {all_files}")
+
+        filepath = os.path.join(workdir, files[0])
+        filesize = os.path.getsize(filepath) / (1024 * 1024)
+        dl["final_size"] = filesize
+        dl["ffmpeg_done"] = True
+        dl["video_done"] = True
+        dl["audio_done"] = True
+
+        send_thumb = None
+        final_title = title
+        final_artist = info.get("uploader", "Unknown") or "Unknown"
+
+        if is_audio and meta_dict:
+            if meta_dict.get("title"):
+                final_title = meta_dict["title"]
+            if meta_dict.get("artist"):
+                final_artist = meta_dict["artist"]
+            if meta_dict.get("thumb_path") and os.path.exists(meta_dict["thumb_path"]):
+                thumb_path = meta_dict["thumb_path"]
+                try:
+                    with open(thumb_path, "rb") as f:
+                        raw_thumb = f.read()
+                    norm = normalize_cover(raw_thumb, force_jpeg=True)
+                    if norm:
+                        norm_path = os.path.join(workdir, "norm_cover.jpg")
+                        with open(norm_path, "wb") as f:
+                            f.write(norm)
+                        thumb_path = norm_path
+                except Exception:
+                    pass
+                temp_out = os.path.join(workdir, "with_cover.mp3")
+                ok = await _embed_cover_ffmpeg(filepath, thumb_path, temp_out)
+                if ok and os.path.exists(temp_out):
+                    os.remove(filepath)
+                    os.rename(temp_out, filepath)
+                    filesize = os.path.getsize(filepath) / (1024 * 1024)
+                send_thumb = thumb_path
+            elif meta_dict.get("use_yt_thumb"):
+                thumb_url = _get_best_thumb_url(info)
+                if thumb_url:
+                    raw = await _download_url(thumb_url, timeout=15)
+                    if raw:
+                        cover_data = normalize_cover(raw, force_jpeg=True)
+                        if cover_data:
+                            thumb_path = os.path.join(workdir, "yt_cover.jpg")
+                            with open(thumb_path, "wb") as f:
+                                f.write(cover_data)
+                            temp_out = os.path.join(workdir, "with_yt_cover.mp3")
+                            ok = await _embed_cover_ffmpeg(filepath, thumb_path, temp_out)
+                            if ok and os.path.exists(temp_out):
+                                os.remove(filepath)
+                                os.rename(temp_out, filepath)
+                                filesize = os.path.getsize(filepath) / (1024 * 1024)
+                            send_thumb = thumb_path
+
+        dl["stage"] = "probe"
+        await self._edit_progress(task_id, chat_id, msg_id)
+
+        real_width, real_height, real_duration = orig_width, orig_height, orig_duration
+        if not is_audio:
+            probe = self._get_video_info_ffprobe(filepath)
+            if probe:
+                real_width = probe["width"]
+                real_height = probe["height"]
+                if probe["duration"] > 0:
+                    real_duration = probe["duration"]
+        else:
+            probe = self._get_audio_info_ffprobe(filepath)
+            if probe and probe["duration"] > 0:
+                real_duration = probe["duration"]
+
+        dl["stage"] = "upload"
+        dl["upload_started"] = True
+        upload_start = time.time()
+        await self._edit_progress(task_id, chat_id, msg_id)
+
+        fname = os.path.basename(filepath)
+        attrs = [DocumentAttributeFilename(file_name=fname)]
+        if not is_audio:
+            attrs.append(DocumentAttributeVideo(
+                duration=int(real_duration), w=int(real_width), h=int(real_height),
+                supports_streaming=True,
+            ))
+            caption = self.strings["file_caption"].format(
+                title=_escape_html(final_title[:120]),
+                size_mb=filesize, width=real_width, height=real_height, elapsed=_fmt_elapsed(time.time()-task_start),
+            )
+        else:
+            attrs.append(DocumentAttributeAudio(
+                duration=int(real_duration),
+                title=final_title[:64],
+                performer=final_artist[:64],
+            ))
+            caption = self.strings["audio_caption"].format(
+                title=_escape_html(final_title[:120]),
+                size_mb=filesize,
+            )
+
+        up_loop = asyncio.create_task(self._upload_progress_loop(task_id, chat_id, msg_id, upload_start))
+        asyncio.ensure_future(self._prefetch_next())
+        try:
+            await self._send_or_forward(
+                task_id, chat_id, filepath, caption, attrs,
+                filesize, reply_to_topic, is_audio, send_thumb=send_thumb,
+            )
+        finally:
+            up_loop.cancel()
+            try:
+                await up_loop
+            except Exception:
+                pass
+
+        await self._log_to_topic(self.strings["log_done"].format(
+            title=_escape_html(title[:60]), size_mb=filesize, elapsed=_fmt_elapsed(time.time()-task_start)))
+        upload_elapsed = time.time() - upload_start
+        dl["upload_elapsed"] = upload_elapsed
+        dl["stage"] = "done"
+        await self._edit_progress(task_id, chat_id, msg_id)
+        await asyncio.sleep(3)
+        await self._safe_delete(chat_id, msg_id)
+        await self._try_delete_orig(chat_id, orig_msg_id)
+
+    async def _prefetch_next(self):
+        pass
+
+    def _get_video_info_ffprobe(self, filepath):
+        try:
+            import json as _json
+            import subprocess as _sp
+            cmd = [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height,duration,codec_name",
+                "-of", "json", filepath,
+            ]
+            result = _sp.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                streams = _json.loads(result.stdout).get("streams", [])
+                if streams:
+                    s = streams[0]
+                    return {
+                        "width": int(s.get("width", 0)),
+                        "height": int(s.get("height", 0)),
+                        "duration": float(s.get("duration", 0)) if s.get("duration") else 0,
+                        "codec": s.get("codec_name", "unknown"),
+                    }
+        except Exception:
+            pass
+        return None
+
+    def _get_audio_info_ffprobe(self, filepath):
+        try:
+            import json as _json
+            import subprocess as _sp
+            cmd = [
+                "ffprobe", "-v", "error", "-select_streams", "a:0",
+                "-show_entries", "stream=duration,codec_name",
+                "-of", "json", filepath,
+            ]
+            result = _sp.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                streams = _json.loads(result.stdout).get("streams", [])
+                if streams:
+                    s = streams[0]
+                    return {
+                        "duration": float(s.get("duration", 0)) if s.get("duration") else 0,
+                        "codec": s.get("codec_name", "unknown"),
+                    }
+        except Exception:
+            pass
+        return None
 
     async def on_unload(self):
-        logger.info("[GRABBER] Module unloading...")
+        logger.info("[GRABBER] Unloading...")
         await self._shutdown()
         await asyncio.sleep(0.5)
         self._clean_cache()
@@ -2397,4 +2604,4 @@ class Grabber(loader.Module):
             self._executor.shutdown(wait=False)
         except Exception:
             pass
-        logger.info("[GRABBER] Module unloaded")
+        logger.info("[GRABBER] Unloaded")
