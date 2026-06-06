@@ -1,4 +1,4 @@
-__version__ = (1, 1, 1)
+__version__ = (1, 2, 0)
 # meta developer: I_execute.t.me 
 
 import io
@@ -8,6 +8,7 @@ from telethon import functions, types
 from PIL import Image
 
 from .. import loader, utils
+from ..inline.types import InlineCall
 
 
 @loader.tds
@@ -16,118 +17,341 @@ class Stories(loader.Module):
 
     strings = {
         "name": "Stories",
-        "no_reply": "<b>Reply to photo!</b>",
-        "uploading": "<b>Uploading...</b>",
-        "deleting": "<b>Deleting...</b>",
-        "archiving": "<b>Archiving...</b>",
-        "unarchiving": "<b>Unarchiving...</b>",
-        "posted": "<b>Posted! {} stories uploaded.</b>",
-        "posted_archive": "<b>Posted to archive! {} stories.</b>",
-        "posted_album_new": "<b>Posted & created album '{}'! {} stories.</b>",
-        "posted_album": "<b>Posted to album '{}'! {} stories.</b>",
-        "deleted": "<b>Deleted: {}</b>",
-        "deleted_active": "<b>Deleted active: {}</b>",
-        "deleted_archive": "<b>Deleted archived: {}</b>",
-        "deleted_album": "<b>Deleted album '{}': {} stories</b>",
-        "archived": "<b>Archived: {}</b>",
-        "unarchived": "<b>Unarchived: {}</b>",
-        "no_active": "<b>No active stories</b>",
-        "no_archived": "<b>No archived stories</b>",
-        "no_stories": "<b>Failed to upload any stories!</b>",
-        "album_not_found": "<b>Album '{}' not found!</b>",
-        "album_name_required": "<b>Album name required!</b>",
-        "error": "<b>Error:</b> {}",
-        "usage": (
+        
+        "main_menu": (
             "<b>Stories Manager</b>\n"
-            "<blockquote expandable><b>Posting (reply to photo):</b>\n"
-            "<code>{prefix}st post</code> post grid to profile\n"
-            "<code>{prefix}st post archive</code> post grid to archive\n"
-            "<code>{prefix}st post album Name</code> post to existing album\n"
-            "<code>{prefix}st post new album Name</code> post and create new album\n\n"
-            "<b>Deleting:</b>\n"
-            "<code>{prefix}st delete all</code> delete all stories\n"
-            "<code>{prefix}st delete active</code> delete only active (in profile)\n"
-            "<code>{prefix}st delete archive</code> delete only archived\n"
-            "<code>{prefix}st delete album Name</code> delete album with stories\n\n"
-            "<b>Archiving:</b>\n"
-            "<code>{prefix}st archive</code> move all active to archive\n"
-            "<code>{prefix}st unarchive</code> move all archived to profile\n\n"
-            "<b>Supported aspect ratios:</b>\n"
-            "5:4 (1.25) 2 rows, 6 stories\n"
-            "4:5 (0.80) 3 rows, 9 stories\n"
-            "3:5 (0.60) 4 rows, 12 stories\n"
-            "9:16 (0.56) 5 rows, 15 stories</blockquote>"
+            "<blockquote>Select operation</blockquote>"
         ),
-        "unknown_cmd": "<b>Unknown command</b>",
-        "unknown_target": "<b>Unknown target</b>",
-        "specify_target": "<b>Specify: all/active/archive/album [name]</b>",
+        
+        "btn_post": "Post",
+        "btn_archive_menu": "Archive",
+        "btn_delete_menu": "Delete",
+        "btn_back": "Back",
+        "btn_close": "Close",
+        
+        "post_menu": (
+            "<b>Post Stories</b>\n"
+            "<blockquote>Select where to post</blockquote>"
+        ),
+        
+        "btn_post_profile": "Post to Profile",
+        "btn_post_archive": "Post to Archive",
+        "btn_post_album": "Post to Album",
+        
+        "archive_menu": (
+            "<b>Archive Stories</b>\n"
+            "<blockquote>Select what to archive</blockquote>"
+        ),
+        
+        "btn_archive_all": "Archive All Active",
+        "btn_archive_album": "Archive Album",
+        "btn_unarchive_all": "Unarchive All",
+        
+        "delete_menu": (
+            "<b>Delete Stories</b>\n"
+            "<blockquote>Select what to delete</blockquote>"
+        ),
+        
+        "btn_delete_all": "Delete All",
+        "btn_delete_active": "Delete Active",
+        "btn_delete_archive": "Delete Archived",
+        "btn_delete_album": "Delete Album",
+        
+        "album_menu": (
+            "<b>Select Album</b>\n"
+            "<blockquote>Available albums</blockquote>"
+        ),
+        
+        "no_albums": (
+            "<b>No Albums Found</b>\n"
+            "<blockquote>Create an album first</blockquote>"
+        ),
+        
+        "no_reply": (
+            "<b>No Photo in Reply</b>\n"
+            "<blockquote>Reply to a photo to use this feature</blockquote>"
+        ),
+        
+        "uploading": (
+            "<b>Uploading Stories</b>\n"
+            "<blockquote>Please wait...</blockquote>"
+        ),
+        
+        "deleting": (
+            "<b>Deleting Stories</b>\n"
+            "<blockquote>Please wait...</blockquote>"
+        ),
+        
+        "archiving": (
+            "<b>Archiving Stories</b>\n"
+            "<blockquote>Please wait...</blockquote>"
+        ),
+        
+        "unarchiving": (
+            "<b>Unarchiving Stories</b>\n"
+            "<blockquote>Please wait...</blockquote>"
+        ),
+        
+        "posted": (
+            "<b>Posted Successfully</b>\n"
+            "<blockquote>{} stories uploaded</blockquote>"
+        ),
+        
+        "posted_archive": (
+            "<b>Posted to Archive</b>\n"
+            "<blockquote>{} stories uploaded</blockquote>"
+        ),
+        
+        "posted_album_new": (
+            "<b>Album Created</b>\n"
+            "<blockquote>Album '{}' created with {} stories</blockquote>"
+        ),
+        
+        "posted_album": (
+            "<b>Posted to Album</b>\n"
+            "<blockquote>Album '{}' updated with {} stories</blockquote>"
+        ),
+        
+        "deleted": (
+            "<b>Deleted Successfully</b>\n"
+            "<blockquote>{} stories deleted</blockquote>"
+        ),
+        
+        "deleted_active": (
+            "<b>Active Deleted</b>\n"
+            "<blockquote>{} active stories deleted</blockquote>"
+        ),
+        
+        "deleted_archive": (
+            "<b>Archive Deleted</b>\n"
+            "<blockquote>{} archived stories deleted</blockquote>"
+        ),
+        
+        "deleted_album": (
+            "<b>Album Deleted</b>\n"
+            "<blockquote>Album '{}' with {} stories deleted</blockquote>"
+        ),
+        
+        "archived": (
+            "<b>Archived Successfully</b>\n"
+            "<blockquote>{} stories archived</blockquote>"
+        ),
+        
+        "archived_album": (
+            "<b>Album Archived</b>\n"
+            "<blockquote>Album '{}' with {} stories archived</blockquote>"
+        ),
+        
+        "unarchived": (
+            "<b>Unarchived Successfully</b>\n"
+            "<blockquote>{} stories unarchived</blockquote>"
+        ),
+        
+        "no_active": (
+            "<b>No Active Stories</b>\n"
+            "<blockquote>Nothing to archive</blockquote>"
+        ),
+        
+        "no_archived": (
+            "<b>No Archived Stories</b>\n"
+            "<blockquote>Nothing to unarchive</blockquote>"
+        ),
+        
+        "no_stories": (
+            "<b>Upload Failed</b>\n"
+            "<blockquote>Failed to upload any stories</blockquote>"
+        ),
+        
+        "album_not_found": (
+            "<b>Album Not Found</b>\n"
+            "<blockquote>Album '{}' doesn't exist</blockquote>"
+        ),
+        
+        "error": (
+            "<b>Error Occurred</b>\n"
+            "<blockquote>{}</blockquote>"
+        ),
+        
+        "input_new_album_name": "Enter new album name:",
+        
         "wrong_ratio": (
-            "<b>Wrong image aspect ratio!</b>\n\n"
-            "<b>Your ratio:</b> <code>{:.2f}</code>\n"
-            "<b>Supported ratios:</b>\n"
-            "<code>1.25</code> (5:4) 2 rows, 6 stories\n"
-            "<code>0.80</code> (4:5) 3 rows, 9 stories\n"
-            "<code>0.60</code> (3:5) 4 rows, 12 stories\n"
-            "<code>0.56</code> (9:16) 5 rows, 15 stories\n\n"
-            "<b>Tolerance:</b> 5%"
+            "<b>Wrong Aspect Ratio</b>\n"
+            "<blockquote>Your ratio: {:.2f}</blockquote>\n"
+            "<blockquote>Supported ratios:\n"
+            "1.25 (5:4) - 2 rows, 6 stories\n"
+            "0.80 (4:5) - 3 rows, 9 stories\n"
+            "0.60 (3:5) - 4 rows, 12 stories\n"
+            "0.56 (9:16) - 5 rows, 15 stories\n"
+            "Tolerance: 5%</blockquote>"
         ),
     }
 
     strings_ru = {
-        "no_reply": "<b>Ответь на фото!</b>",
-        "uploading": "<b>Загружаю...</b>",
-        "deleting": "<b>Удаляю...</b>",
-        "archiving": "<b>Архивирую...</b>",
-        "unarchiving": "<b>Разархивирую...</b>",
-        "posted": "<b>Готово! Загружено {} историй.</b>",
-        "posted_archive": "<b>Загружено в архив! {} историй.</b>",
-        "posted_album_new": "<b>Загружено и создан альбом '{}'! {} историй.</b>",
-        "posted_album": "<b>Загружено в альбом '{}'! {} историй.</b>",
-        "deleted": "<b>Удалено: {}</b>",
-        "deleted_active": "<b>Удалено активных: {}</b>",
-        "deleted_archive": "<b>Удалено из архива: {}</b>",
-        "deleted_album": "<b>Удалён альбом '{}': {} историй</b>",
-        "archived": "<b>Архивировано: {}</b>",
-        "unarchived": "<b>Разархивировано: {}</b>",
-        "no_active": "<b>Нет активных историй</b>",
-        "no_archived": "<b>Нет архивных историй</b>",
-        "no_stories": "<b>Не удалось загрузить ни одной истории!</b>",
-        "album_not_found": "<b>Альбом '{}' не найден!</b>",
-        "album_name_required": "<b>Укажите название альбома!</b>",
-        "error": "<b>Ошибка:</b> {}",
-        "usage": (
+        "main_menu": (
             "<b>Менеджер историй</b>\n"
-            "<blockquote expandable><b>Публикация (ответ на фото):</b>\n"
-            "<code>{prefix}st post</code> опубликовать сетку в профиль\n"
-            "<code>{prefix}st post archive</code> опубликовать сетку в архив\n"
-            "<code>{prefix}st post album Название</code> опубликовать в существующий альбом\n"
-            "<code>{prefix}st post new album Название</code> опубликовать и создать новый альбом\n\n"
-            "<b>Удаление:</b>\n"
-            "<code>{prefix}st delete all</code> удалить все истории\n"
-            "<code>{prefix}st delete active</code> удалить только активные (в профиле)\n"
-            "<code>{prefix}st delete archive</code> удалить только архивные\n"
-            "<code>{prefix}st delete album Название</code> удалить альбом с историями\n\n"
-            "<b>Архивация:</b>\n"
-            "<code>{prefix}st archive</code> переместить все активные в архив\n"
-            "<code>{prefix}st unarchive</code> переместить все из архива в профиль\n\n"
-            "<b>Поддерживаемые соотношения сторон:</b>\n"
-            "5:4 (1.25) 2 ряда, 6 историй\n"
-            "4:5 (0.80) 3 ряда, 9 историй\n"
-            "3:5 (0.60) 4 ряда, 12 историй\n"
-            "9:16 (0.56) 5 рядов, 15 историй</blockquote>"
+            "<blockquote>Выберите операцию</blockquote>"
         ),
-        "unknown_cmd": "<b>Неизвестная команда</b>",
-        "unknown_target": "<b>Неизвестная цель</b>",
-        "specify_target": "<b>Укажи: all/active/archive/album [название]</b>",
+        
+        "btn_post": "Публикация",
+        "btn_archive_menu": "Архив",
+        "btn_delete_menu": "Удаление",
+        "btn_back": "Назад",
+        "btn_close": "Закрыть",
+        
+        "post_menu": (
+            "<b>Публикация историй</b>\n"
+            "<blockquote>Выберите куда опубликовать</blockquote>"
+        ),
+        
+        "btn_post_profile": "В профиль",
+        "btn_post_archive": "В архив",
+        "btn_post_album": "В альбом",
+        
+        "archive_menu": (
+            "<b>Архивация историй</b>\n"
+            "<blockquote>Выберите что архивировать</blockquote>"
+        ),
+        
+        "btn_archive_all": "Все активные",
+        "btn_archive_album": "Альбом",
+        "btn_unarchive_all": "Разархивировать все",
+        
+        "delete_menu": (
+            "<b>Удаление историй</b>\n"
+            "<blockquote>Выберите что удалить</blockquote>"
+        ),
+        
+        "btn_delete_all": "Все",
+        "btn_delete_active": "Активные",
+        "btn_delete_archive": "Архивные",
+        "btn_delete_album": "Альбом",
+        
+        "album_menu": (
+            "<b>Выбор альбома</b>\n"
+            "<blockquote>Доступные альбомы</blockquote>"
+        ),
+        
+        "no_albums": (
+            "<b>Альбомы не найдены</b>\n"
+            "<blockquote>Сначала создайте альбом</blockquote>"
+        ),
+        
+        "no_reply": (
+            "<b>Нет фото в ответе</b>\n"
+            "<blockquote>Ответьте на фото чтобы использовать эту функцию</blockquote>"
+        ),
+        
+        "uploading": (
+            "<b>Загрузка историй</b>\n"
+            "<blockquote>Пожалуйста, подождите...</blockquote>"
+        ),
+        
+        "deleting": (
+            "<b>Удаление историй</b>\n"
+            "<blockquote>Пожалуйста, подождите...</blockquote>"
+        ),
+        
+        "archiving": (
+            "<b>Архивация историй</b>\n"
+            "<blockquote>Пожалуйста, подождите...</blockquote>"
+        ),
+        
+        "unarchiving": (
+            "<b>Разархивация историй</b>\n"
+            "<blockquote>Пожалуйста, подождите...</blockquote>"
+        ),
+        
+        "posted": (
+            "<b>Успешно опубликовано</b>\n"
+            "<blockquote>Загружено {} историй</blockquote>"
+        ),
+        
+        "posted_archive": (
+            "<b>Опубликовано в архив</b>\n"
+            "<blockquote>Загружено {} историй</blockquote>"
+        ),
+        
+        "posted_album_new": (
+            "<b>Альбом создан</b>\n"
+            "<blockquote>Альбом '{}' создан с {} историями</blockquote>"
+        ),
+        
+        "posted_album": (
+            "<b>Опубликовано в альбом</b>\n"
+            "<blockquote>Альбом '{}' обновлен {} историями</blockquote>"
+        ),
+        
+        "deleted": (
+            "<b>Успешно удалено</b>\n"
+            "<blockquote>Удалено {} историй</blockquote>"
+        ),
+        
+        "deleted_active": (
+            "<b>Активные удалены</b>\n"
+            "<blockquote>Удалено {} активных историй</blockquote>"
+        ),
+        
+        "deleted_archive": (
+            "<b>Архив удален</b>\n"
+            "<blockquote>Удалено {} архивных историй</blockquote>"
+        ),
+        
+        "deleted_album": (
+            "<b>Альбом удален</b>\n"
+            "<blockquote>Альбом '{}' с {} историями удален</blockquote>"
+        ),
+        
+        "archived": (
+            "<b>Успешно архивировано</b>\n"
+            "<blockquote>Архивировано {} историй</blockquote>"
+        ),
+        
+        "archived_album": (
+            "<b>Альбом архивирован</b>\n"
+            "<blockquote>Альбом '{}' с {} историями архивирован</blockquote>"
+        ),
+        
+        "unarchived": (
+            "<b>Успешно разархивировано</b>\n"
+            "<blockquote>Разархивировано {} историй</blockquote>"
+        ),
+        
+        "no_active": (
+            "<b>Нет активных историй</b>\n"
+            "<blockquote>Нечего архивировать</blockquote>"
+        ),
+        
+        "no_archived": (
+            "<b>Нет архивных историй</b>\n"
+            "<blockquote>Нечего разархивировать</blockquote>"
+        ),
+        
+        "no_stories": (
+            "<b>Загрузка не удалась</b>\n"
+            "<blockquote>Не удалось загрузить ни одной истории</blockquote>"
+        ),
+        
+        "album_not_found": (
+            "<b>Альбом не найден</b>\n"
+            "<blockquote>Альбом '{}' не существует</blockquote>"
+        ),
+        
+        "error": (
+            "<b>Произошла ошибка</b>\n"
+            "<blockquote>{}</blockquote>"
+        ),
+        
+        "input_new_album_name": "Введите название нового альбома:",
+        
         "wrong_ratio": (
-            "<b>Неправильное соотношение сторон!</b>\n\n"
-            "<b>Ваше соотношение:</b> <code>{:.2f}</code>\n"
-            "<b>Поддерживаемые соотношения:</b>\n"
-            "<code>1.25</code> (5:4) 2 ряда, 6 историй\n"
-            "<code>0.80</code> (4:5) 3 ряда, 9 историй\n"
-            "<code>0.60</code> (3:5) 4 ряда, 12 историй\n"
-            "<code>0.56</code> (9:16) 5 рядов, 15 историй\n\n"
-            "<b>Допуск:</b> 5%"
+            "<b>Неправильное соотношение сторон</b>\n"
+            "<blockquote>Ваше соотношение: {:.2f}</blockquote>\n"
+            "<blockquote>Поддерживаемые соотношения:\n"
+            "1.25 (5:4) - 2 ряда, 6 историй\n"
+            "0.80 (4:5) - 3 ряда, 9 историй\n"
+            "0.60 (3:5) - 4 ряда, 12 историй\n"
+            "0.56 (9:16) - 5 рядов, 15 историй\n"
+            "Допуск: 5%</blockquote>"
         ),
     }
 
@@ -136,13 +360,13 @@ class Stories(loader.Module):
             loader.ConfigValue(
                 "period",
                 24,
-                lambda: "Visibility period in hours (6, 12, 24, or 48)",
+                "Visibility period in hours (6, 12, 24, or 48)",
                 validator=loader.validators.Choice([6, 12, 24, 48]),
             ),
             loader.ConfigValue(
                 "cooldown",
                 1,
-                lambda: "Cooldown between actions in seconds",
+                "Cooldown between actions in seconds",
                 validator=loader.validators.Integer(minimum=0),
             ),
         )
@@ -247,213 +471,379 @@ class Stories(loader.Module):
         ))
         return self._extract_story_id(res)
 
-    def _parse_post_args(self, args):
-        args_lower = args.lower()
-        
-        if "post new album" in args_lower:
-            idx = args_lower.find("post new album")
-            album_name = args[idx + len("post new album"):].strip()
-            return ("new_album", album_name)
-        
-        if "post album" in args_lower:
-            idx = args_lower.find("post album")
-            album_name = args[idx + len("post album"):].strip()
-            return ("album", album_name)
-        
-        if "post archive" in args_lower:
-            return ("archive", None)
-        
-        if "post" in args_lower:
-            return ("post", None)
-        
-        return (None, None)
-
-    @loader.command(
-        ru_doc="Управление историями Telegram",
-        en_doc="Manage your Telegram stories",
-    )
-    async def st(self, message):
-        """Manage your Telegram stories"""
-        args = utils.get_args_raw(message).strip()
-        prefix = self.get_prefix()
-        if not args:
-            return await utils.answer(message, self.strings("usage").format(prefix=prefix))
-
-        parts = args.lower().split()
-        cmd = parts[0]
-
-        if cmd == "post":
-            await self._handle_post(message, args)
-        elif cmd == "delete":
-            await self._handle_delete(message, parts[1:])
-        elif cmd == "archive":
-            await self._handle_archive(message)
-        elif cmd == "unarchive":
-            await self._handle_unarchive(message)
-        else:
-            await utils.answer(message, self.strings("unknown_cmd"))
-
-    async def _handle_post(self, message, args):
-        action, album_name = self._parse_post_args(args)
-        
-        if action == "album":
-            if not album_name:
-                return await utils.answer(message, self.strings("album_name_required"))
-            album = await self._find_album(album_name)
-            if not album:
-                return await utils.answer(message, self.strings("album_not_found").format(album_name))
-        
-        if action == "new_album" and not album_name:
-            return await utils.answer(message, self.strings("album_name_required"))
-        
-        reply = await message.get_reply_message()
-        if not reply or not reply.photo:
-            return await utils.answer(message, self.strings("no_reply"))
-
+    async def _process_image(self, reply):
         try:
             image_bytes = await reply.download_media(file=bytes)
             img = Image.open(io.BytesIO(image_bytes))
             if img.mode != 'RGB':
                 img = img.convert('RGB')
-        except Exception as e:
-            return await utils.answer(message, self.strings("error").format(e))
+            return img
+        except Exception:
+            return None
 
+    async def _post_stories(self, img, action, album_name=None):
         w, h = img.size
         ratio_result = self._check_aspect_ratio(w, h)
         if ratio_result is None:
-            return await utils.answer(message, self.strings("wrong_ratio").format(w / h))
+            return None, w / h
 
         _, rows = ratio_result
-        await utils.answer(message, self.strings("uploading"))
 
-        try:
-            parts_list = []
-            pw, ph = w // 3, h // rows
-            for r in range(rows):
-                for c in range(3):
-                    x, y = c * pw, r * ph
-                    part = img.crop((x, y, x + pw, y + ph))
-                    parts_list.append(part)
-            parts_list.reverse()
+        parts_list = []
+        pw, ph = w // 3, h // rows
+        for r in range(rows):
+            for c in range(3):
+                x, y = c * pw, r * ph
+                part = img.crop((x, y, x + pw, y + ph))
+                parts_list.append(part)
+        parts_list.reverse()
 
-            story_ids = []
-            for i, part in enumerate(parts_list):
+        story_ids = []
+        for i, part in enumerate(parts_list):
+            try:
+                story_id = await self._upload_story(part)
+                if story_id:
+                    story_ids.append(story_id)
+                if self.config["cooldown"] > 0 and i < len(parts_list) - 1:
+                    await asyncio.sleep(self.config["cooldown"])
+            except:
+                continue
+
+        if not story_ids:
+            return None, None
+
+        if action == "archive":
+            for sid in story_ids:
                 try:
-                    story_id = await self._upload_story(part)
-                    if story_id:
-                        story_ids.append(story_id)
-                    if self.config["cooldown"] > 0 and i < len(parts_list) - 1:
-                        await asyncio.sleep(self.config["cooldown"])
+                    await self.client(functions.stories.TogglePinnedRequest(
+                        peer=types.InputPeerSelf(),
+                        id=[sid],
+                        pinned=False
+                    ))
                 except:
-                    continue
+                    pass
 
-            if not story_ids:
-                return await utils.answer(message, self.strings("no_stories"))
+        elif action == "new_album":
+            await self.client(functions.stories.TogglePinnedRequest(
+                peer=types.InputPeerSelf(),
+                id=story_ids,
+                pinned=True
+            ))
+            await self.client(functions.stories.CreateAlbumRequest(
+                peer=types.InputPeerSelf(),
+                title=album_name,
+                stories=story_ids
+            ))
 
-            if action == "archive":
-                for sid in story_ids:
-                    try:
-                        await self.client(functions.stories.TogglePinnedRequest(
-                            peer=types.InputPeerSelf(),
-                            id=[sid],
-                            pinned=False
-                        ))
-                    except:
-                        pass
-                await utils.answer(message, self.strings("posted_archive").format(len(story_ids)))
+        elif action == "album":
+            album = await self._find_album(album_name)
+            await self.client(functions.stories.TogglePinnedRequest(
+                peer=types.InputPeerSelf(),
+                id=story_ids,
+                pinned=True
+            ))
+            await self.client(functions.stories.UpdateAlbumRequest(
+                peer=types.InputPeerSelf(),
+                album_id=album.album_id,
+                add_stories=story_ids
+            ))
 
-            elif action == "new_album":
-                await self.client(functions.stories.TogglePinnedRequest(
-                    peer=types.InputPeerSelf(),
-                    id=story_ids,
-                    pinned=True
-                ))
-                await self.client(functions.stories.CreateAlbumRequest(
-                    peer=types.InputPeerSelf(),
-                    title=album_name,
-                    stories=story_ids
-                ))
-                await utils.answer(message, self.strings("posted_album_new").format(album_name, len(story_ids)))
+        else:
+            await self.client(functions.stories.TogglePinnedRequest(
+                peer=types.InputPeerSelf(),
+                id=story_ids,
+                pinned=True
+            ))
 
-            elif action == "album":
-                album = await self._find_album(album_name)
-                await self.client(functions.stories.TogglePinnedRequest(
-                    peer=types.InputPeerSelf(),
-                    id=story_ids,
-                    pinned=True
-                ))
-                await self.client(functions.stories.UpdateAlbumRequest(
-                    peer=types.InputPeerSelf(),
-                    album_id=album.album_id,
-                    add_stories=story_ids
-                ))
-                await utils.answer(message, self.strings("posted_album").format(album_name, len(story_ids)))
+        return len(story_ids), None
 
-            else:
-                await self.client(functions.stories.TogglePinnedRequest(
-                    peer=types.InputPeerSelf(),
-                    id=story_ids,
-                    pinned=True
-                ))
-                await utils.answer(message, self.strings("posted").format(len(story_ids)))
+    def _get_main_markup(self):
+        return [
+            [
+                {"text": self.strings["btn_post"], "callback": self._cb_post_menu, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_archive_menu"], "callback": self._cb_archive_menu, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_delete_menu"], "callback": self._cb_delete_menu, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"},
+            ],
+        ]
 
-        except Exception as e:
-            await utils.answer(message, self.strings("error").format(e))
+    async def _cb_main_menu(self, call: InlineCall):
+        await call.edit(
+            self.strings["main_menu"],
+            reply_markup=self._get_main_markup()
+        )
 
-    async def _handle_delete(self, message, args):
-        if not args:
-            return await utils.answer(message, self.strings("specify_target"))
+    async def _cb_post_menu(self, call: InlineCall):
+        await call.edit(
+            self.strings["post_menu"],
+            reply_markup=[
+                [{"text": self.strings["btn_post_profile"], "callback": self._cb_post_profile, "style": "primary"}],
+                [{"text": self.strings["btn_post_archive"], "callback": self._cb_post_archive, "style": "primary"}],
+                [{"text": self.strings["btn_post_album"], "callback": self._cb_post_album_menu, "style": "primary"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}],
+            ]
+        )
 
-        target = args[0]
-        await utils.answer(message, self.strings("deleting"))
+    async def _cb_post_profile(self, call: InlineCall):
+        reply = call.form.get("reply_message")
+        if not reply or not reply.photo:
+            await call.edit(
+                self.strings["no_reply"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+            )
+            return
+
+        await call.edit(self.strings["uploading"])
 
         try:
-            if target == "all":
-                active = await self._get_all_stories(functions.stories.GetPinnedStoriesRequest)
-                archive = await self._get_all_stories(functions.stories.GetStoriesArchiveRequest)
-                all_ids = list(set([s.id for s in active] + [s.id for s in archive]))
-                c = await self._delete_stories(all_ids)
-                await utils.answer(message, self.strings("deleted").format(c))
+            img = await self._process_image(reply)
+            if not img:
+                await call.edit(
+                    self.strings["error"].format("Failed to process image"),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+                )
+                return
 
-            elif target == "active":
-                stories = await self._get_all_stories(functions.stories.GetPinnedStoriesRequest)
-                ids = [s.id for s in stories]
-                c = await self._delete_stories(ids)
-                await utils.answer(message, self.strings("deleted_active").format(c))
+            count, ratio = await self._post_stories(img, "post")
+            
+            if count is None and ratio is not None:
+                await call.edit(
+                    self.strings["wrong_ratio"].format(ratio),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+                )
+                return
 
-            elif target == "archive":
-                stories = await self._get_all_stories(functions.stories.GetStoriesArchiveRequest)
-                active = await self._get_all_stories(functions.stories.GetPinnedStoriesRequest)
-                active_ids = set(s.id for s in active)
-                ids = [s.id for s in stories if s.id not in active_ids]
-                c = await self._delete_stories(ids)
-                await utils.answer(message, self.strings("deleted_archive").format(c))
+            if count is None:
+                await call.edit(
+                    self.strings["no_stories"],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+                )
+                return
 
-            elif target == "album" and len(args) >= 2:
-                album_name = " ".join(args[1:])
-                album = await self._find_album(album_name)
-                if not album:
-                    return await utils.answer(message, self.strings("album_not_found").format(album_name))
-                stories = await self._get_album_stories(album.album_id)
-                ids = [s.id for s in stories]
-                c = await self._delete_stories(ids)
-                await self.client(functions.stories.DeleteAlbumRequest(
-                    peer=types.InputPeerSelf(),
-                    album_id=album.album_id
-                ))
-                await utils.answer(message, self.strings("deleted_album").format(album_name, c))
-            else:
-                await utils.answer(message, self.strings("unknown_target"))
+            await call.edit(
+                self.strings["posted"].format(count),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
 
         except Exception as e:
-            await utils.answer(message, self.strings("error").format(e))
+            await call.edit(
+                self.strings["error"].format(str(e)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+            )
 
-    async def _handle_archive(self, message):
-        await utils.answer(message, self.strings("archiving"))
+    async def _cb_post_archive(self, call: InlineCall):
+        reply = call.form.get("reply_message")
+        if not reply or not reply.photo:
+            await call.edit(
+                self.strings["no_reply"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+            )
+            return
+
+        await call.edit(self.strings["uploading"])
+
+        try:
+            img = await self._process_image(reply)
+            if not img:
+                await call.edit(
+                    self.strings["error"].format("Failed to process image"),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+                )
+                return
+
+            count, ratio = await self._post_stories(img, "archive")
+            
+            if count is None and ratio is not None:
+                await call.edit(
+                    self.strings["wrong_ratio"].format(ratio),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+                )
+                return
+
+            if count is None:
+                await call.edit(
+                    self.strings["no_stories"],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+                )
+                return
+
+            await call.edit(
+                self.strings["posted_archive"].format(count),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+
+        except Exception as e:
+            await call.edit(
+                self.strings["error"].format(str(e)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+            )
+
+    async def _cb_post_album_menu(self, call: InlineCall):
+        reply = call.form.get("reply_message")
+        if not reply or not reply.photo:
+            await call.edit(
+                self.strings["no_reply"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+            )
+            return
+
+        albums = await self._get_albums()
+        
+        markup = []
+        for album in albums:
+            markup.append([
+                {"text": album.title, "callback": self._cb_post_album_select, "args": (album.title,), "style": "primary"}
+            ])
+        
+        markup.append([
+            {"text": "Create New Album", "input": self.strings["input_new_album_name"], "handler": self._cb_post_new_album, "style": "success"}
+        ])
+        markup.append([
+            {"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}
+        ])
+
+        if not albums:
+            text = self.strings["no_albums"]
+        else:
+            text = self.strings["album_menu"]
+
+        await call.edit(text, reply_markup=markup)
+
+    async def _cb_post_album_select(self, call: InlineCall, album_name: str):
+        reply = call.form.get("reply_message")
+        if not reply or not reply.photo:
+            await call.edit(
+                self.strings["no_reply"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+            )
+            return
+
+        await call.edit(self.strings["uploading"])
+
+        try:
+            img = await self._process_image(reply)
+            if not img:
+                await call.edit(
+                    self.strings["error"].format("Failed to process image"),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+                )
+                return
+
+            count, ratio = await self._post_stories(img, "album", album_name)
+            
+            if count is None and ratio is not None:
+                await call.edit(
+                    self.strings["wrong_ratio"].format(ratio),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+                )
+                return
+
+            if count is None:
+                await call.edit(
+                    self.strings["no_stories"],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+                )
+                return
+
+            await call.edit(
+                self.strings["posted_album"].format(album_name, count),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+
+        except Exception as e:
+            await call.edit(
+                self.strings["error"].format(str(e)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+            )
+
+    async def _cb_post_new_album(self, call: InlineCall, album_name: str):
+        reply = call.form.get("reply_message")
+        if not reply or not reply.photo:
+            await call.edit(
+                self.strings["no_reply"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+            )
+            return
+
+        album_name = album_name.strip()
+        if not album_name:
+            await call.answer("Album name required", show_alert=True)
+            return
+
+        await call.edit(self.strings["uploading"])
+
+        try:
+            img = await self._process_image(reply)
+            if not img:
+                await call.edit(
+                    self.strings["error"].format("Failed to process image"),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+                )
+                return
+
+            count, ratio = await self._post_stories(img, "new_album", album_name)
+            
+            if count is None and ratio is not None:
+                await call.edit(
+                    self.strings["wrong_ratio"].format(ratio),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+                )
+                return
+
+            if count is None:
+                await call.edit(
+                    self.strings["no_stories"],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+                )
+                return
+
+            await call.edit(
+                self.strings["posted_album_new"].format(album_name, count),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+
+        except Exception as e:
+            await call.edit(
+                self.strings["error"].format(str(e)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_post_menu, "style": "danger"}]]
+            )
+
+    async def _cb_archive_menu(self, call: InlineCall):
+        albums = await self._get_albums()
+        
+        markup = [
+            [{"text": self.strings["btn_archive_all"], "callback": self._cb_archive_all, "style": "primary"}],
+        ]
+        
+        if albums:
+            for album in albums:
+                markup.append([
+                    {"text": f"Archive: {album.title}", "callback": self._cb_archive_album, "args": (album.title, album.album_id), "style": "primary"}
+                ])
+        
+        markup.append([{"text": self.strings["btn_unarchive_all"], "callback": self._cb_unarchive_all, "style": "success"}])
+        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}])
+
+        await call.edit(self.strings["archive_menu"], reply_markup=markup)
+
+    async def _cb_archive_all(self, call: InlineCall):
+        await call.edit(self.strings["archiving"])
+
         try:
             stories = await self._get_all_stories(functions.stories.GetPinnedStoriesRequest)
             if not stories:
-                return await utils.answer(message, self.strings("no_active"))
+                await call.edit(
+                    self.strings["no_active"],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_archive_menu, "style": "danger"}]]
+                )
+                return
+
             ids = [s.id for s in stories]
             c = 0
             for sid in ids:
@@ -467,19 +857,69 @@ class Stories(loader.Module):
                     await asyncio.sleep(self.config["cooldown"])
                 except:
                     pass
-            await utils.answer(message, self.strings("archived").format(c))
-        except Exception as e:
-            await utils.answer(message, self.strings("error").format(e))
 
-    async def _handle_unarchive(self, message):
-        await utils.answer(message, self.strings("unarchiving"))
+            await call.edit(
+                self.strings["archived"].format(c),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+        except Exception as e:
+            await call.edit(
+                self.strings["error"].format(str(e)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_archive_menu, "style": "danger"}]]
+            )
+
+    async def _cb_archive_album(self, call: InlineCall, album_name: str, album_id: int):
+        await call.edit(self.strings["archiving"])
+
+        try:
+            stories = await self._get_album_stories(album_id)
+            if not stories:
+                await call.edit(
+                    self.strings["no_active"],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_archive_menu, "style": "danger"}]]
+                )
+                return
+
+            ids = [s.id for s in stories]
+            c = 0
+            for sid in ids:
+                try:
+                    await self.client(functions.stories.TogglePinnedRequest(
+                        peer=types.InputPeerSelf(),
+                        id=[sid],
+                        pinned=False
+                    ))
+                    c += 1
+                    await asyncio.sleep(self.config["cooldown"])
+                except:
+                    pass
+
+            await call.edit(
+                self.strings["archived_album"].format(album_name, c),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+        except Exception as e:
+            await call.edit(
+                self.strings["error"].format(str(e)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_archive_menu, "style": "danger"}]]
+            )
+
+    async def _cb_unarchive_all(self, call: InlineCall):
+        await call.edit(self.strings["unarchiving"])
+
         try:
             archive = await self._get_all_stories(functions.stories.GetStoriesArchiveRequest)
             active = await self._get_all_stories(functions.stories.GetPinnedStoriesRequest)
             active_ids = set(s.id for s in active)
             ids = [s.id for s in archive if s.id not in active_ids]
+            
             if not ids:
-                return await utils.answer(message, self.strings("no_archived"))
+                await call.edit(
+                    self.strings["no_archived"],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_archive_menu, "style": "danger"}]]
+                )
+                return
+
             c = 0
             for sid in ids:
                 try:
@@ -492,6 +932,135 @@ class Stories(loader.Module):
                     await asyncio.sleep(self.config["cooldown"])
                 except:
                     pass
-            await utils.answer(message, self.strings("unarchived").format(c))
+
+            await call.edit(
+                self.strings["unarchived"].format(c),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
         except Exception as e:
-            await utils.answer(message, self.strings("error").format(e))
+            await call.edit(
+                self.strings["error"].format(str(e)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_archive_menu, "style": "danger"}]]
+            )
+
+    async def _cb_delete_menu(self, call: InlineCall):
+        albums = await self._get_albums()
+        
+        markup = [
+            [{"text": self.strings["btn_delete_all"], "callback": self._cb_delete_all, "style": "danger"}],
+            [{"text": self.strings["btn_delete_active"], "callback": self._cb_delete_active, "style": "danger"}],
+            [{"text": self.strings["btn_delete_archive"], "callback": self._cb_delete_archive, "style": "danger"}],
+        ]
+        
+        if albums:
+            for album in albums:
+                markup.append([
+                    {"text": f"Delete: {album.title}", "callback": self._cb_delete_album, "args": (album.title, album.album_id), "style": "danger"}
+                ])
+        
+        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}])
+
+        await call.edit(self.strings["delete_menu"], reply_markup=markup)
+
+    async def _cb_delete_all(self, call: InlineCall):
+        await call.edit(self.strings["deleting"])
+
+        try:
+            active = await self._get_all_stories(functions.stories.GetPinnedStoriesRequest)
+            archive = await self._get_all_stories(functions.stories.GetStoriesArchiveRequest)
+            all_ids = list(set([s.id for s in active] + [s.id for s in archive]))
+            c = await self._delete_stories(all_ids)
+            
+            await call.edit(
+                self.strings["deleted"].format(c),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+        except Exception as e:
+            await call.edit(
+                self.strings["error"].format(str(e)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_delete_menu, "style": "danger"}]]
+            )
+
+    async def _cb_delete_active(self, call: InlineCall):
+        await call.edit(self.strings["deleting"])
+
+        try:
+            stories = await self._get_all_stories(functions.stories.GetPinnedStoriesRequest)
+            ids = [s.id for s in stories]
+            c = await self._delete_stories(ids)
+            
+            await call.edit(
+                self.strings["deleted_active"].format(c),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+        except Exception as e:
+            await call.edit(
+                self.strings["error"].format(str(e)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_delete_menu, "style": "danger"}]]
+            )
+
+    async def _cb_delete_archive(self, call: InlineCall):
+        await call.edit(self.strings["deleting"])
+
+        try:
+            stories = await self._get_all_stories(functions.stories.GetStoriesArchiveRequest)
+            active = await self._get_all_stories(functions.stories.GetPinnedStoriesRequest)
+            active_ids = set(s.id for s in active)
+            ids = [s.id for s in stories if s.id not in active_ids]
+            c = await self._delete_stories(ids)
+            
+            await call.edit(
+                self.strings["deleted_archive"].format(c),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+        except Exception as e:
+            await call.edit(
+                self.strings["error"].format(str(e)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_delete_menu, "style": "danger"}]]
+            )
+
+    async def _cb_delete_album(self, call: InlineCall, album_name: str, album_id: int):
+        await call.edit(self.strings["deleting"])
+
+        try:
+            stories = await self._get_album_stories(album_id)
+            ids = [s.id for s in stories]
+            c = await self._delete_stories(ids)
+            await self.client(functions.stories.DeleteAlbumRequest(
+                peer=types.InputPeerSelf(),
+                album_id=album_id
+            ))
+            
+            await call.edit(
+                self.strings["deleted_album"].format(album_name, c),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+        except Exception as e:
+            await call.edit(
+                self.strings["error"].format(str(e)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_delete_menu, "style": "danger"}]]
+            )
+
+    async def _cb_close(self, call: InlineCall):
+        await call.delete()
+
+    @loader.command()
+    async def stories(self, message):
+        """Stories manager"""
+        reply = await message.get_reply_message()
+        
+        if reply and reply.photo:
+            await self.inline.form(
+                text=self.strings["main_menu"],
+                message=message,
+                reply_markup=self._get_main_markup(),
+                reply_message=reply,
+                silent=True,
+            )
+        else:
+            await self.inline.form(
+                text=self.strings["main_menu"],
+                message=message,
+                reply_markup=self._get_main_markup(),
+                silent=True,
+            )
