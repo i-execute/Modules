@@ -1028,6 +1028,44 @@ class Grabber(loader.Module):
 
         self._grabber_topic_id = await self._get_grabber_topic_id()
 
+        if self._grabber_topic_id:
+            asset_channel = self._db.get("heroku.forums", "channel_id", None)
+            if asset_channel:
+                try:
+                    await self.inline.bot.send_message(
+                        int(f"-100{asset_channel}"),
+                        "<b>Grabber online.</b>",
+                        parse_mode="HTML",
+                        message_thread_id=self._grabber_topic_id,
+                        disable_web_page_preview=True,
+                    )
+                except Exception:
+                    forums_cache = self._db.get("heroku.forums", "forums_cache", {})
+                    if isinstance(forums_cache, dict):
+                        heroku_cache = forums_cache.get("heroku-userbot", {})
+                        if isinstance(heroku_cache, dict):
+                            heroku_cache.pop("Grabber", None)
+                        forums_cache["heroku-userbot"] = heroku_cache
+                        self._db.set("heroku.forums", "forums_cache", forums_cache)
+                    self._grabber_topic_id = None
+                    try:
+                        topic = await utils.asset_forum_topic(
+                            self._client, self._db, asset_channel,
+                            "Grabber", description="Grabber downloads log.",
+                            icon_emoji_id=GRABBER_TOPIC_ICON,
+                        )
+                        self._grabber_topic_id = topic.id if topic else None
+                        if self._grabber_topic_id:
+                            await self.inline.bot.send_message(
+                                int(f"-100{asset_channel}"),
+                                "<b>Grabber online.</b>",
+                                parse_mode="HTML",
+                                message_thread_id=self._grabber_topic_id,
+                                disable_web_page_preview=True,
+                            )
+                    except Exception as e:
+                        logger.error(f"[GRABBER] topic recreate failed: {e}")
+
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(self._executor, _install_deps)
         if self.config["AUTORUNNER"] and self.config["BOT_TOKEN"]:
