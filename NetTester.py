@@ -29,7 +29,7 @@ class NetTester(loader.Module):
         "name": "NetTester",
         
         "main_menu": (
-            "<b>Network Testing Suite</b>\n\n"
+            "<b>Network Testing Suite</b>\n"
             "Select test type:"
         ),
         
@@ -103,7 +103,7 @@ class NetTester(loader.Module):
 
     strings_ru = {
         "main_menu": (
-            "<b>Набор сетевых тестов</b>\n\n"
+            "<b>Набор сетевых тестов</b>\n"
             "Выберите тип теста:"
         ),
         

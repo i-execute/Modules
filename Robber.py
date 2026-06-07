@@ -46,7 +46,7 @@ class Robber(loader.Module):
         "name": "Robber",
         
         "main_menu": (
-            "<b>Robber - Channel & Content Stealer</b>\n\n"
+            "<b>Robber - Channel & Content Stealer</b>\n"
             "Select operation:"
         ),
         
@@ -99,7 +99,7 @@ class Robber(loader.Module):
 
     strings_ru = {
         "main_menu": (
-            "<b>Robber - Копировщик каналов и контента</b>\n\n"
+            "<b>Robber - Копировщик каналов и контента</b>\n"
             "Выберите операцию:"
         ),
         
