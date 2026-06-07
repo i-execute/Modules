@@ -358,7 +358,7 @@ class Grabber(loader.Module):
         "btn_retry": "Retry",
         "no_token": (
             "<b>Bot token not set!</b>\n"
-            "Use: <code>{prefix}grab token [token]</code>"
+            "<blockquote>Use: <code>{prefix}grab token [token]</code></blockquote>"
         ),
         "token_stored": (
             "<b>Token saved!</b>\n"
@@ -371,46 +371,49 @@ class Grabber(loader.Module):
         "need_token": "<b>Specify token or reply to message with it!</b>",
         "already_running": "<b>Already running!</b>",
         "not_running": "<b>Bot not running!</b>",
-        "start_failed": "<b>Start error:</b>\n<code>{error}</code>\nUse <code>{prefix}unextarnal Grabber</code> to reload.",
+        "start_failed": (
+            "<b>Start error:</b>\n"
+            "<blockquote><code>{error}</code>\nUse <code>{prefix}unextarnal Grabber</code> to reload.</blockquote>"
+        ),
         "reboot_start": "<b>REBOOT...</b>",
         "reboot_done": "<b>Reboot complete!</b>",
         "reboot_no_token": "<b>No token for restart!</b>",
         "clear_done": "<b>Factory reset complete!</b>",
         "cookie_saved": "<b>Cookies saved!</b>",
         "cookie_cleared": "<b>Cookies deleted!</b>",
-        "cookie_empty": "<b>Cookies not set.</b>",
-        "cookie_ok": "<b>Cookies installed</b>",
+        "cookie_empty": "Not set",
+        "cookie_ok": "Installed",
         "no_reply_file": "<b>Reply to .txt file with cookies!</b>",
         "invalid_ext": "<b>File must have .txt extension!</b>",
-        "cookie_err": "<b>Cookie save error:</b>\n<code>{}</code>",
-        "cookie_invalid_format": "<b>Invalid cookie format! Expected Netscape format.</b>",
+        "cookie_err": "<b>Cookie save error:</b>\n<blockquote><code>{}</code></blockquote>",
+        "cookie_invalid_format": "<b>Invalid cookie format!</b>\n<blockquote>Expected Netscape format.</blockquote>",
         "status_template": (
-            "<b>Grabber Status</b>\n\n"
-            "Status: {status}\n"
-            "Cookies: {cookies}\n"
-            "In queue: {pending}\n"
-            "Active tasks: {active}\n"
-            "Completed: {completed}\n"
-            "Errors: {errors}"
+            "<b>Grabber Status</b>\n"
+            "<blockquote><b>Status:</b> {status}\n"
+            "<b>Cookies:</b> {cookies}\n"
+            "<b>In queue:</b> {pending}\n"
+            "<b>Active tasks:</b> {active}\n"
+            "<b>Completed:</b> {completed}\n"
+            "<b>Errors:</b> {errors}</blockquote>"
         ),
         "status_running": "Running",
         "status_stopped": "Stopped",
         "no_active_process": "<b>No active process</b>",
         "analyzing": "<b>Analyzing...</b>",
-        "found_media": "<b>{title}</b>\n\nDuration: {duration}\nSelect format:",
-        "found_media_group": "<b>{title}</b>\n\nDuration: {duration}",
-        "grab_failed": "<b>ATTENTION:</b>\n<code>{error}</code>",
+        "found_media": "<b>{title}</b>\n<blockquote><b>Duration:</b> {duration}\nSelect format:</blockquote>",
+        "found_media_group": "<b>{title}</b>\n<blockquote><b>Duration:</b> {duration}</blockquote>",
+        "grab_failed": "<b>Error</b>\n<blockquote><code>{error}</code></blockquote>",
         "queue_pos": "<b>Queue: #{pos}</b>",
         "starting": "<b>Starting download!</b>",
-        "too_large_bot": "<b>File too large for bot API ({size_mb:.1f} MB). Uploading via userbot...</b>",
-        "too_large_no_premium": "<b>File too large ({size_mb:.1f} MB). Telegram Premium required on userbot account.</b>",
-        "too_large_over_limit": "<b>File too large ({size_mb:.1f} MB). Max is 4096 MB.</b>",
+        "too_large_bot": "<b>File too large for bot API</b>\n<blockquote>{size_mb:.1f} MB — uploading via userbot...</blockquote>",
+        "too_large_no_premium": "<b>File too large</b>\n<blockquote>{size_mb:.1f} MB — Telegram Premium required on userbot account.</blockquote>",
+        "too_large_over_limit": "<b>File too large</b>\n<blockquote>{size_mb:.1f} MB — max is 4096 MB.</blockquote>",
         "cancelled": "<b>Cancelled</b>",
         "already_processing": "Already processing!",
-        "hello": "<b>Hello, {user_link}!</b>\n\nSend a video link!",
-        "hello_fallback": "<b>Hello!</b>\n\nSend a video link!",
-        "hello_group": "<b>Bot activated in this group!</b>\n\nSend video links.",
-        "hello_topic": "<b>Bot activated in this topic!</b>\n\nSend video links.",
+        "hello": "<b>Hello, {user_link}!</b>\n<blockquote>Send a video link!</blockquote>",
+        "hello_fallback": "<b>Hello!</b>\n<blockquote>Send a video link!</blockquote>",
+        "hello_group": "<b>Bot activated in this group!</b>\n<blockquote>Send video links.</blockquote>",
+        "hello_topic": "<b>Bot activated in this topic!</b>\n<blockquote>Send video links.</blockquote>",
         "hello_group_off": "<b>Bot deactivated in this group.</b>",
         "hello_topic_off": "<b>Bot deactivated in this topic.</b>",
         "file_caption": (
@@ -443,18 +446,17 @@ class Grabber(loader.Module):
         "stage_done_success": "Successfully uploaded!",
         "time_stage": "Time: {elapsed:.1f}s | {stage_text}",
         "audio_menu": "<b>Select option:</b>",
-        "editor_mode": "<b>Editor mode!</b>\n\nSend TRACK NAME:",
-        "edit_title_done": "Title: <b>{}</b>\n\nNow enter ARTIST name:",
-        "edit_artist_done": "Artist: <b>{}</b>\n\nNow send COVER (PNG/JPEG as FILE!):",
+        "editor_mode": "<b>Editor mode</b>\n<blockquote>Send TRACK NAME:</blockquote>",
+        "edit_title_done": "<b>Title:</b> {}\n<blockquote>Now enter ARTIST name:</blockquote>",
+        "edit_artist_done": "<b>Artist:</b> {}\n<blockquote>Now send COVER (PNG/JPEG as FILE!):</blockquote>",
         "only_image": "<b>Only PNG or JPEG as FILE!</b>",
         "downloading_image": "<b>Downloading image...</b>",
         "text_needed_image": "<b>Need PNG/JPEG file, not text!</b>",
         "confirm_menu": (
-            "<b>Check data:</b>\n\n"
-            "Track: {title}\n"
-            "Artist: {artist}\n"
-            "Cover: {thumb}\n\n"
-            "All correct?"
+            "<b>Check data:</b>\n"
+            "<blockquote><b>Track:</b> {title}\n"
+            "<b>Artist:</b> {artist}\n"
+            "<b>Cover:</b> {thumb}</blockquote>"
         ),
         "thumb_yes": "Yes",
         "thumb_no": "No",
@@ -473,22 +475,40 @@ class Grabber(loader.Module):
             "<code>{prefix}grab cookies remove</code> - Remove cookies\n"
             "<code>{prefix}grab status</code> - Status\n"
         ),
-        "log_processing": "<b>Processing:</b> {title}\nFrom: {user}\nURL: <code>{url}</code>",
+        "log_processing": "<b>Processing:</b> {title}\n<blockquote>From: {user}\nURL: <code>{url}</code></blockquote>",
         "log_done": "<b>Done:</b> {title} | {size_mb:.1f} MB",
-        "log_error": "<b>Error:</b> {title}\n<code>{error}</code>",
-        "log_large": "<b>Large file ({size_mb:.1f} MB), uploading via userbot...</b>",
+        "log_error": "<b>Error:</b> {title}\n<blockquote><code>{error}</code></blockquote>",
+        "log_large": "<b>Large file ({size_mb:.1f} MB)</b>\n<blockquote>Uploading via userbot...</blockquote>",
         "main_menu": (
-            "<b>Grabber</b>\n\n"
-            "Status: {status}\n"
-            "Token: {token}\n"
-            "Cookies: {cookies}\n"
-            "Queue: {pending} | Active: {active}\n"
-            "Done: {completed} | Errors: {errors}"
+            "<b>Grabber</b>\n"
+            "<blockquote><b>Status:</b> {status}\n"
+            "<b>Token:</b> {token}\n"
+            "<b>Cookies:</b> {cookies}\n"
+            "<b>Queue:</b> {pending} | <b>Active:</b> {active}\n"
+            "<b>Done:</b> {completed} | <b>Errors:</b> {errors}</blockquote>"
         ),
-        "token_menu": "<b>Token</b>\n\nSet bot token below:",
-        "cookies_menu": "<b>Cookies</b>\n\nStatus: {status}",
-        "clear_confirm": "<b>Factory reset?</b>\n\nAll data will be deleted.",
+        "token_menu": "<b>Token</b>\n<blockquote>Set bot token below:</blockquote>",
+        "clear_confirm": "<b>Factory reset?</b>\n<blockquote>All data will be deleted.</blockquote>",
+        "cookies_menu": "<b>Cookies</b>\n<blockquote><b>File:</b> {file_status}\n<b>Active:</b> {enabled}</blockquote>",
         "btn_status": "Refresh",
+        "btn_settings": "Settings",
+        "settings_menu": (
+            "<b>Settings</b>\n"
+            "<blockquote><b>Workers:</b> {workers}\n"
+            "<b>Max file:</b> {max_file} MB\n"
+            "<b>Update interval:</b> {delay}s\n"
+            "<b>Autostart:</b> {autostart}</blockquote>"
+        ),
+        "btn_workers": "Workers: {val}",
+        "btn_max_file": "Max file: {val} MB",
+        "btn_delay": "Interval: {val}s",
+        "btn_autostart": "Autostart: {val}",
+        "input_workers": "Enter number of workers (1-10):",
+        "input_max_file": "Enter max file size in MB (50-4096):",
+        "input_delay": "Enter update interval in seconds (1-30):",
+        "setting_saved": "Saved! Will apply after current task finishes.",
+        "setting_saved_instant": "Saved!",
+        "setting_invalid": "Invalid value!",
         "btn_token": "Token",
         "btn_cookies": "Cookies",
         "btn_reboot": "Reboot",
@@ -498,6 +518,7 @@ class Grabber(loader.Module):
         "btn_stop": "Stop",
         "btn_set_token": "Set token",
         "btn_remove_cookies": "Remove cookies",
+        "btn_toggle_cookies": "Cookies: {val}",
         "btn_confirm_reboot": "Confirm",
         "btn_confirm_clear": "Confirm reset",
         "input_token": "Paste bot token:",
@@ -519,7 +540,7 @@ class Grabber(loader.Module):
         "btn_retry": "Заново",
         "no_token": (
             "<b>Токен бота не задан!</b>\n"
-            "Используй: <code>{prefix}grab token [токен]</code>"
+            "<blockquote>Используй: <code>{prefix}grab token [токен]</code></blockquote>"
         ),
         "token_stored": (
             "<b>Токен сохранён!</b>\n"
@@ -532,46 +553,49 @@ class Grabber(loader.Module):
         "need_token": "<b>Укажи токен или ответь на сообщение с ним!</b>",
         "already_running": "<b>Уже запущен!</b>",
         "not_running": "<b>Бот не запущен!</b>",
-        "start_failed": "<b>Ошибка запуска:</b>\n<code>{error}</code>\nИспользуй <code>{prefix}unextarnal Grabber</code>.",
+        "start_failed": (
+            "<b>Ошибка запуска:</b>\n"
+            "<blockquote><code>{error}</code>\nИспользуй <code>{prefix}unextarnal Grabber</code>.</blockquote>"
+        ),
         "reboot_start": "<b>ПЕРЕЗАГРУЗКА...</b>",
         "reboot_done": "<b>Перезагрузка завершена!</b>",
         "reboot_no_token": "<b>Нет токена для перезапуска!</b>",
         "clear_done": "<b>Сброс к заводским настройкам!</b>",
         "cookie_saved": "<b>Куки сохранены!</b>",
         "cookie_cleared": "<b>Куки удалены!</b>",
-        "cookie_empty": "<b>Куки не установлены.</b>",
-        "cookie_ok": "<b>Куки установлены</b>",
+        "cookie_empty": "Не установлены",
+        "cookie_ok": "Установлены",
         "no_reply_file": "<b>Ответь на .txt файл с куки!</b>",
         "invalid_ext": "<b>Файл должен иметь расширение .txt!</b>",
-        "cookie_err": "<b>Ошибка сохранения куки:</b>\n<code>{}</code>",
-        "cookie_invalid_format": "<b>Неверный формат куки! Ожидается формат Netscape.</b>",
+        "cookie_err": "<b>Ошибка сохранения куки:</b>\n<blockquote><code>{}</code></blockquote>",
+        "cookie_invalid_format": "<b>Неверный формат куки!</b>\n<blockquote>Ожидается формат Netscape.</blockquote>",
         "status_template": (
-            "<b>Статус Grabber</b>\n\n"
-            "Статус: {status}\n"
-            "Куки: {cookies}\n"
-            "В очереди: {pending}\n"
-            "Активно задач: {active}\n"
-            "Завершено: {completed}\n"
-            "Ошибки: {errors}"
+            "<b>Статус Grabber</b>\n"
+            "<blockquote><b>Статус:</b> {status}\n"
+            "<b>Куки:</b> {cookies}\n"
+            "<b>В очереди:</b> {pending}\n"
+            "<b>Активно задач:</b> {active}\n"
+            "<b>Завершено:</b> {completed}\n"
+            "<b>Ошибки:</b> {errors}</blockquote>"
         ),
         "status_running": "Работает",
         "status_stopped": "Остановлен",
         "no_active_process": "<b>Нет активного процесса</b>",
         "analyzing": "<b>Анализ...</b>",
-        "found_media": "<blockquote><b>{title}</b></blockquote>\nДлительность: {duration}\nВыберите формат:",
-        "found_media_group": "<blockquote><b>{title}</b></blockquote>\nДлительность: {duration}",
-        "grab_failed": "<b>ATTENTION:</b>\n<code>{error}</code>",
+        "found_media": "<b>{title}</b>\n<blockquote><b>Длительность:</b> {duration}\nВыберите формат:</blockquote>",
+        "found_media_group": "<b>{title}</b>\n<blockquote><b>Длительность:</b> {duration}</blockquote>",
+        "grab_failed": "<b>Ошибка</b>\n<blockquote><code>{error}</code></blockquote>",
         "queue_pos": "<b>Очередь: #{pos}</b>",
         "starting": "<b>Начинаю загрузку!</b>",
-        "too_large_bot": "<b>Файл слишком большой для bot API ({size_mb:.1f} МБ). Загружаю через юзербот...</b>",
-        "too_large_no_premium": "<b>Файл слишком большой ({size_mb:.1f} МБ). Нужен Telegram Premium на аккаунте юзербота.</b>",
-        "too_large_over_limit": "<b>Файл слишком большой ({size_mb:.1f} МБ). Максимум 4096 МБ.</b>",
+        "too_large_bot": "<b>Файл слишком большой для bot API</b>\n<blockquote>{size_mb:.1f} МБ — загружаю через юзербот...</blockquote>",
+        "too_large_no_premium": "<b>Файл слишком большой</b>\n<blockquote>{size_mb:.1f} МБ — нужен Telegram Premium на аккаунте юзербота.</blockquote>",
+        "too_large_over_limit": "<b>Файл слишком большой</b>\n<blockquote>{size_mb:.1f} МБ — максимум 4096 МБ.</blockquote>",
         "cancelled": "<b>Отменено</b>",
         "already_processing": "Уже обрабатывается!",
-        "hello": "<b>Привет, {user_link}!</b>\n\nОтправь ссылку на видео!",
-        "hello_fallback": "<b>Привет!</b>\n\nОтправь ссылку на видео!",
-        "hello_group": "<b>Бот активирован в этой группе!</b>\n\nОтправляйте ссылки на видео.",
-        "hello_topic": "<b>Бот активирован в этом топике!</b>\n\nОтправляйте ссылки на видео.",
+        "hello": "<b>Привет, {user_link}!</b>\n<blockquote>Отправь ссылку на видео!</blockquote>",
+        "hello_fallback": "<b>Привет!</b>\n<blockquote>Отправь ссылку на видео!</blockquote>",
+        "hello_group": "<b>Бот активирован в этой группе!</b>\n<blockquote>Отправляйте ссылки на видео.</blockquote>",
+        "hello_topic": "<b>Бот активирован в этом топике!</b>\n<blockquote>Отправляйте ссылки на видео.</blockquote>",
         "hello_group_off": "<b>Бот деактивирован в этой группе.</b>",
         "hello_topic_off": "<b>Бот деактивирован в этом топике.</b>",
         "file_caption": (
@@ -608,18 +632,17 @@ class Grabber(loader.Module):
         "stage_done_success": "Успешно загружено!",
         "time_stage": "Время: {elapsed:.1f}с | {stage_text}",
         "audio_menu": "<b>Выберите вариант:</b>",
-        "editor_mode": "<b>Режим редактора!</b>\n\nОтправьте НАЗВАНИЕ ТРЕКА:",
-        "edit_title_done": "Название: <b>{}</b>\n\nТеперь введите ИМЯ АРТИСТА:",
-        "edit_artist_done": "Артист: <b>{}</b>\n\nТеперь отправьте ОБЛОЖКУ (PNG/JPEG как ФАЙЛ!):",
+        "editor_mode": "<b>Режим редактора</b>\n<blockquote>Отправьте НАЗВАНИЕ ТРЕКА:</blockquote>",
+        "edit_title_done": "<b>Название:</b> {}\n<blockquote>Теперь введите ИМЯ АРТИСТА:</blockquote>",
+        "edit_artist_done": "<b>Артист:</b> {}\n<blockquote>Теперь отправьте ОБЛОЖКУ (PNG/JPEG как ФАЙЛ!):</blockquote>",
         "only_image": "<b>Только PNG или JPEG как ФАЙЛ!</b>",
         "downloading_image": "<b>Загрузка изображения...</b>",
         "text_needed_image": "<b>Нужен PNG/JPEG файл, не текст!</b>",
         "confirm_menu": (
-            "<b>Проверьте данные:</b>\n\n"
-            "Трек: {title}\n"
-            "Артист: {artist}\n"
-            "Обложка: {thumb}\n\n"
-            "Всё верно?"
+            "<b>Проверьте данные:</b>\n"
+            "<blockquote><b>Трек:</b> {title}\n"
+            "<b>Артист:</b> {artist}\n"
+            "<b>Обложка:</b> {thumb}</blockquote>"
         ),
         "thumb_yes": "Да",
         "thumb_no": "Нет",
@@ -638,22 +661,40 @@ class Grabber(loader.Module):
             "<code>{prefix}grab cookies remove</code> - Удалить куки\n"
             "<code>{prefix}grab status</code> - Статус\n"
         ),
-        "log_processing": "<b>Обработка:</b> {title}\nОт: {user}\nURL: <code>{url}</code>",
+        "log_processing": "<b>Обработка:</b> {title}\n<blockquote>От: {user}\nURL: <code>{url}</code></blockquote>",
         "log_done": "<b>Готово:</b> {title} | {size_mb:.1f} MB",
-        "log_error": "<b>Ошибка:</b> {title}\n<code>{error}</code>",
-        "log_large": "<b>Большой файл ({size_mb:.1f} МБ), загружаю через юзербот...</b>",
+        "log_error": "<b>Ошибка:</b> {title}\n<blockquote><code>{error}</code></blockquote>",
+        "log_large": "<b>Большой файл ({size_mb:.1f} МБ)</b>\n<blockquote>Загружаю через юзербот...</blockquote>",
         "main_menu": (
-            "<b>Grabber</b>\n\n"
-            "Статус: {status}\n"
-            "Токен: {token}\n"
-            "Куки: {cookies}\n"
-            "Очередь: {pending} | Активно: {active}\n"
-            "Готово: {completed} | Ошибки: {errors}"
+            "<b>Grabber</b>\n"
+            "<blockquote><b>Статус:</b> {status}\n"
+            "<b>Токен:</b> {token}\n"
+            "<b>Куки:</b> {cookies}\n"
+            "<b>Очередь:</b> {pending} | <b>Активно:</b> {active}\n"
+            "<b>Готово:</b> {completed} | <b>Ошибки:</b> {errors}</blockquote>"
         ),
-        "token_menu": "<b>Токен</b>\n\nВведи токен бота:",
-        "cookies_menu": "<b>Куки</b>\n\nСтатус: {status}",
-        "clear_confirm": "<b>Сброс к заводским?</b>\n\nВсе данные будут удалены.",
+        "token_menu": "<b>Токен</b>\n<blockquote>Введи токен бота:</blockquote>",
+        "cookies_menu": "<b>Куки</b>\n<blockquote><b>Файл:</b> {file_status}\n<b>Активны:</b> {enabled}</blockquote>",
+        "clear_confirm": "<b>Сброс к заводским?</b>\n<blockquote>Все данные будут удалены.</blockquote>",
         "btn_status": "Обновить",
+        "btn_settings": "Настройки",
+        "settings_menu": (
+            "<b>Настройки</b>\n"
+            "<blockquote><b>Воркеры:</b> {workers}\n"
+            "<b>Макс. файл:</b> {max_file} МБ\n"
+            "<b>Интервал обновления:</b> {delay}с\n"
+            "<b>Автозапуск:</b> {autostart}</blockquote>"
+        ),
+        "btn_workers": "Воркеры: {val}",
+        "btn_max_file": "Макс. файл: {val} МБ",
+        "btn_delay": "Интервал: {val}с",
+        "btn_autostart": "Автозапуск: {val}",
+        "input_workers": "Введи количество воркеров (1-10):",
+        "input_max_file": "Введи максимальный размер файла в МБ (50-4096):",
+        "input_delay": "Введи интервал обновления в секундах (1-30):",
+        "setting_saved": "Сохранено! Применится после завершения текущей задачи.",
+        "setting_saved_instant": "Сохранено!",
+        "setting_invalid": "Недопустимое значение!",
         "btn_token": "Токен",
         "btn_cookies": "Куки",
         "btn_reboot": "Перезагрузка",
@@ -663,6 +704,7 @@ class Grabber(loader.Module):
         "btn_stop": "Стоп",
         "btn_set_token": "Установить токен",
         "btn_remove_cookies": "Удалить куки",
+        "btn_toggle_cookies": "Куки: {val}",
         "btn_confirm_reboot": "Подтвердить",
         "btn_confirm_clear": "Подтвердить сброс",
         "input_token": "Вставьте токен бота:",
@@ -679,30 +721,6 @@ class Grabber(loader.Module):
                 validator=loader.validators.Hidden(),
             ),
             loader.ConfigValue(
-                "AUTORUNNER",
-                False,
-                "Auto-start bot on module load",
-                validator=loader.validators.Boolean(),
-            ),
-            loader.ConfigValue(
-                "MAX_FILE_MB",
-                2000,
-                "Max file size in MB (>2000 sent via userbot if premium)",
-                validator=loader.validators.Integer(minimum=50, maximum=4096),
-            ),
-            loader.ConfigValue(
-                "MAX_WORKERS",
-                1,
-                "Number of parallel download workers",
-                validator=loader.validators.Integer(minimum=1, maximum=10),
-            ),
-            loader.ConfigValue(
-                "ACTION_DELAY",
-                3,
-                "Progress message update interval in seconds",
-                validator=loader.validators.Integer(minimum=1, maximum=30),
-            ),
-            loader.ConfigValue(
                 "ACTIVE_GROUPS",
                 [],
                 "Groups where bot is active (managed automatically)",
@@ -714,6 +732,14 @@ class Grabber(loader.Module):
                 "Topics where bot is active (managed automatically)",
             ),
         )
+
+        self._settings_defaults = {
+            "AUTORUNNER": False,
+            "MAX_FILE_MB": 2000,
+            "MAX_WORKERS": 1,
+            "ACTION_DELAY": 3,
+            "COOKIES_ENABLED": True,
+        }
 
         self._bot = None
         self._running = False
@@ -732,6 +758,7 @@ class Grabber(loader.Module):
         self._lock = asyncio.Lock()
         self._edit_lock = asyncio.Lock()
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        self._active_worker_count = 0
         self._active_processes = []
 
         self._edit_state = {}
@@ -741,6 +768,40 @@ class Grabber(loader.Module):
         self._current_downloads = {}
         self._og_cache = {}
         self._grabber_topic_id = None
+
+    def _get_setting(self, key):
+        val = self._db.get("Grabber", f"setting_{key}", None)
+        if val is None:
+            return self._settings_defaults[key]
+        return val
+
+    def _set_setting(self, key, value):
+        self._db.set("Grabber", f"setting_{key}", value)
+
+    async def _apply_settings_now(self):
+        if not self._running:
+            return
+        num_workers = max(1, self._get_setting("MAX_WORKERS"))
+        current_workers = len(self._worker_tasks)
+        if num_workers == current_workers:
+            return
+        for t in self._worker_tasks:
+            t.cancel()
+            try:
+                await t
+            except Exception:
+                pass
+        self._worker_tasks.clear()
+        try:
+            self._executor.shutdown(wait=False)
+        except Exception:
+            pass
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=num_workers)
+        self._worker_tasks = [asyncio.create_task(self._queue_worker()) for _ in range(num_workers)]
+
+    async def _apply_settings_deferred_or_now(self):
+        if self._active_worker_count == 0:
+            await self._apply_settings_now()
 
     def _empty_progress(self):
         return {
@@ -915,7 +976,7 @@ class Grabber(loader.Module):
         self._clean_session()
         self._clean_cookies()
         self.config["BOT_TOKEN"] = ""
-        self.config["AUTORUNNER"] = False
+        self._set_setting("AUTORUNNER", False)
         self.config["ACTIVE_GROUPS"] = []
         self.config["ACTIVE_TOPICS"] = {}
         self._active_groups.clear()
@@ -1068,7 +1129,7 @@ class Grabber(loader.Module):
 
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(self._executor, _install_deps)
-        if self.config["AUTORUNNER"] and self.config["BOT_TOKEN"]:
+        if self._get_setting("AUTORUNNER") and self.config["BOT_TOKEN"]:
             try:
                 await self._launch(self.config["BOT_TOKEN"])
             except Exception as e:
@@ -1118,10 +1179,10 @@ class Grabber(loader.Module):
             "created": time.strftime("%Y-%m-%d %H:%M:%S"),
             "bot": {"BOT_TOKEN": self.config["BOT_TOKEN"]},
             "settings": {
-                "AUTORUNNER": self.config["AUTORUNNER"],
-                "MAX_FILE_MB": self.config["MAX_FILE_MB"],
-                "MAX_WORKERS": self.config["MAX_WORKERS"],
-                "ACTION_DELAY": self.config["ACTION_DELAY"],
+                "AUTORUNNER": self._get_setting("AUTORUNNER"),
+                "MAX_FILE_MB": self._get_setting("MAX_FILE_MB"),
+                "MAX_WORKERS": self._get_setting("MAX_WORKERS"),
+                "ACTION_DELAY": self._get_setting("ACTION_DELAY"),
             },
             "groups": {
                 "active_groups": list(self._active_groups),
@@ -1144,7 +1205,7 @@ class Grabber(loader.Module):
             for k, t in [("AUTORUNNER", bool), ("MAX_FILE_MB", int),
                           ("MAX_WORKERS", int), ("ACTION_DELAY", int)]:
                 if k in settings:
-                    self.config[k] = t(settings[k])
+                    self._set_setting(k, t(settings[k]))
             if "active_groups" in groups:
                 self._active_groups = set(groups["active_groups"])
                 self._save_active_groups()
@@ -1185,13 +1246,14 @@ class Grabber(loader.Module):
             ],
             [
                 {"text": self.strings["btn_cookies"], "callback": self._cb_cookies_menu, "style": "primary"},
+                {"text": self.strings["btn_settings"], "callback": self._cb_settings_menu, "style": "primary"},
+            ],
+            [
                 {"text": self.strings["btn_reboot"], "callback": self._cb_reboot, "style": "primary"},
-            ],
-            [
                 start_stop,
-                {"text": self.strings["btn_clear"], "callback": self._cb_clear_confirm, "style": "danger"},
             ],
             [
+                {"text": self.strings["btn_clear"], "callback": self._cb_clear_confirm, "style": "danger"},
                 {"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"},
             ],
         ]
@@ -1201,8 +1263,13 @@ class Grabber(loader.Module):
         """Grabber management"""
         reply = await message.get_reply_message()
         token = None
-        if reply and reply.text:
-            token = self._extract_bot_token(reply.text)
+        if reply:
+            try:
+                reply_text = reply.text
+            except Exception:
+                reply_text = None
+            if reply_text:
+                token = self._extract_bot_token(reply_text)
         if token:
             await self._do_set_token_msg(message, token)
             return
@@ -1254,7 +1321,7 @@ class Grabber(loader.Module):
             await self._launch(token)
             bot_me = await self._bot.get_me()
             connect_line = f"bot: @{bot_me.username} ({bot_me.id}): OK"
-            self.config["AUTORUNNER"] = True
+            self._set_setting("AUTORUNNER", True)
             await self._create_backup()
             full_log = connect_line + "\n" + dep_log
             await self._safe_edit(msg, self.strings["token_started"].format(
@@ -1295,7 +1362,7 @@ class Grabber(loader.Module):
             await self._launch(token)
             bot_me = await self._bot.get_me()
             connect_line = f"bot: @{bot_me.username} ({bot_me.id}): OK"
-            self.config["AUTORUNNER"] = True
+            self._set_setting("AUTORUNNER", True)
             await self._create_backup()
             full_log = connect_line + "\n" + dep_log
             await call.edit(
@@ -1310,8 +1377,15 @@ class Grabber(loader.Module):
 
     async def _cb_cookies_menu(self, call):
         has_cookies = bool(self._cookie_path and os.path.exists(self._cookie_path))
+        enabled = self._get_setting("COOKIES_ENABLED") if has_cookies else False
+        file_status = self.strings["cookie_ok"] if has_cookies else self.strings["cookie_empty"]
+        enabled_str = "On" if enabled else "Off"
         markup = []
         if has_cookies:
+            markup.append([
+                {"text": self.strings["btn_toggle_cookies"].format(val=enabled_str),
+                 "callback": self._cb_toggle_cookies, "style": "success" if enabled else "danger"},
+            ])
             markup.append([
                 {"text": self.strings["btn_remove_cookies"], "callback": self._cb_remove_cookies, "style": "danger"},
             ])
@@ -1320,16 +1394,106 @@ class Grabber(loader.Module):
         ])
         await call.edit(
             text=self.strings["cookies_menu"].format(
-                status=self.strings["cookie_ok"] if has_cookies else self.strings["cookie_empty"]
+                file_status=file_status,
+                enabled="On" if enabled else "Off",
             ),
             reply_markup=markup,
         )
 
+    async def _cb_toggle_cookies(self, call):
+        current = self._get_setting("COOKIES_ENABLED")
+        self._set_setting("COOKIES_ENABLED", not current)
+        await self._cb_cookies_menu(call)
+
     async def _cb_remove_cookies(self, call):
         self._clean_cookies()
+        self._set_setting("COOKIES_ENABLED", False)
         os.makedirs(self._cookie_dir, exist_ok=True)
         await call.answer(self.strings["cookie_cleared_short"], show_alert=True)
         await self._cb_cookies_menu(call)
+
+    def _fmt_settings_menu(self):
+        return self.strings["settings_menu"].format(
+            workers=self._get_setting("MAX_WORKERS"),
+            max_file=self._get_setting("MAX_FILE_MB"),
+            delay=self._get_setting("ACTION_DELAY"),
+            autostart="On" if self._get_setting("AUTORUNNER") else "Off",
+        )
+
+    def _get_settings_markup(self):
+        autostart_val = "On" if self._get_setting("AUTORUNNER") else "Off"
+        return [
+            [
+                {"text": self.strings["btn_workers"].format(val=self._get_setting("MAX_WORKERS")),
+                 "input": self.strings["input_workers"], "handler": self._cb_set_workers, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_max_file"].format(val=self._get_setting("MAX_FILE_MB")),
+                 "input": self.strings["input_max_file"], "handler": self._cb_set_max_file, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_delay"].format(val=self._get_setting("ACTION_DELAY")),
+                 "input": self.strings["input_delay"], "handler": self._cb_set_delay, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_autostart"].format(val=autostart_val),
+                 "callback": self._cb_toggle_autostart, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"},
+            ],
+        ]
+
+    async def _cb_settings_menu(self, call):
+        await call.edit(
+            text=self._fmt_settings_menu(),
+            reply_markup=self._get_settings_markup(),
+        )
+
+    async def _cb_set_workers(self, call, value: str):
+        try:
+            v = int(value.strip())
+            if not (1 <= v <= 10):
+                raise ValueError
+        except ValueError:
+            await call.answer(self.strings["setting_invalid"], show_alert=True)
+            return
+        self._set_setting("MAX_WORKERS", v)
+        is_busy = self._active_worker_count > 0
+        await self._apply_settings_deferred_or_now()
+        msg = self.strings["setting_saved"] if is_busy else self.strings["setting_saved_instant"]
+        await call.answer(msg)
+        await call.edit(text=self._fmt_settings_menu(), reply_markup=self._get_settings_markup())
+
+    async def _cb_set_max_file(self, call, value: str):
+        try:
+            v = int(value.strip())
+            if not (50 <= v <= 4096):
+                raise ValueError
+        except ValueError:
+            await call.answer(self.strings["setting_invalid"], show_alert=True)
+            return
+        self._set_setting("MAX_FILE_MB", v)
+        await call.answer(self.strings["setting_saved_instant"])
+        await call.edit(text=self._fmt_settings_menu(), reply_markup=self._get_settings_markup())
+
+    async def _cb_set_delay(self, call, value: str):
+        try:
+            v = int(value.strip())
+            if not (1 <= v <= 30):
+                raise ValueError
+        except ValueError:
+            await call.answer(self.strings["setting_invalid"], show_alert=True)
+            return
+        self._set_setting("ACTION_DELAY", v)
+        await call.answer(self.strings["setting_saved_instant"])
+        await call.edit(text=self._fmt_settings_menu(), reply_markup=self._get_settings_markup())
+
+    async def _cb_toggle_autostart(self, call):
+        current = self._get_setting("AUTORUNNER")
+        self._set_setting("AUTORUNNER", not current)
+        await call.answer(self.strings["setting_saved_instant"])
+        await call.edit(text=self._fmt_settings_menu(), reply_markup=self._get_settings_markup())
 
     async def _cb_reboot(self, call):
         await call.edit(
@@ -1363,7 +1527,7 @@ class Grabber(loader.Module):
         if tkn:
             try:
                 await self._launch(tkn)
-                self.config["AUTORUNNER"] = True
+                self._set_setting("AUTORUNNER", True)
                 await call.edit(
                     text=self.strings["reboot_done"],
                     reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "success"}]],
@@ -1416,7 +1580,7 @@ class Grabber(loader.Module):
         prefix = self.get_prefix()
         try:
             await self._launch(tkn)
-            self.config["AUTORUNNER"] = True
+            self._set_setting("AUTORUNNER", True)
         except Exception as e:
             await call.edit(
                 text=self.strings["start_failed"].format(error=str(e)[:200], prefix=prefix),
@@ -1441,6 +1605,12 @@ class Grabber(loader.Module):
     async def _launch(self, tkn):
         await self._shutdown()
         os.makedirs(self._session_dir, exist_ok=True)
+        num_workers = max(1, self._get_setting("MAX_WORKERS"))
+        try:
+            self._executor.shutdown(wait=False)
+        except Exception:
+            pass
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=num_workers)
         sess_file = os.path.join(self._session_dir, "grabber_bot")
         for ext in ["", ".session", ".session-journal"]:
             path = sess_file + ext
@@ -1492,7 +1662,7 @@ class Grabber(loader.Module):
         self._bot.add_event_handler(self._h_start, events.NewMessage(pattern="/start"))
         self._bot.add_event_handler(self._h_msg, events.NewMessage())
         self._bot.add_event_handler(self._h_btn, events.CallbackQuery())
-        num_workers = max(1, self.config["MAX_WORKERS"])
+        num_workers = max(1, self._get_setting("MAX_WORKERS"))
         self._worker_tasks = [asyncio.create_task(self._queue_worker()) for _ in range(num_workers)]
         bot_me = await self._bot.get_me()
         logger.info(f"[GRABBER] Started as @{bot_me.username}, workers={num_workers}")
@@ -1540,13 +1710,13 @@ class Grabber(loader.Module):
                 title = (info.get("title") or "Unknown")[:100]
 
                 try:
+                    self._active_worker_count += 1
                     await self._process_download(
                         task_id, chat_id, msg_id, url, mode,
                         workdir, info, meta_dict, reply_to_topic, orig_msg_id,
                     )
                     self._stats["completed"] += 1
                 except Exception as e:
-                    self._stats["errors"] += 1
                     err_text = str(e)[:150]
                     try:
                         await self._bot.edit_message(
@@ -1559,9 +1729,12 @@ class Grabber(loader.Module):
                     await self._log_to_topic(self.strings["log_error"].format(
                         title=_escape_html(title[:60]), error=_escape_html(err_text)))
                 finally:
+                    self._active_worker_count = max(0, self._active_worker_count - 1)
                     self._current_downloads.pop(task_id, None)
                     self._clean_workdir(workdir)
                     self._download_queue.task_done()
+                    if self._active_worker_count == 0:
+                        asyncio.ensure_future(self._apply_settings_now())
 
             except asyncio.CancelledError:
                 break
@@ -2152,10 +2325,11 @@ class Grabber(loader.Module):
         task_id = f"{ev.chat_id}_{ev.message_id}_{int(time.time() * 1000)}"
         self._queue_items.append({"title": title, "url": url})
 
-        is_active = bool(self._current_downloads)
-        pending = len(self._queue_items)
+        num_workers = max(1, self._get_setting("MAX_WORKERS"))
+        all_workers_busy = self._active_worker_count >= num_workers
 
-        if is_active or pending > 1:
+        if all_workers_busy:
+            pending = len(self._queue_items)
             try:
                 await ev.edit(self.strings["queue_pos"].format(pos=pending), parse_mode="html")
             except Exception:
@@ -2187,7 +2361,7 @@ class Grabber(loader.Module):
                 "socket_timeout": 30,
                 "skip_download": True,
             }
-            if os.path.exists(self._cookie_path):
+            if os.path.exists(self._cookie_path) and self._get_setting("COOKIES_ENABLED"):
                 opts["cookiefile"] = self._cookie_path
             with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(url, download=False)
@@ -2240,7 +2414,7 @@ class Grabber(loader.Module):
         )
 
     async def _progress_loop(self, task_id, chat_id, msg_id, done_event):
-        delay = max(1, self.config["ACTION_DELAY"])
+        delay = max(1, self._get_setting("ACTION_DELAY"))
         while not done_event.is_set():
             try:
                 await asyncio.sleep(delay)
@@ -2252,7 +2426,7 @@ class Grabber(loader.Module):
                 pass
 
     async def _upload_progress_loop(self, task_id, chat_id, msg_id, start_time):
-        delay = max(1, self.config["ACTION_DELAY"])
+        delay = max(1, self._get_setting("ACTION_DELAY"))
         while True:
             try:
                 await asyncio.sleep(delay)
@@ -2400,7 +2574,7 @@ class Grabber(loader.Module):
         safe_title = re.sub(r'[\\/*?:"<>|]', "", title).replace(" ", "_")[:50]
         loop = asyncio.get_event_loop()
         base_opts = {"quiet": True, "no_warnings": True, "restrictfilenames": True}
-        if os.path.exists(self._cookie_path):
+        if os.path.exists(self._cookie_path) and self._get_setting("COOKIES_ENABLED"):
             base_opts["cookiefile"] = self._cookie_path
 
         if is_audio:
