@@ -1,5 +1,6 @@
 __version__ = (2, 1, 0)
 # meta developer: I_execute.t.me 
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/ServerBox/MetaBanner.jpeg
 
 import logging
 import asyncio
@@ -14,7 +15,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Logger/Greetings.jpeg"
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/ServerBox/Greetings.jpeg"
 
 
 @loader.tds
