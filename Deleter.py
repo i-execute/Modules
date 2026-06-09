@@ -1,4 +1,4 @@
-__version__ = (2, 1, 2)
+__version__ = (2, 2, 0)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/MetaBanner.jpeg
 
@@ -11,6 +11,7 @@ from telethon.tl.functions.channels import LeaveChannelRequest
 from telethon.tl.types import Message, User
 
 from .. import loader, utils
+from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
@@ -24,27 +25,78 @@ class Deleter(loader.Module):
     strings = {
         "name": "Deleter",
         "help": (
-            "<b>Deleter - swift message deletion</b>\n\n"
+            "<b>Deleter - swift message deletion</b>\n"
             "<b>Own messages:</b>\n"
+            "<blockquote>"
             "<code>{prefix}del me</code> - delete all your messages in current chat\n"
             "<code>{prefix}del me -f</code> - delete all your messages and leave the chat\n"
             "<code>{prefix}del [n]</code> - delete last n your messages\n"
             "<code>{prefix}del [n]</code> (reply) - delete n your messages before replied message\n"
             "<code>{prefix}del now</code> - delete your messages from last 5 minutes\n"
-            "<code>{prefix}del today</code> - delete your messages since 00:00 today\n\n"
+            "<code>{prefix}del today</code> - delete your messages since 00:00 today"
+            "</blockquote>\n"
             "<b>Other users:</b>\n"
+            "<blockquote>"
             "<code>{prefix}del @username</code> - delete all messages from specified user\n"
             "<code>{prefix}del before</code> (reply) - delete all messages from everyone before replied message\n"
-            "<code>{prefix}del after</code> (reply) - delete all messages from everyone after replied message\n"
+            "<code>{prefix}del after</code> (reply) - delete all messages from everyone after replied message"
+            "</blockquote>"
+        ),
+        "main_menu": (
+            "<b>Deleter Control Panel</b>\n"
+            "<blockquote>Select action:</blockquote>"
+        ),
+        "btn_usage": "Usage",
+        "btn_purger": "Purger",
+        "btn_del_today": "Delete All Today",
+        "btn_back": "Back",
+        "btn_confirm": "Confirm",
+        "btn_cancel": "Cancel",
+        "btn_stop": "Stop",
+        "purger_menu": (
+            "<b>Purger Mode</b>\n"
+            "<blockquote>Delete all new messages in this chat automatically.</blockquote>"
+        ),
+        "btn_enable_purger": "Enable Auto-Delete",
+        "btn_stop_all": "Stop All Active",
+        "purger_confirm": (
+            "<b>Are you sure?</b>\n"
+            "<blockquote>This will delete all new messages in this chat automatically.</blockquote>"
+        ),
+        "purger_activated": (
+            "<b>Purger Mode Activated</b>\n"
+            "<blockquote>All new messages in this chat will be deleted.</blockquote>"
+        ),
+        "purger_stopped": (
+            "<b>Purger Stopped</b>\n"
+            "<blockquote>Auto-delete disabled for this chat.</blockquote>"
+        ),
+        "all_purgers_stopped": "<b>All Active Purgers Stopped</b>",
+        "del_today_confirm": (
+            "<b>Are you sure?</b>\n"
+            "<blockquote>This will delete ALL messages from everyone in this chat since 00:00 today.</blockquote>"
+        ),
+        "del_today_progress": (
+            "<b>Deleting messages...</b>\n"
+            "<blockquote>Deleted: {count}</blockquote>"
+        ),
+        "del_today_done": (
+            "<b>Done</b>\n"
+            "<blockquote>Deleted {count} messages from today.</blockquote>"
         ),
         "no_count": "<b>Error:</b> Provide a valid number of messages",
         "no_reply": "<b>Error:</b> Reply to a message",
         "no_user": "<b>Error:</b> User not found",
         "no_perms": "<b>Error:</b> Not enough permissions to delete some messages",
         "error": "<b>Error:</b>\n<blockquote>{error}</blockquote>",
-        "done_me": "<b>All your {count} messages in chat</b>\n<blockquote>{chat}</blockquote>\n<b>have been deleted.</b>",
+        "done_me": (
+            "<b>All your {count} messages in chat</b>\n"
+            "<blockquote>{chat}</blockquote>\n"
+            "<b>have been deleted.</b>"
+        ),
         "done_leave": (
-            "<b>Left chat:</b>\n<blockquote>{chat}</blockquote>\n"
+            "<b>Left chat:</b>\n"
+            "<blockquote>{chat}</blockquote>\n"
             "<b>Deleted messages:</b> <code>{count}</code>\n"
             "<b>First message date:</b> <code>{first_date}</code>\n"
             "<b>Last message date:</b> <code>{last_date}</code>"
@@ -53,27 +105,78 @@ class Deleter(loader.Module):
 
     strings_ru = {
         "help": (
-            "<b>Deleter - быстрое удаление сообщений</b>\n\n"
+            "<b>Deleter - быстрое удаление сообщений</b>\n"
             "<b>Свои сообщения:</b>\n"
+            "<blockquote>"
             "<code>{prefix}del me</code> - удалить все свои сообщения в текущем чате\n"
             "<code>{prefix}del me -f</code> - удалить все свои сообщения и покинуть чат\n"
             "<code>{prefix}del [n]</code> - удалить последние n своих сообщений\n"
             "<code>{prefix}del [n]</code> (реплай) - удалить n своих сообщений до указанного сообщения\n"
             "<code>{prefix}del now</code> - удалить свои сообщения за последние 5 минут\n"
-            "<code>{prefix}del today</code> - удалить свои сообщения с 00:00 сегодня\n\n"
+            "<code>{prefix}del today</code> - удалить свои сообщения с 00:00 сегодня"
+            "</blockquote>\n"
             "<b>Другие пользователи:</b>\n"
+            "<blockquote>"
             "<code>{prefix}del @username</code> - удалить все сообщения указанного пользователя\n"
             "<code>{prefix}del before</code> (реплай) - удалить все сообщения от всех до указанного сообщения\n"
-            "<code>{prefix}del after</code> (реплай) - удалить все сообщения от всех после указанного сообщения\n"
+            "<code>{prefix}del after</code> (реплай) - удалить все сообщения от всех после указанного сообщения"
+            "</blockquote>"
+        ),
+        "main_menu": (
+            "<b>Панель управления Deleter</b>\n"
+            "<blockquote>Выберите действие:</blockquote>"
+        ),
+        "btn_usage": "Инструкция",
+        "btn_purger": "Purger",
+        "btn_del_today": "Удалить все за сегодня",
+        "btn_back": "Назад",
+        "btn_confirm": "Подтвердить",
+        "btn_cancel": "Отмена",
+        "btn_stop": "Остановить",
+        "purger_menu": (
+            "<b>Режим Purger</b>\n"
+            "<blockquote>Автоматическое удаление всех новых сообщений в этом чате.</blockquote>"
+        ),
+        "btn_enable_purger": "Включить авто-удаление",
+        "btn_stop_all": "Остановить все активные",
+        "purger_confirm": (
+            "<b>Вы уверены?</b>\n"
+            "<blockquote>Все новые сообщения в этом чате будут автоматически удаляться.</blockquote>"
+        ),
+        "purger_activated": (
+            "<b>Режим Purger активирован</b>\n"
+            "<blockquote>Все новые сообщения в этом чате будут удалены.</blockquote>"
+        ),
+        "purger_stopped": (
+            "<b>Purger остановлен</b>\n"
+            "<blockquote>Авто-удаление отключено для этого чата.</blockquote>"
+        ),
+        "all_purgers_stopped": "<b>Все активные Purger'ы остановлены</b>",
+        "del_today_confirm": (
+            "<b>Вы уверены?</b>\n"
+            "<blockquote>Будут удалены ВСЕ сообщения от всех в этом чате с 00:00 сегодня.</blockquote>"
+        ),
+        "del_today_progress": (
+            "<b>Удаление сообщений...</b>\n"
+            "<blockquote>Удалено: {count}</blockquote>"
+        ),
+        "del_today_done": (
+            "<b>Готово</b>\n"
+            "<blockquote>Удалено {count} сообщений за сегодня.</blockquote>"
         ),
         "no_count": "<b>Ошибка:</b> Укажите корректное количество сообщений",
         "no_reply": "<b>Ошибка:</b> Ответьте на сообщение",
         "no_user": "<b>Ошибка:</b> Пользователь не найден",
         "no_perms": "<b>Ошибка:</b> Недостаточно прав для удаления некоторых сообщений",
         "error": "<b>Ошибка:</b>\n<blockquote>{error}</blockquote>",
-        "done_me": "<b>Все ваши {count} сообщения в чате</b>\n<blockquote>{chat}</blockquote>\n<b>удалены.</b>",
+        "done_me": (
+            "<b>Все ваши {count} сообщения в чате</b>\n"
+            "<blockquote>{chat}</blockquote>\n"
+            "<b>удалены.</b>"
+        ),
         "done_leave": (
-            "<b>Вышел из чата:</b>\n<blockquote>{chat}</blockquote>\n"
+            "<b>Вышел из чата:</b>\n"
+            "<blockquote>{chat}</blockquote>\n"
             "<b>Удалено сообщений:</b> <code>{count}</code>\n"
             "<b>Дата первого сообщения:</b> <code>{first_date}</code>\n"
             "<b>Дата последнего сообщения:</b> <code>{last_date}</code>"
@@ -91,6 +194,8 @@ class Deleter(loader.Module):
         )
         self._deleter_topic = None
         self._asset_channel = None
+        self._purger_tasks = {}
+        self._purger_chats = set()
 
     async def client_ready(self):
         self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
@@ -172,6 +277,196 @@ class Deleter(loader.Module):
 
         return deleted, failed
 
+    async def _cb_main_menu(self, call: InlineCall):
+        await call.edit(
+            self.strings["main_menu"],
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"},
+                ],
+                [
+                    {"text": self.strings["btn_purger"], "callback": self._cb_purger_menu, "style": "primary"},
+                ],
+                [
+                    {"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"},
+                ],
+            ],
+        )
+
+    async def _cb_usage(self, call: InlineCall):
+        prefix = self.get_prefix()
+        await call.edit(
+            self.strings["help"].format(prefix=prefix),
+            reply_markup=[
+                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
+            ],
+        )
+
+    async def _cb_purger_menu(self, call: InlineCall):
+        await call.edit(
+            self.strings["purger_menu"],
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_enable_purger"], "callback": self._cb_purger_confirm, "style": "success"},
+                ],
+                [
+                    {"text": self.strings["btn_stop_all"], "callback": self._cb_stop_all_purgers, "style": "danger"},
+                ],
+                [
+                    {"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"},
+                ],
+            ],
+        )
+
+    async def _cb_purger_confirm(self, call: InlineCall):
+        await call.edit(
+            self.strings["purger_confirm"],
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_confirm"], "callback": self._cb_enable_purger, "style": "success"},
+                    {"text": self.strings["btn_cancel"], "callback": self._cb_purger_menu, "style": "danger"},
+                ],
+            ],
+        )
+
+    async def _cb_enable_purger(self, call: InlineCall):
+        chat_id = call.form["chat"]
+        
+        if chat_id in self._purger_chats:
+            await call.answer("Purger already active in this chat", show_alert=True)
+            return
+
+        self._purger_chats.add(chat_id)
+        
+        task = asyncio.create_task(self._purger_worker(chat_id))
+        self._purger_tasks[chat_id] = task
+
+        await call.edit(
+            self.strings["purger_activated"],
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_stop"], "callback": self._cb_stop_purger, "args": (chat_id,), "style": "danger"},
+                ],
+            ],
+        )
+
+    async def _cb_stop_purger(self, call: InlineCall, chat_id: int):
+        if chat_id in self._purger_tasks:
+            self._purger_tasks[chat_id].cancel()
+            del self._purger_tasks[chat_id]
+        
+        if chat_id in self._purger_chats:
+            self._purger_chats.remove(chat_id)
+
+        await call.edit(
+            self.strings["purger_stopped"],
+            reply_markup=[
+                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
+            ],
+        )
+
+    async def _cb_stop_all_purgers(self, call: InlineCall):
+        for task in self._purger_tasks.values():
+            task.cancel()
+        
+        self._purger_tasks.clear()
+        self._purger_chats.clear()
+
+        await call.edit(
+            self.strings["all_purgers_stopped"],
+            reply_markup=[
+                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
+            ],
+        )
+
+    async def _purger_worker(self, chat_id: int):
+        try:
+            last_id = None
+            
+            async for msg in self._client.iter_messages(chat_id, limit=1):
+                last_id = msg.id
+                break
+
+            while chat_id in self._purger_chats:
+                await asyncio.sleep(2)
+                
+                try:
+                    new_msgs = []
+                    async for msg in self._client.iter_messages(chat_id, min_id=last_id or 0):
+                        new_msgs.append(msg.id)
+                        if msg.id > (last_id or 0):
+                            last_id = msg.id
+
+                    if new_msgs:
+                        try:
+                            await self._client.delete_messages(chat_id, new_msgs)
+                        except Exception as e:
+                            logger.error(f"[Deleter] Purger delete error: {e}")
+
+                except Exception as e:
+                    logger.error(f"[Deleter] Purger iter error: {e}")
+                    await asyncio.sleep(5)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"[Deleter] Purger worker error: {e}")
+
+    async def _cb_del_today_confirm(self, call: InlineCall):
+        await call.edit(
+            self.strings["del_today_confirm"],
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_confirm"], "callback": self._cb_del_today_execute, "style": "danger"},
+                    {"text": self.strings["btn_cancel"], "callback": self._cb_main_menu, "style": "primary"},
+                ],
+            ],
+        )
+
+    async def _cb_del_today_execute(self, call: InlineCall):
+        chat_id = call.form["chat"]
+        
+        offset = self.config["TIMEZONE_OFFSET"]
+        tz = timezone(timedelta(hours=offset))
+        now = datetime.now(tz)
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        await call.edit(self.strings["del_today_progress"].format(count=0))
+
+        try:
+            ids = []
+            count = 0
+
+            async for msg in self._client.iter_messages(chat_id):
+                msg_local = msg.date.astimezone(tz)
+                if msg_local < midnight:
+                    break
+                
+                ids.append(msg.id)
+                count += 1
+
+                if count % 100 == 0:
+                    await call.edit(self.strings["del_today_progress"].format(count=count))
+
+            if ids:
+                deleted, failed = await self._bulk_delete(self._client, chat_id, ids)
+
+            await call.edit(
+                self.strings["del_today_done"].format(count=count),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
+                ],
+            )
+
+        except Exception as e:
+            logger.error(f"[Deleter] del today execute error: {e}")
+            await call.edit(
+                self.strings["error"].format(error=str(e)),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
+                ],
+            )
+
     @loader.command(
         ru_doc="Быстрое удаление сообщений",
         en_doc="Swift message deletion",
@@ -182,10 +477,21 @@ class Deleter(loader.Module):
         args_list = args.split() if args else []
 
         if not args_list:
-            prefix = self.get_prefix()
-            await utils.answer(
-                message,
-                self.strings["help"].format(prefix=prefix),
+            await self.inline.form(
+                text=self.strings["main_menu"],
+                message=message,
+                reply_markup=[
+                    [
+                        {"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"},
+                    ],
+                    [
+                        {"text": self.strings["btn_purger"], "callback": self._cb_purger_menu, "style": "primary"},
+                    ],
+                    [
+                        {"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"},
+                    ],
+                ],
+                silent=True,
             )
             return
 
@@ -214,10 +520,22 @@ class Deleter(loader.Module):
                     return
             except Exception:
                 pass
-            prefix = self.get_prefix()
-            await utils.answer(
-                message,
-                self.strings["help"].format(prefix=prefix),
+            
+            await self.inline.form(
+                text=self.strings["main_menu"],
+                message=message,
+                reply_markup=[
+                    [
+                        {"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"},
+                    ],
+                    [
+                        {"text": self.strings["btn_purger"], "callback": self._cb_purger_menu, "style": "primary"},
+                    ],
+                    [
+                        {"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"},
+                    ],
+                ],
+                silent=True,
             )
 
     async def _get_chat_name(self, message: Message) -> str:

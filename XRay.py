@@ -1,4 +1,4 @@
-__version__ = (3, 5, 6)
+__version__ = (3, 6, 0)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/MetaBanner.jpeg
 
@@ -26,6 +26,7 @@ from aiogram.types import (
     LinkPreviewOptions,
 )
 from .. import loader, utils
+from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
@@ -81,423 +82,326 @@ class XRay(loader.Module):
 
     strings = {
         "name": "XRay",
-        "help": (
-            "<b>XRay VLESS+Reality</b>\n\n"
-            "<b>Setup:</b>\n"
-            "<blockquote>"
-            "<code>{prefix}xr setup</code> install + generate keys + config\n"
-            "<code>{prefix}xr start</code> / <code>{prefix}xr stop</code> / <code>{prefix}xr restart</code>\n"
-            "<code>{prefix}xr status</code> status, traffic, connections"
-            "</blockquote>\n\n"
-            "<b>Settings:</b>\n"
-            "<blockquote>"
-            "<code>{prefix}xr port [port]</code> port (default 8443)\n"
-            "<code>{prefix}xr dest [domain:port]</code> Reality dest\n"
-            "<code>{prefix}xr sni [domain]</code> SNI\n"
-            "<code>{prefix}xr ip [address]</code> external IP\n"
-            "<code>{prefix}xr keys</code> show all keys (PM only)\n"
-            "<code>{prefix}xr overwrite</code> new keys + uuid + restart"
-            "</blockquote>\n\n"
-            "<b>Access:</b>\n"
-            "<blockquote>"
-            "<code>{prefix}xr add</code> reply to add trusted user\n"
-            "<code>{prefix}xr rm</code> reply to remove trusted user\n"
-            "<code>{prefix}xr users</code> list trusted users"
-            "</blockquote>\n\n"
-            "<b>Debug:</b>\n"
-            "<blockquote>"
-            "<code>{prefix}xr log</code> / <code>{prefix}xr log full</code>\n"
-            "<code>{prefix}xr debug</code> debug info\n"
-            "<code>{prefix}xr diagnose</code> diagnostics\n"
-            "<code>{prefix}xr checkout</code> IPs connected last 24h\n"
-            "<code>{prefix}xr ping</code> host speed test"
-            "</blockquote>\n\n"
-            "<b>Bot:</b>\n"
-            "<blockquote>"
-            "/xray get vless link (trusted users only)"
-            "</blockquote>"
+        
+        "main_menu": (
+            "<b>XRay VLESS+Reality</b>\n"
+            "<blockquote>Status: {status}\n"
+            "Port: {port}\n"
+            "Uptime: {uptime}</blockquote>"
         ),
-
-        "not_installed": "<b>xray not installed</b>\n<code>{prefix}xr setup</code>",
-        "setup_progress": "<b>Setting up XRay...</b>",
-        "setup_installing": "Downloading XRay...",
-        "setup_installed": "XRay installed: {version}",
-        "setup_keys": "Keys generated",
-        "setup_config": "Config written",
-        "setup_done": "<b>Setup complete</b>\n\nNow: <code>{prefix}xr start</code>",
-        "setup_fail": "<b>Setup failed</b>\n\n<code>{error}</code>",
+        
+        "status_menu": (
+            "<b>XRay Status</b>\n"
+            "<blockquote>State: {state}\n"
+            "PID: {pid}\n"
+            "Uptime: {uptime}\n"
+            "Traffic RX: {rx}\n"
+            "Traffic TX: {tx}\n"
+            "Active clients: {active}\n"
+            "Unique IPs (24h): {unique}\n"
+            "Port: {port}</blockquote>"
+        ),
+        
+        "settings_menu": (
+            "<b>XRay Settings</b>\n"
+            "<blockquote>Port: {port}\n"
+            "SNI: {sni}\n"
+            "Dest: {dest}\n"
+            "IP: {ip}</blockquote>"
+        ),
+        
+        "users_menu": (
+            "<b>Trusted Users</b>\n"
+            "<blockquote>Total: {count}\n"
+            "{users}</blockquote>"
+        ),
+        
+        "cleanup_confirm": (
+            "<b>Full Cleanup Warning</b>\n"
+            "<blockquote>This will:\n"
+            "- Kill all XRay processes\n"
+            "- Delete all files and configs\n"
+            "- Clear database\n"
+            "- Remove all traces\n\n"
+            "This action cannot be undone!</blockquote>"
+        ),
+        
+        "cleanup_done": (
+            "<b>Cleanup Complete</b>\n"
+            "<blockquote>All XRay data removed</blockquote>"
+        ),
+        
+        "btn_status": "Status",
+        "btn_start": "Start",
+        "btn_stop": "Stop",
+        "btn_restart": "Restart",
+        "btn_settings": "Settings",
+        "btn_users": "Users",
+        "btn_get_link": "Get Link",
+        "btn_cleanup": "Full Cleanup",
+        "btn_back": "Back",
+        "btn_close": "Close",
+        "btn_confirm_cleanup": "Confirm Cleanup",
+        "btn_cancel": "Cancel",
+        
+        "btn_set_port": "Set Port",
+        "btn_set_sni": "Set SNI",
+        "btn_set_dest": "Set Dest",
+        "btn_detect_ip": "Detect IP",
+        
+        "input_port": "Enter port (1025-65535):",
+        "input_sni": "Enter SNI domain:",
+        "input_dest": "Enter destination (domain:port):",
+        
+        "not_installed": (
+            "<b>XRay Not Installed</b>\n"
+            "<blockquote>Use setup first</blockquote>"
+        ),
+        
+        "setup_done": (
+            "<b>Setup Complete</b>\n"
+            "<blockquote>XRay installed and configured</blockquote>"
+        ),
+        
+        "setup_fail": (
+            "<b>Setup Failed</b>\n"
+            "<blockquote>{error}</blockquote>"
+        ),
+        
         "setup_docker": (
-            "<b>Docker detected</b>\n\n"
-            "This module cannot work inside Docker container.\n"
-            "Unload: <code>{prefix}ulm XRay</code>"
+            "<b>Docker Detected</b>\n"
+            "<blockquote>This module cannot work in Docker</blockquote>"
         ),
-
-        "already_running": "<b>Proxy already running</b>",
-        "not_running": "<b>Proxy not running</b>",
-        "starting": "<b>Starting XRay...</b>",
+        
         "started": (
-            "<b>XRay started</b>\n\n"
-            "<blockquote>"
-            "Port: <code>{port}</code>\n"
-            "IP: <code>{ip}</code>"
-            "</blockquote>"
+            "<b>XRay Started</b>\n"
+            "<blockquote>Port: {port}\n"
+            "IP: {ip}</blockquote>"
         ),
-        "start_fail": "<b>Start failed</b>\n\n<code>{error}</code>",
-        "stopped": "<b>Proxy stopped</b>",
-        "restarting": "<b>Restarting...</b>",
-        "port_busy": (
-            "<b>Port {port} is busy</b>\n\n"
-            "Change port: <code>{prefix}xr port [port]</code>\n"
-            "Then: <code>{prefix}xr start</code>"
+        
+        "stopped": (
+            "<b>XRay Stopped</b>\n"
+            "<blockquote>Service is offline</blockquote>"
         ),
-
-        "status_on": (
-            "<b>XRay Status</b>\n\n"
-            "<blockquote>"
-            "<b>State:</b> running\n"
-            "<b>PID:</b> <code>{pid}</code>\n"
-            "<b>Uptime:</b> <code>{uptime}</code>"
-            "</blockquote>\n\n"
-            "<b>Traffic (since start):</b>\n"
-            "<blockquote>"
-            "RX: <code>{rx}</code>\n"
-            "TX: <code>{tx}</code>\n"
-            "Total: <code>{total}</code>"
-            "</blockquote>\n\n"
-            "<b>Connections:</b>\n"
-            "<blockquote>"
-            "Active clients: <code>{active}</code>\n"
-            "Unique IPs (24h): <code>{unique_ips}</code>"
-            "</blockquote>\n\n"
-            "Trusted users: <code>{trusted_count}</code>\n"
-            "Port: <code>{port}</code>"
+        
+        "already_running": (
+            "<b>Already Running</b>\n"
+            "<blockquote>XRay is active</blockquote>"
         ),
-        "status_off": "<b>XRay Status</b>\n\n<blockquote><b>State:</b> stopped</blockquote>",
-
-        "keys_info": (
-            "<b>Reality keys</b>\n\n"
-            "<b>Private:</b>\n"
-            "<blockquote><code>{private_key}</code></blockquote>\n\n"
-            "<b>Public:</b>\n"
-            "<blockquote><code>{public_key}</code></blockquote>\n\n"
-            "<b>UUID:</b>\n"
-            "<blockquote><code>{uid}</code></blockquote>\n\n"
-            "Short ID: <code>{short_id}</code>\n"
-            "SNI: <code>{sni}</code>\n"
-            "Dest: <code>{dest}</code>\n"
-            "Port: <code>{port}</code>"
+        
+        "not_running": (
+            "<b>Not Running</b>\n"
+            "<blockquote>Start XRay first</blockquote>"
         ),
-        "keys_pm_only": "<b>Keys only in PM</b>",
-
-        "port_current": "Port: <code>{port}</code>",
-        "port_set": "Port: <code>{port}</code>\n<code>{prefix}xr restart</code>",
-        "port_invalid": "<b>Port must be 1025-65535</b>",
-
-        "dest_set": "Dest: <code>{dest}</code>\n<code>{prefix}xr restart</code>",
-        "dest_current": "Dest: <code>{dest}</code>",
-        "sni_set": "SNI: <code>{sni}</code>\n<code>{prefix}xr restart</code>",
-        "sni_current": "SNI: <code>{sni}</code>",
-
-        "ip_set": "IP: <code>{ip}</code>",
-        "ip_detected": "IP: <code>{ip}</code>",
-        "ip_fail": "<b>IP not detected</b>\n<code>{prefix}xr ip [address]</code>",
-        "ip_invalid": "<b>Invalid IP address</b>",
-
-        "user_added": "<b>Added:</b> <blockquote><code>{uid}</code></blockquote>",
-        "user_removed": "<b>Removed:</b> <blockquote><code>{uid}</code></blockquote>",
-        "user_not_found": "<b>Not found</b>",
-        "user_need_reply": "<b>Reply to a message to add/remove user</b>",
-        "users_list": "<b>Trusted users:</b>\n\n<blockquote>{users}</blockquote>",
-        "users_empty": "<b>No trusted users</b>",
-
-        "log_empty": "<b>Log empty</b>",
-        "log_title": "<b>XRay log:</b>\n\n<blockquote>",
-        "log_suffix": "</blockquote>",
-
-        "need_setup": "<b>Setup first</b>\n<code>{prefix}xr setup</code>",
-        "no_config": (
-            "<b>Not configured</b>\n\n"
-            "1. <code>{prefix}xr setup</code>\n"
-            "2. <code>{prefix}xr start</code>"
+        
+        "port_set": (
+            "<b>Port Updated</b>\n"
+            "<blockquote>New port: {port}\n"
+            "Restart required</blockquote>"
         ),
-
-        "overwrite_progress": "<b>Overwriting all credentials...</b>",
-        "overwrite_done": (
-            "<b>All credentials overwritten</b>\n\n"
-            "Old links are now dead.\n"
-            "Get new link via /xray in bot."
+        
+        "sni_set": (
+            "<b>SNI Updated</b>\n"
+            "<blockquote>New SNI: {sni}\n"
+            "Restart required</blockquote>"
         ),
-        "overwrite_fail": "<b>Overwrite failed</b>\n\n<code>{error}</code>",
-
-        "debug_info": (
-            "<b>XRay Debug</b>\n\n"
-            "<b>System:</b>\n"
-            "<blockquote>"
-            "OS: <code>{os_name}</code>\n"
-            "Arch: <code>{arch}</code>\n"
-            "Python: <code>{python}</code>"
-            "</blockquote>\n\n"
-            "<b>XRay:</b>\n"
-            "<blockquote>"
-            "Installed: {installed}\n"
-            "Path: <code>{xray_path}</code>\n"
-            "Version: <code>{xray_version}</code>"
-            "</blockquote>\n\n"
-            "<b>Proxy:</b>\n"
-            "<blockquote>"
-            "Status: {status}\n"
-            "PID: <code>{pid}</code>\n"
-            "Port: <code>{port}</code>\n"
-            "SNI: <code>{sni}</code>\n"
-            "Dest: <code>{dest}</code>\n"
-            "IP: <code>{ip}</code>"
-            "</blockquote>\n\n"
-            "<b>Checks:</b>\n"
-            "<blockquote>"
-            "Port listening: {port_listening}\n"
-            "Config: {config_exists}\n"
-            "Docker: {docker}\n"
-            "Work dir: <code>{work_dir}</code>"
-            "</blockquote>"
+        
+        "dest_set": (
+            "<b>Dest Updated</b>\n"
+            "<blockquote>New dest: {dest}\n"
+            "Restart required</blockquote>"
         ),
-
-        "diagnose_title": "<b>Diagnostics</b>\n\n<blockquote>",
-        "diagnose_suffix": "</blockquote>",
-
-        "bot_link_response": (
-            "<b>Your VLESS link</b>\n\n"
-            "Download client:\n"
-            '<a href="https://apps.apple.com/app/id6476628951">v2RayTun for iOS</a>\n'
-            '<a href="https://play.google.com/store/apps/details?id=com.v2raytun.android">v2RayTun for Android</a>\n\n'
-            "Press the button below to copy the link, then open v2RayTun, "
-            "tap add server and paste."
+        
+        "ip_detected": (
+            "<b>IP Detected</b>\n"
+            "<blockquote>External IP: {ip}</blockquote>"
         ),
-        "bot_not_configured": "<b>Proxy not configured yet</b>",
-        "bot_copy_button": "VPN LINK",
-
-        "checkout_empty": "<b>No connections in last 24h</b>",
-
-        "ping_progress": "<b>Running speed test...</b>",
-        "ping_result": (
-            "<b>Host Speed Test</b>\n\n"
-            "<b>Download:</b>\n"
-            "<blockquote>{download}</blockquote>\n\n"
-            "<b>Upload:</b>\n"
-            "<blockquote>{upload}</blockquote>\n\n"
-            "<b>Latency:</b>\n"
-            "<blockquote>{latency}</blockquote>"
+        
+        "ip_fail": (
+            "<b>IP Detection Failed</b>\n"
+            "<blockquote>Cannot detect external IP</blockquote>"
         ),
-        "ping_fail": "<b>Speed test failed</b>\n\n<code>{error}</code>",
+        
+        "link_message": (
+            "<b>Your VLESS Link</b>\n"
+            "<blockquote>Download client:\n"
+            "iOS: v2RayTun\n"
+            "Android: v2RayTun\n\n"
+            "Tap button to copy link</blockquote>"
+        ),
+        
+        "link_not_ready": (
+            "<b>Link Not Ready</b>\n"
+            "<blockquote>Setup and start XRay first</blockquote>"
+        ),
+        
+        "no_users": "No users added",
+        
+        "status_running": "Running",
+        "status_stopped": "Stopped",
+        
+        "bot_copy_button": "COPY LINK",
     }
 
     strings_ru = {
-        "help": (
-            "<b>XRay VLESS+Reality</b>\n\n"
-            "<b>Установка:</b>\n"
-            "<blockquote>"
-            "<code>{prefix}xr setup</code> установка + генерация ключей + конфиг\n"
-            "<code>{prefix}xr start</code> / <code>{prefix}xr stop</code> / <code>{prefix}xr restart</code>\n"
-            "<code>{prefix}xr status</code> статус, трафик, подключения"
-            "</blockquote>\n\n"
-            "<b>Настройки:</b>\n"
-            "<blockquote>"
-            "<code>{prefix}xr port [порт]</code> порт (по умолчанию 8443)\n"
-            "<code>{prefix}xr dest [домен:порт]</code> Reality dest\n"
-            "<code>{prefix}xr sni [домен]</code> SNI\n"
-            "<code>{prefix}xr ip [адрес]</code> внешний IP\n"
-            "<code>{prefix}xr keys</code> показать все ключи (только в ЛС)\n"
-            "<code>{prefix}xr overwrite</code> новые ключи + uuid + перезапуск"
-            "</blockquote>\n\n"
-            "<b>Доступ:</b>\n"
-            "<blockquote>"
-            "<code>{prefix}xr add</code> ответ на сообщение для добавления пользователя\n"
-            "<code>{prefix}xr rm</code> ответ на сообщение для удаления пользователя\n"
-            "<code>{prefix}xr users</code> список доверенных пользователей"
-            "</blockquote>\n\n"
-            "<b>Отладка:</b>\n"
-            "<blockquote>"
-            "<code>{prefix}xr log</code> / <code>{prefix}xr log full</code>\n"
-            "<code>{prefix}xr debug</code> отладочная информация\n"
-            "<code>{prefix}xr diagnose</code> диагностика\n"
-            "<code>{prefix}xr checkout</code> IP за последние 24ч\n"
-            "<code>{prefix}xr ping</code> тест скорости хоста"
-            "</blockquote>\n\n"
-            "<b>Бот:</b>\n"
-            "<blockquote>"
-            "/xray получить vless ссылку (только доверенные пользователи)"
-            "</blockquote>"
+        "main_menu": (
+            "<b>XRay VLESS+Reality</b>\n"
+            "<blockquote>Статус: {status}\n"
+            "Порт: {port}\n"
+            "Аптайм: {uptime}</blockquote>"
         ),
-
-        "not_installed": "<b>xray не установлен</b>\n<code>{prefix}xr setup</code>",
-        "setup_progress": "<b>Настройка XRay...</b>",
-        "setup_installing": "Скачивание XRay...",
-        "setup_installed": "XRay установлен: {version}",
-        "setup_keys": "Ключи сгенерированы",
-        "setup_config": "Конфиг записан",
-        "setup_done": "<b>Настройка завершена</b>\n\nТеперь: <code>{prefix}xr start</code>",
-        "setup_fail": "<b>Настройка не удалась</b>\n\n<code>{error}</code>",
+        
+        "status_menu": (
+            "<b>Статус XRay</b>\n"
+            "<blockquote>Состояние: {state}\n"
+            "PID: {pid}\n"
+            "Аптайм: {uptime}\n"
+            "Трафик RX: {rx}\n"
+            "Трафик TX: {tx}\n"
+            "Активные клиенты: {active}\n"
+            "Уникальные IP (24ч): {unique}\n"
+            "Порт: {port}</blockquote>"
+        ),
+        
+        "settings_menu": (
+            "<b>Настройки XRay</b>\n"
+            "<blockquote>Порт: {port}\n"
+            "SNI: {sni}\n"
+            "Dest: {dest}\n"
+            "IP: {ip}</blockquote>"
+        ),
+        
+        "users_menu": (
+            "<b>Доверенные пользователи</b>\n"
+            "<blockquote>Всего: {count}\n"
+            "{users}</blockquote>"
+        ),
+        
+        "cleanup_confirm": (
+            "<b>Полная очистка - Предупреждение</b>\n"
+            "<blockquote>Будет выполнено:\n"
+            "- Убийство всех процессов XRay\n"
+            "- Удаление всех файлов и конфигов\n"
+            "- Очистка базы данных\n"
+            "- Удаление всех следов\n\n"
+            "Это действие необратимо!</blockquote>"
+        ),
+        
+        "cleanup_done": (
+            "<b>Очистка завершена</b>\n"
+            "<blockquote>Все данные XRay удалены</blockquote>"
+        ),
+        
+        "btn_status": "Статус",
+        "btn_start": "Запустить",
+        "btn_stop": "Остановить",
+        "btn_restart": "Перезапустить",
+        "btn_settings": "Настройки",
+        "btn_users": "Пользователи",
+        "btn_get_link": "Получить ссылку",
+        "btn_cleanup": "Полная очистка",
+        "btn_back": "Назад",
+        "btn_close": "Закрыть",
+        "btn_confirm_cleanup": "Подтвердить очистку",
+        "btn_cancel": "Отмена",
+        
+        "btn_set_port": "Установить порт",
+        "btn_set_sni": "Установить SNI",
+        "btn_set_dest": "Установить Dest",
+        "btn_detect_ip": "Определить IP",
+        
+        "input_port": "Введите порт (1025-65535):",
+        "input_sni": "Введите SNI домен:",
+        "input_dest": "Введите назначение (домен:порт):",
+        
+        "not_installed": (
+            "<b>XRay не установлен</b>\n"
+            "<blockquote>Сначала выполните установку</blockquote>"
+        ),
+        
+        "setup_done": (
+            "<b>Установка завершена</b>\n"
+            "<blockquote>XRay установлен и настроен</blockquote>"
+        ),
+        
+        "setup_fail": (
+            "<b>Установка не удалась</b>\n"
+            "<blockquote>{error}</blockquote>"
+        ),
+        
         "setup_docker": (
-            "<b>Обнаружен Docker</b>\n\n"
-            "Этот модуль не может работать внутри Docker контейнера.\n"
-            "Выгрузить: <code>{prefix}ulm XRay</code>"
+            "<b>Обнаружен Docker</b>\n"
+            "<blockquote>Модуль не может работать в Docker</blockquote>"
         ),
-
-        "already_running": "<b>Прокси уже запущен</b>",
-        "not_running": "<b>Прокси не запущен</b>",
-        "starting": "<b>Запуск XRay...</b>",
+        
         "started": (
-            "<b>XRay запущен</b>\n\n"
-            "<blockquote>"
-            "Порт: <code>{port}</code>\n"
-            "IP: <code>{ip}</code>"
-            "</blockquote>"
+            "<b>XRay запущен</b>\n"
+            "<blockquote>Порт: {port}\n"
+            "IP: {ip}</blockquote>"
         ),
-        "start_fail": "<b>Ошибка запуска</b>\n\n<code>{error}</code>",
-        "stopped": "<b>Прокси остановлен</b>",
-        "restarting": "<b>Перезапуск...</b>",
-        "port_busy": (
-            "<b>Порт {port} занят</b>\n\n"
-            "Сменить порт: <code>{prefix}xr port [порт]</code>\n"
-            "Затем: <code>{prefix}xr start</code>"
+        
+        "stopped": (
+            "<b>XRay остановлен</b>\n"
+            "<blockquote>Сервис не активен</blockquote>"
         ),
-
-        "status_on": (
-            "<b>Статус XRay</b>\n\n"
-            "<blockquote>"
-            "<b>Состояние:</b> работает\n"
-            "<b>PID:</b> <code>{pid}</code>\n"
-            "<b>Аптайм:</b> <code>{uptime}</code>"
-            "</blockquote>\n\n"
-            "<b>Трафик (с запуска):</b>\n"
-            "<blockquote>"
-            "RX: <code>{rx}</code>\n"
-            "TX: <code>{tx}</code>\n"
-            "Всего: <code>{total}</code>"
-            "</blockquote>\n\n"
-            "<b>Подключения:</b>\n"
-            "<blockquote>"
-            "Активных клиентов: <code>{active}</code>\n"
-            "Уникальных IP (24ч): <code>{unique_ips}</code>"
-            "</blockquote>\n\n"
-            "Доверенных пользователей: <code>{trusted_count}</code>\n"
-            "Порт: <code>{port}</code>"
+        
+        "already_running": (
+            "<b>Уже запущен</b>\n"
+            "<blockquote>XRay активен</blockquote>"
         ),
-        "status_off": "<b>Статус XRay</b>\n\n<blockquote><b>Состояние:</b> остановлен</blockquote>",
-
-        "keys_info": (
-            "<b>Ключи Reality</b>\n\n"
-            "<b>Приватный:</b>\n"
-            "<blockquote><code>{private_key}</code></blockquote>\n\n"
-            "<b>Публичный:</b>\n"
-            "<blockquote><code>{public_key}</code></blockquote>\n\n"
-            "<b>UUID:</b>\n"
-            "<blockquote><code>{uid}</code></blockquote>\n\n"
-            "Short ID: <code>{short_id}</code>\n"
-            "SNI: <code>{sni}</code>\n"
-            "Dest: <code>{dest}</code>\n"
-            "Порт: <code>{port}</code>"
+        
+        "not_running": (
+            "<b>Не запущен</b>\n"
+            "<blockquote>Сначала запустите XRay</blockquote>"
         ),
-        "keys_pm_only": "<b>Ключи только в ЛС</b>",
-
-        "port_current": "Порт: <code>{port}</code>",
-        "port_set": "Порт: <code>{port}</code>\n<code>{prefix}xr restart</code>",
-        "port_invalid": "<b>Порт должен быть 1025-65535</b>",
-
-        "dest_set": "Dest: <code>{dest}</code>\n<code>{prefix}xr restart</code>",
-        "dest_current": "Dest: <code>{dest}</code>",
-        "sni_set": "SNI: <code>{sni}</code>\n<code>{prefix}xr restart</code>",
-        "sni_current": "SNI: <code>{sni}</code>",
-
-        "ip_set": "IP: <code>{ip}</code>",
-        "ip_detected": "IP: <code>{ip}</code>",
-        "ip_fail": "<b>IP не определён</b>\n<code>{prefix}xr ip [адрес]</code>",
-        "ip_invalid": "<b>Неверный IP адрес</b>",
-
-        "user_added": "<b>Добавлен:</b> <blockquote><code>{uid}</code></blockquote>",
-        "user_removed": "<b>Удалён:</b> <blockquote><code>{uid}</code></blockquote>",
-        "user_not_found": "<b>Не найден</b>",
-        "user_need_reply": "<b>Ответьте на сообщение для добавления/удаления пользователя</b>",
-        "users_list": "<b>Доверенные пользователи:</b>\n\n<blockquote>{users}</blockquote>",
-        "users_empty": "<b>Нет доверенных пользователей</b>",
-
-        "log_empty": "<b>Лог пуст</b>",
-        "log_title": "<b>Лог XRay:</b>\n\n<blockquote>",
-        "log_suffix": "</blockquote>",
-
-        "need_setup": "<b>Сначала настройте</b>\n<code>{prefix}xr setup</code>",
-        "no_config": (
-            "<b>Не настроено</b>\n\n"
-            "1. <code>{prefix}xr setup</code>\n"
-            "2. <code>{prefix}xr start</code>"
+        
+        "port_set": (
+            "<b>Порт обновлен</b>\n"
+            "<blockquote>Новый порт: {port}\n"
+            "Требуется перезапуск</blockquote>"
         ),
-
-        "overwrite_progress": "<b>Перезапись всех учётных данных...</b>",
-        "overwrite_done": (
-            "<b>Все учётные данные перезаписаны</b>\n\n"
-            "Старые ссылки больше не работают.\n"
-            "Получите новую ссылку через /xray в боте."
+        
+        "sni_set": (
+            "<b>SNI обновлен</b>\n"
+            "<blockquote>Новый SNI: {sni}\n"
+            "Требуется перезапуск</blockquote>"
         ),
-        "overwrite_fail": "<b>Ошибка перезаписи</b>\n\n<code>{error}</code>",
-
-        "debug_info": (
-            "<b>Отладка XRay</b>\n\n"
-            "<b>Система:</b>\n"
-            "<blockquote>"
-            "ОС: <code>{os_name}</code>\n"
-            "Арх: <code>{arch}</code>\n"
-            "Python: <code>{python}</code>"
-            "</blockquote>\n\n"
-            "<b>XRay:</b>\n"
-            "<blockquote>"
-            "Установлен: {installed}\n"
-            "Путь: <code>{xray_path}</code>\n"
-            "Версия: <code>{xray_version}</code>"
-            "</blockquote>\n\n"
-            "<b>Прокси:</b>\n"
-            "<blockquote>"
-            "Статус: {status}\n"
-            "PID: <code>{pid}</code>\n"
-            "Порт: <code>{port}</code>\n"
-            "SNI: <code>{sni}</code>\n"
-            "Dest: <code>{dest}</code>\n"
-            "IP: <code>{ip}</code>"
-            "</blockquote>\n\n"
-            "<b>Проверки:</b>\n"
-            "<blockquote>"
-            "Порт слушает: {port_listening}\n"
-            "Конфиг: {config_exists}\n"
-            "Docker: {docker}\n"
-            "Рабочая директория: <code>{work_dir}</code>"
-            "</blockquote>"
+        
+        "dest_set": (
+            "<b>Dest обновлен</b>\n"
+            "<blockquote>Новый dest: {dest}\n"
+            "Требуется перезапуск</blockquote>"
         ),
-
-        "diagnose_title": "<b>Диагностика</b>\n\n<blockquote>",
-        "diagnose_suffix": "</blockquote>",
-
-        "bot_link_response": (
-            "<b>Ваша VLESS ссылка</b>\n\n"
-            "Скачайте клиент:\n"
-            '<a href="https://apps.apple.com/app/id6476628951">v2RayTun для iOS</a>\n'
-            '<a href="https://play.google.com/store/apps/details?id=com.v2raytun.android">v2RayTun для Android</a>\n\n'
-            "Нажмите кнопку ниже чтобы скопировать ссылку, затем откройте v2RayTun, "
-            "нажмите добавить сервер и вставьте."
+        
+        "ip_detected": (
+            "<b>IP определен</b>\n"
+            "<blockquote>Внешний IP: {ip}</blockquote>"
         ),
-        "bot_not_configured": "<b>Прокси ещё не настроен</b>",
-        "bot_copy_button": "VPN ССЫЛКА",
-
-        "checkout_empty": "<b>Нет подключений за последние 24ч</b>",
-
-        "ping_progress": "<b>Запуск теста скорости...</b>",
-        "ping_result": (
-            "<b>Тест скорости хоста</b>\n\n"
-            "<b>Скачивание:</b>\n"
-            "<blockquote>{download}</blockquote>\n\n"
-            "<b>Загрузка:</b>\n"
-            "<blockquote>{upload}</blockquote>\n\n"
-            "<b>Задержка:</b>\n"
-            "<blockquote>{latency}</blockquote>"
+        
+        "ip_fail": (
+            "<b>Определение IP не удалось</b>\n"
+            "<blockquote>Не удается определить внешний IP</blockquote>"
         ),
-        "ping_fail": "<b>Тест скорости не удался</b>\n\n<code>{error}</code>",
+        
+        "link_message": (
+            "<b>Ваша VLESS ссылка</b>\n"
+            "<blockquote>Загрузите клиент:\n"
+            "iOS: v2RayTun\n"
+            "Android: v2RayTun\n\n"
+            "Нажмите кнопку для копирования</blockquote>"
+        ),
+        
+        "link_not_ready": (
+            "<b>Ссылка не готова</b>\n"
+            "<blockquote>Сначала установите и запустите XRay</blockquote>"
+        ),
+        
+        "no_users": "Нет добавленных пользователей",
+        
+        "status_running": "Запущен",
+        "status_stopped": "Остановлен",
+        
+        "bot_copy_button": "КОПИРОВАТЬ ССЫЛКУ",
     }
 
     def __init__(self):
@@ -515,14 +419,7 @@ class XRay(loader.Module):
         self._traffic_tx = 0
         self._traffic_task = None
         self._log_rotation_task = None
-
-    def _s(self, key, **kwargs):
-        prefix = self.get_prefix()
-        text = self.strings.get(key, "")
-        try:
-            return text.format(prefix=prefix, **kwargs)
-        except (KeyError, IndexError):
-            return text
+        self._process_marker = None
 
     async def client_ready(self, client, db):
         self._client = client
@@ -535,6 +432,7 @@ class XRay(loader.Module):
         )
         self._xray_path = os.path.join(self._root, "xray")
         self._config_path = os.path.join(self._root, "config.json")
+        self._process_marker = f"XRAY_MODULE_{tg_user_id}"
 
         os.makedirs(self._root, exist_ok=True)
 
@@ -590,6 +488,18 @@ class XRay(loader.Module):
                 pass
             self._log_reader_task = None
 
+        await self._kill_module_processes()
+
+        if self._log_fd:
+            try:
+                self._log_fd.close()
+            except Exception:
+                pass
+            self._log_fd = None
+
+        self._db.set("XR", "proxy_autostart", False)
+
+    async def _kill_module_processes(self):
         if self._proc:
             pid = self._proc.pid
             try:
@@ -613,24 +523,19 @@ class XRay(loader.Module):
             self._proc = None
             self._start_time = 0
 
-        if self._log_fd:
+        if self._process_marker:
             try:
-                self._log_fd.close()
+                p = await asyncio.create_subprocess_exec(
+                    "pkill", "-f", self._process_marker,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await asyncio.wait_for(p.communicate(), timeout=5)
             except Exception:
                 pass
-            self._log_fd = None
 
-        try:
-            p = await asyncio.create_subprocess_exec(
-                "pkill", "-f", f"xray.*{self._root}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await asyncio.wait_for(p.communicate(), timeout=5)
-        except Exception:
-            pass
-
-        self._db.set("XR", "proxy_autostart", False)
+    async def _full_module_cleanup(self):
+        await self._kill_module_processes()
 
         if self._root and os.path.exists(self._root):
             try:
@@ -638,17 +543,31 @@ class XRay(loader.Module):
             except Exception:
                 pass
 
-    def _is_owner(self, uid):
-        return uid == self._me.id
-
-    def _is_trusted(self, uid):
-        return self._is_owner(uid) or uid in self._db.get(
-            "XR", "trusted_users", []
-        )
+        for key in ["port", "sni", "dest", "trusted_users", "external_ip", 
+                    "vless_uuid", "private_key", "public_key", "short_id", 
+                    "proxy_autostart"]:
+            try:
+                self._db.set("XR", key, None)
+            except Exception:
+                pass
 
     def _proxy_running(self):
-        proc = self._proc
-        return proc is not None and proc.poll() is None
+        if not self._proc:
+            return False
+        
+        poll = self._proc.poll()
+        if poll is not None:
+            self._proc = None
+            self._start_time = 0
+            return False
+        
+        try:
+            os.kill(self._proc.pid, 0)
+            return True
+        except (ProcessLookupError, OSError):
+            self._proc = None
+            self._start_time = 0
+            return False
 
     def _get_uptime(self):
         if not self._proxy_running() or self._start_time == 0:
@@ -738,14 +657,6 @@ class XRay(loader.Module):
             return text.split("\n")[0][:200] if text else "unknown"
         except Exception:
             return "unknown"
-
-    async def _safe_edit(self, msg, text):
-        try:
-            if isinstance(msg, list):
-                msg = msg[0]
-            await msg.edit(text)
-        except Exception:
-            pass
 
     def _parse_xray_x25519_output(self, text):
         result = {}
@@ -925,15 +836,6 @@ class XRay(loader.Module):
             return f"{b / (1024 * 1024):.1f} MB"
         return f"{b / (1024 * 1024 * 1024):.2f} GB"
 
-    def _format_speed(self, bps):
-        if bps < 1024:
-            return f"{bps:.0f} B/s"
-        if bps < 1024 * 1024:
-            return f"{bps / 1024:.1f} KB/s"
-        if bps < 1024 * 1024 * 1024:
-            return f"{bps / (1024 * 1024):.1f} MB/s"
-        return f"{bps / (1024 * 1024 * 1024):.2f} GB/s"
-
     async def _query_xray_stats(self):
         if not self._proxy_running():
             return 0, 0
@@ -1076,265 +978,6 @@ class XRay(loader.Module):
 
         return ips
 
-    async def _run_speed_test(self, progress_cb=None):
-        download_results = []
-        upload_results = []
-        latency_results = []
-
-        test_files = [
-            ("Cloudflare", "https://speed.cloudflare.com/__down?bytes=10000000", 10_000_000),
-            ("Hetzner", "http://speed.hetzner.de/10MB.bin", 10_000_000),
-        ]
-
-        if progress_cb:
-            await progress_cb("Testing download speed...")
-
-        for name, url, expected_size in test_files:
-            try:
-                tmp_file = os.path.join(self._root, "speedtest.tmp")
-                p = await asyncio.create_subprocess_exec(
-                    "curl", "-sL", "--max-time", "30",
-                    "-o", tmp_file,
-                    "-w", "%{speed_download} %{time_total} %{size_download}",
-                    url,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                out, _ = await asyncio.wait_for(
-                    p.communicate(), timeout=35
-                )
-
-                if p.returncode == 0 and out:
-                    parts = out.decode().strip().split()
-                    if len(parts) >= 3:
-                        elapsed = float(parts[1])
-                        size = int(float(parts[2]))
-
-                        if size > 0 and elapsed > 0:
-                            real_speed = size / elapsed
-                            download_results.append(
-                                (name, real_speed, elapsed, size)
-                            )
-
-                try:
-                    os.remove(tmp_file)
-                except Exception:
-                    pass
-
-                if download_results:
-                    break
-
-            except FileNotFoundError:
-                break
-            except (asyncio.TimeoutError, Exception):
-                continue
-
-        if not download_results:
-            for name, url, expected_size in test_files:
-                try:
-                    tmp_file = os.path.join(self._root, "speedtest.tmp")
-                    p = await asyncio.create_subprocess_exec(
-                        "wget", "-q", "--timeout=30",
-                        "-O", tmp_file, url,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    start = time.time()
-                    await asyncio.wait_for(p.communicate(), timeout=35)
-                    elapsed = time.time() - start
-
-                    if p.returncode == 0 and os.path.exists(tmp_file):
-                        size = os.path.getsize(tmp_file)
-                        if size > 0 and elapsed > 0:
-                            speed = size / elapsed
-                            download_results.append(
-                                (name, speed, elapsed, size)
-                            )
-
-                    try:
-                        os.remove(tmp_file)
-                    except Exception:
-                        pass
-
-                    if download_results:
-                        break
-
-                except FileNotFoundError:
-                    break
-                except (asyncio.TimeoutError, Exception):
-                    continue
-
-        if progress_cb:
-            await progress_cb("Testing upload speed...")
-
-        upload_size = 5 * 1024 * 1024
-        upload_file = os.path.join(self._root, "upload.tmp")
-        try:
-            with open(upload_file, "wb") as f:
-                f.write(os.urandom(upload_size))
-
-            upload_targets = [
-                ("Cloudflare", [
-                    "curl", "-sL", "--max-time", "30",
-                    "-X", "POST",
-                    "-F", f"file=@{upload_file}",
-                    "-w", "%{speed_upload} %{time_total} %{size_upload}",
-                    "-o", "/dev/null",
-                    "https://speed.cloudflare.com/__up",
-                ]),
-            ]
-
-            for name, cmd in upload_targets:
-                try:
-                    p = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    out, _ = await asyncio.wait_for(
-                        p.communicate(), timeout=35
-                    )
-
-                    if p.returncode == 0 and out:
-                        parts = out.decode().strip().split()
-                        if len(parts) >= 3:
-                            elapsed = float(parts[1])
-                            size = int(float(parts[2]))
-
-                            if size > 0 and elapsed > 0:
-                                real_speed = size / elapsed
-                                upload_results.append(
-                                    (name, real_speed, elapsed, size)
-                                )
-
-                    if upload_results:
-                        break
-
-                except (asyncio.TimeoutError, FileNotFoundError, Exception):
-                    continue
-
-            if not upload_results:
-                try:
-                    start = time.time()
-                    p = await asyncio.create_subprocess_exec(
-                        "curl", "-sL", "--max-time", "30",
-                        "-T", upload_file,
-                        "-o", "/dev/null",
-                        "https://speed.cloudflare.com/__up",
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    await asyncio.wait_for(p.communicate(), timeout=35)
-                    elapsed = time.time() - start
-
-                    if elapsed > 0:
-                        speed = upload_size / elapsed
-                        upload_results.append(
-                            ("Cloudflare", speed, elapsed, upload_size)
-                        )
-                except Exception:
-                    pass
-
-        except Exception:
-            pass
-        finally:
-            try:
-                os.remove(upload_file)
-            except Exception:
-                pass
-
-        if progress_cb:
-            await progress_cb("Testing latency...")
-
-        ping_targets = [
-            ("Cloudflare", "1.1.1.1"),
-            ("Google", "8.8.8.8"),
-            ("Telegram DC2", "149.154.167.51"),
-            ("Telegram DC4", "149.154.167.91"),
-        ]
-
-        for name, host in ping_targets:
-            try:
-                p = await asyncio.create_subprocess_exec(
-                    "ping", "-c", "3", "-W", "3", host,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                out, _ = await asyncio.wait_for(
-                    p.communicate(), timeout=15
-                )
-
-                if p.returncode == 0 and out:
-                    text = out.decode()
-                    rtt_match = re.search(
-                        r"min/avg/max.*?=\s*([\d.]+)/([\d.]+)/([\d.]+)",
-                        text
-                    )
-                    if rtt_match:
-                        rtt_min = float(rtt_match.group(1))
-                        rtt_avg = float(rtt_match.group(2))
-                        rtt_max = float(rtt_match.group(3))
-                        latency_results.append(
-                            (name, host, rtt_min, rtt_avg, rtt_max)
-                        )
-                    else:
-                        loss_match = re.search(
-                            r"(\d+)% packet loss", text
-                        )
-                        if loss_match:
-                            loss = int(loss_match.group(1))
-                            latency_results.append(
-                                (name, host, -1, -1, -1, loss)
-                            )
-            except FileNotFoundError:
-                break
-            except (asyncio.TimeoutError, Exception):
-                continue
-
-        return download_results, upload_results, latency_results
-
-    def _format_speed_results(self, download, upload, latency):
-        dl_lines = []
-        if download:
-            for name, speed, elapsed, size in download:
-                dl_lines.append(
-                    f"{name}: <code>{self._format_speed(speed)}</code>"
-                    f"\n{self._format_bytes(size)} in {elapsed:.1f}s"
-                )
-        else:
-            dl_lines.append("n/a")
-
-        ul_lines = []
-        if upload:
-            for name, speed, elapsed, size in upload:
-                ul_lines.append(
-                    f"{name}: <code>{self._format_speed(speed)}</code>"
-                    f"\n{self._format_bytes(size)} in {elapsed:.1f}s"
-                )
-        else:
-            ul_lines.append("n/a")
-
-        lat_lines = []
-        if latency:
-            for item in latency:
-                if len(item) == 5:
-                    name, host, rtt_min, rtt_avg, rtt_max = item
-                    lat_lines.append(
-                        f"{name} ({host}): "
-                        f"<code>{rtt_avg:.1f}ms</code>"
-                        f" (min {rtt_min:.1f} / max {rtt_max:.1f})"
-                    )
-                elif len(item) == 6:
-                    name, host, _, _, _, loss = item
-                    lat_lines.append(
-                        f"{name} ({host}): "
-                        f"<code>{loss}% loss</code>"
-                    )
-        else:
-            lat_lines.append("n/a")
-
-        return "\n".join(dl_lines), "\n".join(ul_lines), "\n".join(lat_lines)
-
     async def _install_xray(self):
         arch = platform.machine().lower()
         arch_map = {
@@ -1447,22 +1090,14 @@ class XRay(loader.Module):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    async def _do_setup(self, progress_cb=None):
+    async def _do_setup(self):
         if _in_docker():
             return False, "docker"
 
         if not self._xray_installed():
-            if progress_cb:
-                await progress_cb(self.strings["setup_installing"])
             ok, res = await self._install_xray()
             if not ok:
                 return False, f"Install failed: {res}"
-            if progress_cb:
-                await progress_cb(
-                    self.strings["setup_installed"].format(
-                        version=_escape(res)
-                    )
-                )
 
         private_key, public_key = await self._generate_x25519()
         if not private_key or not public_key:
@@ -1476,16 +1111,10 @@ class XRay(loader.Module):
         self._db.set("XR", "vless_uuid", vless_uuid)
         self._db.set("XR", "short_id", short_id)
 
-        if progress_cb:
-            await progress_cb(self.strings["setup_keys"])
-
         try:
             self._write_config()
         except Exception as e:
             return False, f"Config write error: {e}"
-
-        if progress_cb:
-            await progress_cb(self.strings["setup_config"])
 
         return True, None
 
@@ -1515,6 +1144,7 @@ class XRay(loader.Module):
 
             env = os.environ.copy()
             env["XRAY_LOCATION_ASSET"] = self._root
+            env[self._process_marker] = "1"
 
             log_path = os.path.join(self._root, "xray_run.log")
             try:
@@ -1590,28 +1220,7 @@ class XRay(loader.Module):
                     pass
                 self._log_reader_task = None
 
-            if self._proc:
-                pid = self._proc.pid
-                try:
-                    if hasattr(os, "killpg"):
-                        os.killpg(os.getpgid(pid), signal.SIGTERM)
-                    else:
-                        self._proc.terminate()
-                    try:
-                        self._proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        if hasattr(os, "killpg"):
-                            os.killpg(os.getpgid(pid), signal.SIGKILL)
-                        else:
-                            self._proc.kill()
-                        self._proc.wait(timeout=3)
-                except Exception:
-                    try:
-                        self._proc.kill()
-                    except Exception:
-                        pass
-                self._proc = None
-                self._start_time = 0
+            await self._kill_module_processes()
 
             if self._log_fd:
                 try:
@@ -1711,258 +1320,296 @@ class XRay(loader.Module):
             self._log_reader_task.cancel()
         self._log_reader_task = asyncio.ensure_future(reader())
 
-    async def _send_log_files(self, chat_id):
-        files_sent = False
-        for name in ["xray_run.log", "error.log", "access.log"]:
-            lp = os.path.join(self._root, name)
-            if not os.path.exists(lp) or os.path.getsize(lp) == 0:
-                continue
-            txt_path = lp + ".txt"
-            shutil.copy2(lp, txt_path)
-            try:
-                await self._client.send_file(chat_id, txt_path)
-                files_sent = True
-            except Exception:
-                pass
-            finally:
-                try:
-                    os.remove(txt_path)
-                except Exception:
-                    pass
-        return files_sent
-
-    async def _run_diagnose(self):
-        results = []
-        prefix = self.get_prefix()
-
-        if _in_docker():
-            results.append("FAIL Running inside Docker")
+    def _get_main_markup(self):
+        is_running = self._proxy_running()
+        
+        markup = []
+        
+        markup.append([
+            {"text": self.strings["btn_status"], "callback": self._cb_status, "style": "primary"}
+        ])
+        
+        if is_running:
+            markup.append([
+                {"text": self.strings["btn_stop"], "callback": self._cb_stop, "style": "danger"},
+                {"text": self.strings["btn_restart"], "callback": self._cb_restart, "style": "primary"},
+            ])
         else:
-            results.append("OK Not in Docker")
+            markup.append([
+                {"text": self.strings["btn_start"], "callback": self._cb_start, "style": "success"}
+            ])
+        
+        markup.append([
+            {"text": self.strings["btn_settings"], "callback": self._cb_settings, "style": "primary"},
+            {"text": self.strings["btn_users"], "callback": self._cb_users, "style": "primary"},
+        ])
+        
+        markup.append([
+            {"text": self.strings["btn_get_link"], "callback": self._cb_get_link, "style": "success"}
+        ])
+        
+        markup.append([
+            {"text": self.strings["btn_cleanup"], "callback": self._cb_cleanup_confirm, "style": "danger"}
+        ])
+        
+        markup.append([
+            {"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}
+        ])
+        
+        return markup
 
-        if self._xray_installed():
-            ver = await self._get_xray_version()
-            results.append(f"OK XRay: <code>{_escape(ver[:100])}</code>")
-        else:
-            results.append(
-                f"FAIL XRay NOT installed, use <code>{prefix}xr setup</code>"
-            )
-            return results
-
-        private_key = self._db.get("XR", "private_key", "")
-        public_key = self._db.get("XR", "public_key", "")
-        vless_uuid = self._db.get("XR", "vless_uuid", "")
-        short_id = self._db.get("XR", "short_id", "")
-
-        if private_key and public_key:
-            results.append("OK Reality keys")
-        else:
-            results.append("FAIL Keys not generated")
-
-        if vless_uuid:
-            results.append("OK UUID set")
-        else:
-            results.append("FAIL UUID not set")
-
-        if short_id:
-            results.append(f"OK Short ID: <code>{_escape(short_id)}</code>")
-        else:
-            results.append("FAIL Short ID not set")
-
-        if os.path.exists(self._config_path):
-            results.append("OK Config exists")
-            try:
-                with open(self._config_path, "r") as f:
-                    cfg = json.load(f)
-                inbounds = cfg.get("inbounds", [])
-                if inbounds:
-                    ib = inbounds[0]
-                    results.append(
-                        f"   Protocol: <code>{ib.get('protocol', '?')}</code>"
-                    )
-                    results.append(
-                        f"   Port: <code>{ib.get('port', '?')}</code>"
-                    )
-                    rs = (
-                        ib.get("streamSettings", {})
-                        .get("realitySettings", {})
-                    )
-                    if rs:
-                        results.append(
-                            f"   SNI: <code>"
-                            f"{rs.get('serverNames', ['?'])[0]}</code>"
-                        )
-                        results.append(
-                            f"   Dest: <code>{rs.get('dest', '?')}</code>"
-                        )
-
-                has_stats = "stats" in cfg
-                has_api = "api" in cfg
-                results.append(
-                    f"   Stats API: {'OK' if has_stats and has_api else 'FAIL'}"
-                )
-            except Exception as e:
-                results.append(f"WARN Config broken: <code>{e}</code>")
-        else:
-            results.append("FAIL Config missing")
-
-        sni = self._db.get("XR", "sni", "www.google.com")
-        try:
-            loop = asyncio.get_running_loop()
-            info = await loop.getaddrinfo(sni, 443)
-            if info:
-                ips = list(set(i[4][0] for i in info[:5]))
-                results.append(
-                    f"OK DNS {sni}: <code>{', '.join(ips[:3])}</code>"
-                )
-        except Exception as e:
-            results.append(f"FAIL DNS {sni}: <code>{e}</code>")
-
-        try:
-            p = await asyncio.create_subprocess_exec(
-                "curl", "-s", "--max-time", "5", "-o", "/dev/null",
-                "-w", "%{http_code}", f"https://{sni}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            out, _ = await p.communicate()
-            code = out.decode().strip()
-            results.append(f"OK TLS {sni}: HTTP {code}")
-        except FileNotFoundError:
-            results.append("WARN curl not available")
-        except Exception as e:
-            results.append(f"WARN TLS {sni}: <code>{e}</code>")
-
+    def _format_main_text(self):
+        status = self.strings["status_running"] if self._proxy_running() else self.strings["status_stopped"]
         port = self._db.get("XR", "port", 8443)
-        listening = await self._check_port_listening(port)
-        results.append(
-            f"{'OK' if listening else 'FAIL'} Port {port}: "
-            f"{'listening' if listening else 'NOT listening'}"
+        uptime = self._get_uptime()
+        
+        return self.strings["main_menu"].format(
+            status=status,
+            port=port,
+            uptime=uptime
         )
 
-        stats_listening = await self._check_port_listening(STATS_API_PORT)
-        results.append(
-            f"{'OK' if stats_listening else 'FAIL'} Stats API port {STATS_API_PORT}: "
-            f"{'listening' if stats_listening else 'NOT listening'}"
+    async def _cb_main_menu(self, call: InlineCall):
+        await call.edit(
+            self._format_main_text(),
+            reply_markup=self._get_main_markup()
         )
 
-        ip = await self._get_external_ip()
-        results.append(
-            f"{'OK' if ip else 'FAIL'} External IP: <code>{ip or '?'}</code>"
-        )
-
-        tg_dcs = {
-            1: "149.154.175.53", 2: "149.154.167.51",
-            3: "149.154.175.100", 4: "149.154.167.91",
-            5: "91.108.56.130",
-        }
-        dc_res = []
-        for dc_num, dc_ip in tg_dcs.items():
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(3)
-                r = s.connect_ex((dc_ip, 443))
-                s.close()
-                dc_res.append(
-                    f"DC{dc_num}:{'OK' if r == 0 else 'FAIL'}"
-                )
-            except Exception:
-                dc_res.append(f"DC{dc_num}:FAIL")
-        results.append(f"TG DCs: {' '.join(dc_res)}")
-
-        if self._proxy_running():
-            results.append(f"OK Process: PID {self._proc.pid}")
-
-            err_log = os.path.join(self._root, "error.log")
-            if os.path.exists(err_log):
-                try:
-                    with open(err_log, "r") as f:
-                        err_lines = f.readlines()[-50:]
-                    errors = [
-                        l for l in err_lines
-                        if "error" in l.lower() or "fatal" in l.lower()
-                    ]
-                    if errors:
-                        results.append(f"FAIL Errors: {len(errors)}")
-                        last = errors[-1].strip()[:150]
-                        results.append(
-                            f"   Last: <code>{_escape(last)}</code>"
-                        )
-                    else:
-                        results.append("OK Errors: 0")
-                except Exception:
-                    pass
-        else:
-            results.append("FAIL Process not running")
-
-        results.append(f"Work dir: <code>{_escape(self._root)}</code>")
-
-        return results
-
-    async def _txt_status(self):
+    async def _cb_status(self, call: InlineCall):
         if self._proxy_running():
             port = self._db.get("XR", "port", 8443)
             active = self._get_active_clients()
             unique_ips = self._get_unique_ips_24h()
-            trusted = self._db.get("XR", "trusted_users", [])
-
             rx = max(0, self._traffic_rx)
             tx = max(0, self._traffic_tx)
-
-            return self._s(
-                "status_on",
+            
+            text = self.strings["status_menu"].format(
+                state=self.strings["status_running"],
                 pid=self._proc.pid,
                 uptime=self._get_uptime(),
                 rx=self._format_bytes(rx),
                 tx=self._format_bytes(tx),
-                total=self._format_bytes(rx + tx),
                 active=active,
-                unique_ips=len(unique_ips),
-                trusted_count=len(trusted),
-                port=port,
+                unique=len(unique_ips),
+                port=port
             )
-        return self._s("status_off")
-
-    def _txt_log(self):
-        self._log_lines = self._read_log_file_sync()
-        if not self._log_lines:
-            return self._s("log_empty")
-        last = self._log_lines[-50:]
-        c = "".join(last)
-        if len(c) > 3800:
-            c = c[-3800:]
-        return (
-            self._s("log_title")
-            + "<code>" + _escape(c) + "</code>"
-            + self.strings["log_suffix"]
+        else:
+            text = self.strings["status_menu"].format(
+                state=self.strings["status_stopped"],
+                pid="n/a",
+                uptime="n/a",
+                rx="n/a",
+                tx="n/a",
+                active="n/a",
+                unique="n/a",
+                port=self._db.get("XR", "port", 8443)
+            )
+        
+        await call.edit(
+            text,
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
         )
 
-    async def _txt_debug(self):
-        ip = await self._get_external_ip()
-        ver = await self._get_xray_version()
+    async def _cb_start(self, call: InlineCall):
+        ok, err = await self._do_start_proxy()
+        
+        if ok:
+            port = self._db.get("XR", "port", 8443)
+            ip = await self._get_external_ip()
+            text = self.strings["started"].format(port=port, ip=ip or "?")
+        elif err == "already_running":
+            text = self.strings["already_running"]
+        elif err == "not_installed":
+            text = self.strings["not_installed"]
+        else:
+            text = self.strings["setup_fail"].format(error=_escape(str(err)[:200]))
+        
+        await call.edit(
+            text,
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+        )
+
+    async def _cb_stop(self, call: InlineCall):
+        if not self._proxy_running():
+            await call.edit(
+                self.strings["not_running"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+            return
+        
+        await self._do_stop_proxy()
+        
+        await call.edit(
+            self.strings["stopped"],
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+        )
+
+    async def _cb_restart(self, call: InlineCall):
+        await self._do_stop_proxy()
+        await asyncio.sleep(1)
+        ok, err = await self._do_start_proxy()
+        
+        if ok:
+            port = self._db.get("XR", "port", 8443)
+            ip = await self._get_external_ip()
+            text = self.strings["started"].format(port=port, ip=ip or "?")
+        else:
+            text = self.strings["setup_fail"].format(error=_escape(str(err)[:200]))
+        
+        await call.edit(
+            text,
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+        )
+
+    async def _cb_settings(self, call: InlineCall):
         port = self._db.get("XR", "port", 8443)
         sni = self._db.get("XR", "sni", "www.google.com")
         dest = self._db.get("XR", "dest", "www.google.com:443")
-        listening = await self._check_port_listening(port)
-
-        return self.strings["debug_info"].format(
-            os_name=platform.system(),
-            arch=platform.machine(),
-            python=platform.python_version(),
-            installed="yes" if self._xray_installed() else "no",
-            xray_path=_escape(self._xray_path or "n/a"),
-            xray_version=_escape(ver),
-            status="running" if self._proxy_running() else "stopped",
-            pid=self._proc.pid if self._proxy_running() else "n/a",
-            port=port, sni=_escape(sni), dest=_escape(dest),
-            ip=ip or "?",
-            port_listening="yes" if listening else "no",
-            config_exists=(
-                "yes" if os.path.exists(self._config_path) else "no"
-            ),
-            docker="yes" if _in_docker() else "no",
-            work_dir=_escape(self._root),
+        ip = self._db.get("XR", "external_ip", "") or "not set"
+        
+        text = self.strings["settings_menu"].format(
+            port=port,
+            sni=_escape(sni),
+            dest=_escape(dest),
+            ip=ip
         )
+        
+        markup = [
+            [{"text": self.strings["btn_set_port"], "input": self.strings["input_port"], "handler": self._cb_set_port, "style": "primary"}],
+            [{"text": self.strings["btn_set_sni"], "input": self.strings["input_sni"], "handler": self._cb_set_sni, "style": "primary"}],
+            [{"text": self.strings["btn_set_dest"], "input": self.strings["input_dest"], "handler": self._cb_set_dest, "style": "primary"}],
+            [{"text": self.strings["btn_detect_ip"], "callback": self._cb_detect_ip, "style": "success"}],
+            [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}],
+        ]
+        
+        await call.edit(text, reply_markup=markup)
+
+    async def _cb_set_port(self, call: InlineCall, port_str: str):
+        try:
+            port = int(port_str.strip())
+            if not (1025 <= port <= 65535):
+                raise ValueError
+        except ValueError:
+            await call.answer("Invalid port number", show_alert=True)
+            return
+        
+        self._db.set("XR", "port", port)
+        
+        await call.edit(
+            self.strings["port_set"].format(port=port),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_settings, "style": "danger"}]]
+        )
+
+    async def _cb_set_sni(self, call: InlineCall, sni: str):
+        sni = sni.strip().lower()
+        self._db.set("XR", "sni", sni)
+        
+        await call.edit(
+            self.strings["sni_set"].format(sni=_escape(sni)),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_settings, "style": "danger"}]]
+        )
+
+    async def _cb_set_dest(self, call: InlineCall, dest: str):
+        dest = dest.strip()
+        if ":" not in dest:
+            dest += ":443"
+        self._db.set("XR", "dest", dest)
+        
+        await call.edit(
+            self.strings["dest_set"].format(dest=_escape(dest)),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_settings, "style": "danger"}]]
+        )
+
+    async def _cb_detect_ip(self, call: InlineCall):
+        ip = await self._get_external_ip()
+        
+        if ip:
+            text = self.strings["ip_detected"].format(ip=ip)
+        else:
+            text = self.strings["ip_fail"]
+        
+        await call.edit(
+            text,
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_settings, "style": "danger"}]]
+        )
+
+    async def _cb_users(self, call: InlineCall):
+        users = self._db.get("XR", "trusted_users", [])
+        
+        if users:
+            users_text = "\n".join(f"<code>{u}</code>" for u in users)
+        else:
+            users_text = self.strings["no_users"]
+        
+        text = self.strings["users_menu"].format(
+            count=len(users),
+            users=users_text
+        )
+        
+        await call.edit(
+            text,
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+        )
+
+    async def _cb_get_link(self, call: InlineCall):
+        ip = await self._get_external_ip()
+        if not ip:
+            await call.edit(
+                self.strings["link_not_ready"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+            return
+        
+        link = self._build_vless_link(ip)
+        if not link:
+            await call.edit(
+                self.strings["link_not_ready"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+            return
+        
+        markup = [
+            [
+                {
+                    "text": self.strings["bot_copy_button"],
+                    "copy": link,
+                }
+            ],
+            [
+                {"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}
+            ],
+        ]
+        
+        await call.edit(
+            self.strings["link_message"],
+            reply_markup=markup
+        )
+
+    async def _cb_cleanup_confirm(self, call: InlineCall):
+        markup = [
+            [
+                {"text": self.strings["btn_confirm_cleanup"], "callback": self._cb_cleanup_execute, "style": "danger"}
+            ],
+            [
+                {"text": self.strings["btn_cancel"], "callback": self._cb_main_menu, "style": "primary"}
+            ],
+        ]
+        
+        await call.edit(
+            self.strings["cleanup_confirm"],
+            reply_markup=markup
+        )
+
+    async def _cb_cleanup_execute(self, call: InlineCall):
+        await self._full_module_cleanup()
+        
+        await call.edit(
+            self.strings["cleanup_done"],
+            reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]]
+        )
+
+    async def _cb_close(self, call: InlineCall):
+        await call.delete()
 
     async def aiogram_watcher(self, message: AiogramMessage):
         if not message.text:
@@ -1974,14 +1621,14 @@ class XRay(loader.Module):
 
         uid = message.from_user.id
 
-        if not self._is_trusted(uid):
+        if uid != self._me.id and uid not in self._db.get("XR", "trusted_users", []):
             return
 
         try:
             ip = await self._get_external_ip()
             if not ip:
                 await message.answer(
-                    self._s("bot_not_configured"),
+                    self.strings["link_not_ready"],
                     parse_mode="HTML",
                     link_preview_options=LinkPreviewOptions(is_disabled=True),
                 )
@@ -1990,7 +1637,7 @@ class XRay(loader.Module):
             link = self._build_vless_link(ip)
             if not link:
                 await message.answer(
-                    self._s("bot_not_configured"),
+                    self.strings["link_not_ready"],
                     parse_mode="HTML",
                     link_preview_options=LinkPreviewOptions(is_disabled=True),
                 )
@@ -2008,7 +1655,7 @@ class XRay(loader.Module):
             )
 
             await message.answer(
-                self._s("bot_link_response"),
+                self.strings["link_message"],
                 parse_mode="HTML",
                 reply_markup=keyboard,
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
@@ -2016,396 +1663,12 @@ class XRay(loader.Module):
         except Exception as e:
             logger.error("[XR] aiogram_watcher error: %s", e)
 
-    @loader.command(
-        ru_doc="Управление XRay VLESS+Reality VPN",
-        en_doc="XRay VLESS+Reality VPN management",
-    )
+    @loader.command()
     async def xr(self, message):
         """XRay VLESS+Reality VPN management"""
-        args = utils.get_args_raw(message).strip()
-        prefix = self.get_prefix()
-        if not args:
-            await utils.answer(
-                message,
-                self.strings["help"].format(prefix=prefix),
-            )
-            return
-
-        parts = args.split(maxsplit=1)
-        cmd = parts[0].lower()
-
-        h = {
-            "setup": self._u_setup,
-            "start": self._u_start, "stop": self._u_stop,
-            "restart": self._u_restart,
-            "status": self._u_status,
-            "port": self._u_port, "dest": self._u_dest,
-            "sni": self._u_sni, "ip": self._u_ip,
-            "keys": self._u_keys, "overwrite": self._u_overwrite,
-            "add": self._u_add, "rm": self._u_rm,
-            "users": self._u_users,
-            "log": self._u_log, "debug": self._u_debug,
-            "diagnose": self._u_diagnose,
-            "checkout": self._u_checkout,
-            "ping": self._u_ping,
-        }.get(cmd)
-
-        if h:
-            try:
-                await h(message, parts)
-            except Exception as e:
-                logger.error("[XR] Command %s error: %s", cmd, e)
-                await utils.answer(
-                    message,
-                    f"<b>Error:</b> <code>{_escape(str(e)[:300])}</code>"
-                )
-        else:
-            await utils.answer(
-                message,
-                self.strings["help"].format(prefix=prefix),
-            )
-
-    async def _u_setup(self, msg, parts):
-        if _in_docker():
-            await utils.answer(msg, self._s("setup_docker"))
-            return
-
-        m = await utils.answer(msg, self._s("setup_progress"))
-        log_lines = []
-
-        async def progress_cb(text):
-            log_lines.append(text)
-            display = self._s("setup_progress") + "\n\n"
-            display += "\n".join(
-                f"<code>{_escape(l)}</code>" for l in log_lines
-            )
-            await self._safe_edit(m, display)
-
-        ok, err = await self._do_setup(progress_cb=progress_cb)
-        if ok:
-            t = self._s("setup_done")
-        elif err == "docker":
-            t = self._s("setup_docker")
-        else:
-            t = self._s("setup_fail", error=_escape(str(err)))
-        await self._safe_edit(m, t)
-
-    async def _u_start(self, msg, parts):
-        m = await utils.answer(msg, self._s("starting"))
-        ok, err = await self._do_start_proxy()
-        if ok:
-            port = self._db.get("XR", "port", 8443)
-            ip = await self._get_external_ip()
-            t = self._s("started", port=port, ip=ip or "?")
-        elif err == "already_running":
-            t = self._s("already_running")
-        elif err == "not_installed":
-            t = self._s("not_installed")
-        elif err == "need_setup":
-            t = self._s("need_setup")
-        elif err == "port_busy":
-            port = self._db.get("XR", "port", 8443)
-            t = self._s("port_busy", port=port)
-        else:
-            t = self._s("start_fail", error=_escape(str(err)))
-        await self._safe_edit(m, t)
-
-    async def _u_stop(self, msg, parts):
-        if not self._proxy_running():
-            await utils.answer(msg, self._s("not_running"))
-            return
-        await self._do_stop_proxy()
-        await utils.answer(msg, self._s("stopped"))
-
-    async def _u_restart(self, msg, parts):
-        m = await utils.answer(msg, self._s("restarting"))
-        await self._do_stop_proxy()
-        await asyncio.sleep(1)
-        ok, err = await self._do_start_proxy()
-        if ok:
-            port = self._db.get("XR", "port", 8443)
-            ip = await self._get_external_ip()
-            t = self._s("started", port=port, ip=ip or "?")
-        elif err == "port_busy":
-            port = self._db.get("XR", "port", 8443)
-            t = self._s("port_busy", port=port)
-        else:
-            t = self._s("start_fail", error=_escape(str(err)))
-        await self._safe_edit(m, t)
-
-    async def _u_status(self, msg, parts):
-        await utils.answer(msg, await self._txt_status())
-
-    async def _u_port(self, msg, parts):
-        if len(parts) < 2:
-            await utils.answer(
-                msg,
-                self._s("port_current", port=self._db.get("XR", "port", 8443)),
-            )
-            return
-        try:
-            p = int(parts[1])
-            if not (1025 <= p <= 65535):
-                raise ValueError
-        except ValueError:
-            await utils.answer(msg, self._s("port_invalid"))
-            return
-        self._db.set("XR", "port", p)
-        await utils.answer(msg, self._s("port_set", port=p))
-
-    async def _u_dest(self, msg, parts):
-        if len(parts) < 2:
-            await utils.answer(
-                msg,
-                self._s(
-                    "dest_current",
-                    dest=_escape(self._db.get("XR", "dest", "www.google.com:443")),
-                ),
-            )
-            return
-        dest = parts[1].strip()
-        if ":" not in dest:
-            dest += ":443"
-        self._db.set("XR", "dest", dest)
-        await utils.answer(msg, self._s("dest_set", dest=_escape(dest)))
-
-    async def _u_sni(self, msg, parts):
-        if len(parts) < 2:
-            await utils.answer(
-                msg,
-                self._s(
-                    "sni_current",
-                    sni=_escape(self._db.get("XR", "sni", "www.google.com")),
-                ),
-            )
-            return
-        sni = parts[1].strip().lower()
-        self._db.set("XR", "sni", sni)
-        await utils.answer(msg, self._s("sni_set", sni=_escape(sni)))
-
-    async def _u_ip(self, msg, parts):
-        if len(parts) >= 2:
-            ip_str = parts[1].strip()
-            if not self._validate_ip(ip_str):
-                await utils.answer(msg, self._s("ip_invalid"))
-                return
-            self._db.set("XR", "external_ip", ip_str)
-            await utils.answer(msg, self._s("ip_set", ip=_escape(ip_str)))
-            return
-        ip = await self._get_external_ip()
-        if ip:
-            await utils.answer(msg, self._s("ip_detected", ip=ip))
-        else:
-            await utils.answer(msg, self._s("ip_fail"))
-
-    async def _u_keys(self, msg, parts):
-        if not msg.is_private:
-            await utils.answer(msg, self._s("keys_pm_only"))
-            return
-        private_key = self._db.get("XR", "private_key", "")
-        public_key = self._db.get("XR", "public_key", "")
-        short_id = self._db.get("XR", "short_id", "")
-        vless_uuid = self._db.get("XR", "vless_uuid", "")
-        sni = self._db.get("XR", "sni", "www.google.com")
-        dest = self._db.get("XR", "dest", "www.google.com:443")
-        port = self._db.get("XR", "port", 8443)
-        if not private_key:
-            await utils.answer(msg, self._s("need_setup"))
-            return
-        await utils.answer(
-            msg,
-            self._s(
-                "keys_info",
-                private_key=private_key,
-                public_key=public_key,
-                short_id=short_id,
-                uid=vless_uuid,
-                sni=_escape(sni),
-                dest=_escape(dest),
-                port=port,
-            ),
+        await self.inline.form(
+            text=self._format_main_text(),
+            message=message,
+            reply_markup=self._get_main_markup(),
+            silent=True,
         )
-
-    async def _u_overwrite(self, msg, parts):
-        if not self._xray_installed():
-            await utils.answer(msg, self._s("not_installed"))
-            return
-
-        m = await utils.answer(msg, self._s("overwrite_progress"))
-
-        private_key, public_key = await self._generate_x25519()
-        if not private_key:
-            await self._safe_edit(
-                m, self._s("overwrite_fail", error="Key generation failed")
-            )
-            return
-
-        new_uuid = self._generate_uuid()
-        new_short_id = self._generate_short_id()
-
-        self._db.set("XR", "private_key", private_key)
-        self._db.set("XR", "public_key", public_key)
-        self._db.set("XR", "vless_uuid", new_uuid)
-        self._db.set("XR", "short_id", new_short_id)
-
-        try:
-            self._write_config()
-        except Exception as e:
-            await self._safe_edit(
-                m, self._s("overwrite_fail", error=f"Config write error: {e}")
-            )
-            return
-
-        was_running = self._proxy_running()
-
-        if was_running:
-            await self._do_stop_proxy()
-            await asyncio.sleep(1)
-            ok, err = await self._do_start_proxy()
-            if not ok:
-                await self._safe_edit(
-                    m, self._s("overwrite_fail", error=f"Restart failed: {err}")
-                )
-                return
-
-        await self._safe_edit(m, self._s("overwrite_done"))
-
-    async def _u_add(self, msg, parts):
-        reply = await msg.get_reply_message()
-        if not reply or not reply.sender_id:
-            await utils.answer(msg, self._s("user_need_reply"))
-            return
-        uid = reply.sender_id
-        t = self._db.get("XR", "trusted_users", [])
-        if uid not in t:
-            t.append(uid)
-            self._db.set("XR", "trusted_users", t)
-        await utils.answer(msg, self._s("user_added", uid=uid))
-
-    async def _u_rm(self, msg, parts):
-        reply = await msg.get_reply_message()
-        if not reply or not reply.sender_id:
-            await utils.answer(msg, self._s("user_need_reply"))
-            return
-        uid = reply.sender_id
-        t = self._db.get("XR", "trusted_users", [])
-        if uid in t:
-            t.remove(uid)
-            self._db.set("XR", "trusted_users", t)
-            await utils.answer(msg, self._s("user_removed", uid=uid))
-        else:
-            await utils.answer(msg, self._s("user_not_found"))
-
-    async def _u_users(self, msg, parts):
-        t = self._db.get("XR", "trusted_users", [])
-        if not t:
-            await utils.answer(msg, self._s("users_empty"))
-            return
-        await utils.answer(
-            msg,
-            self._s(
-                "users_list",
-                users="\n".join(f"<code>{u}</code>" for u in t),
-            ),
-        )
-
-    async def _u_log(self, msg, parts):
-        if len(parts) >= 2 and parts[1].lower() == "full":
-            chat_id = msg.chat_id
-            try:
-                await msg.delete()
-            except Exception:
-                pass
-            files_sent = await self._send_log_files(chat_id)
-            if not files_sent:
-                await self._client.send_message(
-                    chat_id, self._s("log_empty"), parse_mode="html"
-                )
-            return
-        await utils.answer(msg, self._txt_log())
-
-    async def _u_debug(self, msg, parts):
-        await utils.answer(msg, await self._txt_debug())
-
-    async def _u_diagnose(self, msg, parts):
-        m = await utils.answer(msg, "<b>Diagnosing...</b>")
-        r = await self._run_diagnose()
-        await self._safe_edit(
-            m,
-            self.strings["diagnose_title"]
-            + "\n".join(r)
-            + self.strings["diagnose_suffix"]
-        )
-
-    async def _u_checkout(self, msg, parts):
-        ips = self._get_unique_ips_24h()
-        chat_id = msg.chat_id
-        try:
-            await msg.delete()
-        except Exception:
-            pass
-
-        if not ips:
-            await self._client.send_message(
-                chat_id, self._s("checkout_empty"), parse_mode="html"
-            )
-            return
-
-        content = f"XRay connected IPs (last 24h)\n"
-        content += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        content += f"Total unique IPs: {len(ips)}\n"
-        content += f"{'=' * 40}\n\n"
-
-        for ip in sorted(ips):
-            content += f"{ip}\n"
-
-        file_path = os.path.join(self._root, "checkout_24h.txt")
-        try:
-            with open(file_path, "w") as f:
-                f.write(content)
-            await self._client.send_file(chat_id, file_path)
-        except Exception as e:
-            await self._client.send_message(
-                chat_id,
-                f"<b>Error:</b> <code>{_escape(str(e)[:200])}</code>",
-                parse_mode="html",
-            )
-        finally:
-            try:
-                os.remove(file_path)
-            except Exception:
-                pass
-
-    async def _u_ping(self, msg, parts):
-        m = await utils.answer(msg, self._s("ping_progress"))
-        step_lines = []
-
-        async def progress_cb(text):
-            step_lines.append(text)
-            display = self._s("ping_progress") + "\n\n"
-            display += "\n".join(
-                f"<code>{_escape(l)}</code>" for l in step_lines
-            )
-            await self._safe_edit(m, display)
-
-        try:
-            dl, ul, lat = await self._run_speed_test(
-                progress_cb=progress_cb
-            )
-            dl_text, ul_text, lat_text = self._format_speed_results(
-                dl, ul, lat
-            )
-            await self._safe_edit(
-                m,
-                self._s(
-                    "ping_result",
-                    download=dl_text,
-                    upload=ul_text,
-                    latency=lat_text,
-                ),
-            )
-        except Exception as e:
-            await self._safe_edit(
-                m,
-                self._s("ping_fail", error=_escape(str(e)[:300])),
-            )

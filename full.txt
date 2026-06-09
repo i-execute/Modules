@@ -34,6 +34,7 @@ Token
 TONScanner
 Twin
 Uploader
+VKCalls
 VKMusic
 XRay
 XRayKiller

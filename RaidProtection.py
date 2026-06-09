@@ -1,4 +1,4 @@
-__version__ = (2, 2, 0)
+__version__ = (2, 3, 0)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/RaidProtection/MetaBanner.jpeg
 
@@ -13,12 +13,12 @@ from telethon.tl.functions.messages import DeleteHistoryRequest, ReportSpamReque
 from telethon.tl.types import (
     Message,
     PeerUser,
-    ChatAdminRights,
 )
-from telethon.errors import FloodWaitError, ChatAdminRequiredError
+from telethon.errors import FloodWaitError
 from telethon.utils import get_display_name
 
 from .. import loader, utils
+from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
@@ -29,81 +29,124 @@ class RaidProtection(loader.Module):
 
     strings = {
         "name": "RaidProtection",
-        "help": (
-            "<b>RaidProtection - PM raid shield</b>\n\n"
-            "<code>{prefix}rp</code> - toggle raid protection on/off\n"
-            "<code>{prefix}rpstat</code> - show raid statistics\n\n"
-            "<b>How it works:</b>\n"
-            "When enabled, if a new unknown user writes to you in DM "
-            "(a chat that didn't exist before), the module will:\n"
-            "1. Send them a message\n"
-            "2. Report spam\n"
-            "3. Delete the chat on your side\n"
-            "4. Block the user\n"
-            "5. Log the event to the log group\n\n"
-            "<b>Ignores:</b> contacts, bots, chats you started yourself"
+        
+        "main_menu": (
+            "<b>Raid Protection</b>\n"
+            "<blockquote>Status: {status}\n"
+            "Total blocked: {total}</blockquote>"
         ),
-        "enabled": "<b>Raid protection enabled</b>",
-        "disabled": "<b>Raid protection disabled</b>",
+        
+        "stats_menu": (
+            "<b>Raid Protection Statistics</b>\n"
+            "<blockquote>Total blocked: {total}\n"
+            "Peak day: {peak_date}\n"
+            "Peak count: {peak_count}</blockquote>"
+        ),
+        
+        "stats_empty": (
+            "<b>Raid Protection Statistics</b>\n"
+            "<blockquote>No raids recorded yet</blockquote>"
+        ),
+        
+        "btn_toggle": "Toggle Protection",
+        "btn_stats": "Statistics",
+        "btn_back": "Back",
+        "btn_close": "Close",
+        
+        "status_enabled": "Enabled",
+        "status_disabled": "Disabled",
+        
+        "enabled": (
+            "<b>Raid Protection Enabled</b>\n"
+            "<blockquote>Unknown users will be blocked automatically</blockquote>"
+        ),
+        
+        "disabled": (
+            "<b>Raid Protection Disabled</b>\n"
+            "<blockquote>Protection is now inactive</blockquote>"
+        ),
+        
         "banned_log": (
-            "<b>Raid protection triggered</b>\n\n"
-            "<b>User:</b> <a href='tg://user?id={user_id}'>{name}</a>\n"
-            "<b>ID:</b> <code>{user_id}</code>\n"
+            "<b>Raid Protection Triggered</b>\n"
+            "<blockquote>User: <a href='tg://user?id={user_id}'>{name}</a>\n"
+            "ID: <code>{user_id}</code>\n"
             "{username_line}"
-            "<b>Report:</b> {report_status}\n"
-            "<b>Message:</b>\n<code>{text}</code>"
+            "Report: {report_status}\n"
+            "Message: <code>{text}</code></blockquote>"
         ),
+        
         "raid_message": "Spam ban btw",
-        "reloaded": "<b>RaidProtection module reloaded, active</b>",
-        "inline_create_failed": (
-            "<b>Failed to setup log topic</b>\n\n"
-            "The module will still work but without logging."
+        "reloaded": (
+            "<b>RaidProtection Reloaded</b>\n"
+            "<blockquote>Module is active</blockquote>"
         ),
-        "stat_header": "<b>RaidProtection Statistics</b>",
-        "stat_total": "<b>Total blocked:</b> <code>{total}</code>",
-        "stat_peak_date": "<b>Peak day:</b> <code>{peak_date}</code>",
-        "stat_peak_count": "<b>Attacks on peak day:</b> <code>{peak_count}</code>",
-        "stat_empty": "<b>No raids recorded yet.</b>",
+        
+        "inline_create_failed": (
+            "<b>Setup Failed</b>\n"
+            "<blockquote>Failed to setup log topic. Module will work without logging.</blockquote>"
+        ),
+        
         "report_ok": "ok",
         "report_error": "error",
     }
 
     strings_ru = {
-        "help": (
-            "<b>RaidProtection - защита ЛС от рейдов</b>\n\n"
-            "<code>{prefix}rp</code> - включить/выключить защиту от рейдов\n"
-            "<code>{prefix}rpstat</code> - показать статистику рейдов\n\n"
-            "<b>Как работает:</b>\n"
-            "При включении, если новый неизвестный пользователь пишет вам в ЛС "
-            "(чат, которого раньше не существовало), модуль:\n"
-            "1. Отправит ему сообщение\n"
-            "2. Зарепортит спам\n"
-            "3. Удалит чат только у вас\n"
-            "4. Заблокирует пользователя\n"
-            "5. Запишет событие в группу логов\n\n"
-            "<b>Игнорирует:</b> контакты, ботов, чаты которые вы начали сами"
+        "main_menu": (
+            "<b>Защита от рейдов</b>\n"
+            "<blockquote>Статус: {status}\n"
+            "Всего заблокировано: {total}</blockquote>"
         ),
-        "enabled": "<b>Защита от рейдов включена</b>",
-        "disabled": "<b>Защита от рейдов выключена</b>",
+        
+        "stats_menu": (
+            "<b>Статистика защиты от рейдов</b>\n"
+            "<blockquote>Всего заблокировано: {total}\n"
+            "Пик был в: {peak_date}\n"
+            "Атак в пик: {peak_count}</blockquote>"
+        ),
+        
+        "stats_empty": (
+            "<b>Статистика защиты от рейдов</b>\n"
+            "<blockquote>Рейдов пока не зафиксировано</blockquote>"
+        ),
+        
+        "btn_toggle": "Переключить защиту",
+        "btn_stats": "Статистика",
+        "btn_back": "Назад",
+        "btn_close": "Закрыть",
+        
+        "status_enabled": "Включено",
+        "status_disabled": "Выключено",
+        
+        "enabled": (
+            "<b>Защита от рейдов включена</b>\n"
+            "<blockquote>Неизвестные пользователи будут блокироваться автоматически</blockquote>"
+        ),
+        
+        "disabled": (
+            "<b>Защита от рейдов выключена</b>\n"
+            "<blockquote>Защита теперь неактивна</blockquote>"
+        ),
+        
         "banned_log": (
-            "<b>Сработала защита от рейдов</b>\n\n"
-            "<b>Пользователь:</b> <a href='tg://user?id={user_id}'>{name}</a>\n"
-            "<b>ID:</b> <code>{user_id}</code>\n"
+            "<b>Сработала защита от рейдов</b>\n"
+            "<blockquote>Пользователь: <a href='tg://user?id={user_id}'>{name}</a>\n"
+            "ID: <code>{user_id}</code>\n"
             "{username_line}"
-            "<b>Репорт:</b> {report_status}\n"
-            "<b>Сообщение:</b>\n<code>{text}</code>"
+            "Репорт: {report_status}\n"
+            "Сообщение: <code>{text}</code></blockquote>"
         ),
+        
         "raid_message": "Spam ban btw",
-        "reloaded": "<b>Модуль RaidProtection перезагружен, активен</b>",
-        "inline_create_failed": (
-            "<b>Не удалось настроить топик логов</b>\n\n"
-            "Модуль продолжит работать, но без логирования."
+        "reloaded": (
+            "<b>RaidProtection перезагружен</b>\n"
+            "<blockquote>Модуль активен</blockquote>"
         ),
-        "stat_header": "<b>Статистика RaidProtection</b>",
-        "stat_total": "<b>Всего заблокировано:</b> <code>{total}</code>",
-        "stat_peak_date": "<b>Самый пик был в:</b> <code>{peak_date}</code>",
-        "stat_peak_count": "<b>Атаковавших в пик:</b> <code>{peak_count}</code>",
-        "stat_empty": "<b>Рейдов пока не зафиксировано.</b>",
+        
+        "inline_create_failed": (
+            "<b>Ошибка настройки</b>\n"
+            "<blockquote>Не удалось настроить топик логов. Модуль будет работать без логирования.</blockquote>"
+        ),
+        
         "report_ok": "ok",
         "report_error": "error",
     }
@@ -231,52 +274,85 @@ class RaidProtection(loader.Module):
         self._processing.discard(user_id)
         logger.debug(f"[RaidProtection] Approved {user_id}, reason: {reason}")
 
-    @loader.command(
-        ru_doc="Включить/выключить защиту от рейдов",
-        en_doc="Toggle raid protection on/off",
-    )
-    async def rp(self, message: Message):
-        """Toggle raid protection on/off"""
-        args = utils.get_args_raw(message)
-        if not args:
-            current = self.get("state", False)
-            new = not current
-            self.set("state", new)
-            if new:
-                await utils.answer(message, self.strings["enabled"])
-            else:
-                await utils.answer(message, self.strings["disabled"])
-            return
-        prefix = self.get_prefix()
-        await utils.answer(
-            message,
-            self.strings["help"].format(prefix=prefix),
+    def _get_main_markup(self):
+        return [
+            [
+                {"text": self.strings["btn_toggle"], "callback": self._cb_toggle, "style": "success" if not self.get("state", False) else "danger"},
+            ],
+            [
+                {"text": self.strings["btn_stats"], "callback": self._cb_stats, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"},
+            ],
+        ]
+
+    def _format_main_text(self):
+        status = self.strings["status_enabled"] if self.get("state", False) else self.strings["status_disabled"]
+        total = self.get("total_bans", 0)
+        
+        return self.strings["main_menu"].format(
+            status=status,
+            total=total
         )
 
-    @loader.command(
-        ru_doc="Показать статистику рейдов",
-        en_doc="Show raid statistics",
-    )
-    async def rpstat(self, message: Message):
-        """Show raid protection statistics"""
+    async def _cb_main_menu(self, call: InlineCall):
+        await call.edit(
+            self._format_main_text(),
+            reply_markup=self._get_main_markup()
+        )
+
+    async def _cb_toggle(self, call: InlineCall):
+        current = self.get("state", False)
+        new = not current
+        self.set("state", new)
+        
+        if new:
+            await call.edit(
+                self.strings["enabled"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+        else:
+            await call.edit(
+                self.strings["disabled"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
+
+    async def _cb_stats(self, call: InlineCall):
         total = self.get("total_bans", 0)
         ban_dates = self.get("ban_dates", [])
 
         if total == 0 or not ban_dates:
-            await utils.answer(message, self.strings["stat_empty"])
+            await call.edit(
+                self.strings["stats_empty"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            )
             return
 
         date_counter = Counter(ban_dates)
         peak_date, peak_count = date_counter.most_common(1)[0]
 
-        stat_text = (
-            self.strings["stat_header"] + "\n\n"
-            + self.strings["stat_total"].format(total=total) + "\n"
-            + self.strings["stat_peak_date"].format(peak_date=peak_date) + "\n"
-            + self.strings["stat_peak_count"].format(peak_count=peak_count)
+        await call.edit(
+            self.strings["stats_menu"].format(
+                total=total,
+                peak_date=peak_date,
+                peak_count=peak_count
+            ),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
         )
 
-        await utils.answer(message, stat_text)
+    async def _cb_close(self, call: InlineCall):
+        await call.delete()
+
+    @loader.command()
+    async def rp(self, message: Message):
+        """Raid protection control"""
+        await self.inline.form(
+            text=self._format_main_text(),
+            message=message,
+            reply_markup=self._get_main_markup(),
+            silent=True,
+        )
 
     @loader.watcher()
     async def watcher(self, message: Message):
@@ -385,7 +461,7 @@ class RaidProtection(loader.Module):
                 else raw[:3000]
             )
 
-            username_line = f"<b>Username:</b> @{username}\n" if username else ""
+            username_line = f"Username: @{username}\n" if username else ""
 
             log_text = self.strings["banned_log"].format(
                 user_id=sender_id,
