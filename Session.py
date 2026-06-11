@@ -1,5 +1,4 @@
-__version__ = (2, 3, 3)
-# meta developer: I_execute.t.me
+__version__ = (2, 3, 4)
 
 import logging
 import asyncio
@@ -778,7 +777,7 @@ class Session(loader.Module):
                         "input": self.strings["input_phone"],
                         "handler": self._input_phone,
                         "args": (session_id,),
-                        "style": "success",
+                        "style": "primary",
                     }
                 ],
                 [
@@ -809,7 +808,7 @@ class Session(loader.Module):
                         "input": self.strings["input_phone"],
                         "handler": self._input_phone,
                         "args": (session_id,),
-                        "style": "success",
+                        "style": "primary",
                     }
                 ],
                 [
@@ -840,7 +839,7 @@ class Session(loader.Module):
                         "input": self.strings["input_phone"],
                         "handler": self._input_phone,
                         "args": (session_id,),
-                        "style": "success",
+                        "style": "primary",
                     }
                 ],
                 [
@@ -883,7 +882,7 @@ class Session(loader.Module):
                             "input": self.strings["input_code"],
                             "handler": self._input_code,
                             "args": (session_id,),
-                            "style": "success",
+                            "style": "primary",
                         }
                     ],
                     [
@@ -919,7 +918,7 @@ class Session(loader.Module):
                             "input": self.strings["input_password"],
                             "handler": self._input_password,
                             "args": (session_id,),
-                            "style": "success",
+                            "style": "primary",
                         }
                     ],
                     [
@@ -1189,14 +1188,14 @@ class Session(loader.Module):
                 
                 if input_type == 'hex':
                     buttons.append([
-                        {"text": self.strings["btn_test"], "callback": self._cb_test_hex_select_dc, "args": (session_id,), "style": "success"}
+                        {"text": self.strings["btn_test"], "callback": self._cb_test_hex_select_dc, "args": (session_id,), "style": "primary"}
                     ])
                     buttons.append([
                         {"text": self.strings["btn_convert"], "callback": self._cb_convert_hex, "args": (session_id,), "style": "primary"}
                     ])
                 else:
                     buttons.append([
-                        {"text": self.strings["btn_test"], "callback": self._cb_test_session, "args": (session_id,), "style": "success"}
+                        {"text": self.strings["btn_test"], "callback": self._cb_test_session, "args": (session_id,), "style": "primary"}
                     ])
                     
                     if input_type == 'string':
@@ -1209,10 +1208,6 @@ class Session(loader.Module):
                             {"text": self.strings["btn_string"], "callback": self._cb_convert_string, "args": (session_id,), "style": "primary"},
                             {"text": self.strings["btn_hex"], "callback": self._cb_convert_hex_from_other, "args": (session_id,), "style": "primary"},
                         ])
-                
-                buttons.append([
-                    {"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}
-                ])
                 
                 await self.inline.form(
                     text=self.strings["main_menu_convert_format" if input_type != 'hex' else "main_menu_convert_hex"].format(

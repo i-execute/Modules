@@ -1,6 +1,6 @@
-__version__ = (3, 6, 0)
-# meta developer: I_execute.t.me
-# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/MetaBanner.jpeg
+__version__ = (4, 0, 4)
+# meta developer: I_execute.t.me 
+# meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner_new.jpeg
 
 import os
 import asyncio
@@ -11,20 +11,14 @@ import platform
 import json
 import subprocess
 import shutil
-import socket
 import uuid
 import ipaddress
 import tempfile
 import re
+import random
 from datetime import datetime, timedelta
+from typing import Optional, Dict, List, Tuple
 
-from aiogram.types import (
-    Message as AiogramMessage,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    CopyTextButton,
-    LinkPreviewOptions,
-)
 from .. import loader, utils
 from ..inline.types import InlineCall
 
@@ -32,394 +26,609 @@ logger = logging.getLogger(__name__)
 
 LOG_MAX_SIZE = 30 * 1024 * 1024
 LOG_KEEP_SIZE = 10 * 1024 * 1024
-STATS_API_PORT = 10085
-STATS_API_TAG = "api"
-
+BASE_PORT = 8443
 
 def _escape(text):
     if not text:
         return ""
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+def _strip_md(text: str) -> str:
+    import re
+    return re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'', text).strip()
 
 def _in_docker():
     if os.path.isfile("/.dockerenv"):
         return True
-
     try:
         with open("/proc/1/cgroup", "rt") as f:
             data = f.read()
-
-        docker_markers = (
-            "docker",
-            "kubepods",
-            "containerd",
-            "podman",
-            "lxc",
-        )
-
+        docker_markers = ("docker", "kubepods", "containerd", "podman", "lxc")
         if any(marker in data for marker in docker_markers):
             return True
-
     except Exception:
         pass
-
     try:
         with open("/proc/1/environ", "rb") as f:
             env = f.read()
-
         if b"container=" in env:
             return True
-
     except Exception:
         pass
-
     return False
 
 @loader.tds
 class XRay(loader.Module):
-    """Run VPN on your VPS server (VLESS + reality)"""
+    """Multi-user VPN with VLESS+Reality (XHTTP/TCP+Vision)"""
 
     strings = {
         "name": "XRay",
         
         "main_menu": (
-            "<b>XRay VLESS+Reality</b>\n"
-            "<blockquote>Status: {status}\n"
-            "Port: {port}\n"
-            "Uptime: {uptime}</blockquote>"
+            "<b>XRay Multi-User VPN</b>\n"
+            "<blockquote>Total users: {total}\n"
+            "Active: {active}\n"
+            "XRay version: {version}</blockquote>"
         ),
         
-        "status_menu": (
-            "<b>XRay Status</b>\n"
-            "<blockquote>State: {state}\n"
-            "PID: {pid}\n"
-            "Uptime: {uptime}\n"
-            "Traffic RX: {rx}\n"
-            "Traffic TX: {tx}\n"
-            "Active clients: {active}\n"
-            "Unique IPs (24h): {unique}\n"
-            "Port: {port}</blockquote>"
+        "setup_menu": (
+            "<b>Setup & Installation</b>\n"
+            "<blockquote>"
+            "XRay Core: {xray_status}\n"
+            "GitHub API: {gh_status}"
+            "</blockquote>"
         ),
         
-        "settings_menu": (
-            "<b>XRay Settings</b>\n"
-            "<blockquote>Port: {port}\n"
-            "SNI: {sni}\n"
-            "Dest: {dest}\n"
-            "IP: {ip}</blockquote>"
+        "xray_install_menu": (
+            "<b>XRay Core Installation</b>\n"
+            "<blockquote>"
+            "Current: {current}\n"
+            "Select version to install:"
+            "</blockquote>"
         ),
+        
+        "xray_installing": (
+            "<b>Installing XRay</b>\n"
+            "<blockquote>Version: {version}\nPlease wait...</blockquote>"
+        ),
+        
+        "loading": "<b>Loading...</b>",
+        
+        "collecting_versions": "<b>Collecting versions...</b>",
+        
+        "user_item": "{status} {name} ({port})",
         
         "users_menu": (
-            "<b>Trusted Users</b>\n"
-            "<blockquote>Total: {count}\n"
-            "{users}</blockquote>"
+            "<b>Users Management</b>\n"
+            "<blockquote>Total: {total}\nActive: {active}</blockquote>"
         ),
         
-        "cleanup_confirm": (
-            "<b>Full Cleanup Warning</b>\n"
-            "<blockquote>This will:\n"
-            "- Kill all XRay processes\n"
-            "- Delete all files and configs\n"
-            "- Clear database\n"
-            "- Remove all traces\n\n"
-            "This action cannot be undone!</blockquote>"
+        "user_menu": (
+            "<b>User: {name}</b>\n"
+            "<blockquote>"
+            "Status: {status}\n"
+            "Transport: {transport}\n"
+            "Port: {port}\n"
+            "Device limit: {limit}\n"
+            "Active devices: {active}\n"
+            "Uptime: {uptime}"
+            "</blockquote>"
         ),
         
-        "cleanup_done": (
-            "<b>Cleanup Complete</b>\n"
-            "<blockquote>All XRay data removed</blockquote>"
+        "user_settings": (
+            "<b>Settings: {name}</b>\n"
+            "<blockquote>"
+            "Transport: {transport}\n"
+            "SNI: {sni}\n"
+            "Dest: {dest}\n"
+            "Path: {path}\n"
+            "Padding: {padding}\n"
+            "Fingerprint: {fp}\n"
+            "Device limit: {limit}"
+            "</blockquote>"
         ),
         
-        "btn_status": "Status",
-        "btn_start": "Start",
-        "btn_stop": "Stop",
-        "btn_restart": "Restart",
-        "btn_settings": "Settings",
-        "btn_users": "Users",
-        "btn_get_link": "Get Link",
-        "btn_cleanup": "Full Cleanup",
-        "btn_back": "Back",
-        "btn_close": "Close",
-        "btn_confirm_cleanup": "Confirm Cleanup",
-        "btn_cancel": "Cancel",
-        
-        "btn_set_port": "Set Port",
-        "btn_set_sni": "Set SNI",
-        "btn_set_dest": "Set Dest",
-        "btn_detect_ip": "Detect IP",
-        
-        "input_port": "Enter port (1025-65535):",
-        "input_sni": "Enter SNI domain:",
-        "input_dest": "Enter destination (domain:port):",
-        
-        "not_installed": (
-            "<b>XRay Not Installed</b>\n"
-            "<blockquote>Use setup first</blockquote>"
+        "add_user_name": (
+            "<b>Add New User</b>\n"
+            "<blockquote>Enter username (alphanumeric, no spaces):</blockquote>"
         ),
         
-        "setup_done": (
-            "<b>Setup Complete</b>\n"
-            "<blockquote>XRay installed and configured</blockquote>"
+        "add_user_transport": (
+            "<b>Add User: {name}</b>\n"
+            "<blockquote>Select transport type:</blockquote>"
         ),
         
-        "setup_fail": (
-            "<b>Setup Failed</b>\n"
-            "<blockquote>{error}</blockquote>"
+        "add_user_limit": (
+            "<b>Add User: {name}</b>\n"
+            "<blockquote>Enter device limit (0 = unlimited):</blockquote>"
         ),
         
-        "setup_docker": (
-            "<b>Docker Detected</b>\n"
-            "<blockquote>This module cannot work in Docker</blockquote>"
+        "user_created": (
+            "<b>User Created</b>\n"
+            "<blockquote>"
+            "Name: {name}\n"
+            "Port: {port}\n"
+            "Transport: {transport}\n"
+            "Limit: {limit}"
+            "</blockquote>"
         ),
         
-        "started": (
-            "<b>XRay Started</b>\n"
-            "<blockquote>Port: {port}\n"
-            "IP: {ip}</blockquote>"
+        "user_deleted": (
+            "<b>User Deleted</b>\n"
+            "<blockquote>{name} removed</blockquote>"
         ),
         
-        "stopped": (
-            "<b>XRay Stopped</b>\n"
-            "<blockquote>Service is offline</blockquote>"
+        "user_started": (
+            "<b>Started</b>\n"
+            "<blockquote>{name} is now online</blockquote>"
         ),
         
-        "already_running": (
-            "<b>Already Running</b>\n"
-            "<blockquote>XRay is active</blockquote>"
+        "user_stopped": (
+            "<b>Stopped</b>\n"
+            "<blockquote>{name} is now offline</blockquote>"
         ),
         
-        "not_running": (
-            "<b>Not Running</b>\n"
-            "<blockquote>Start XRay first</blockquote>"
+        "link_message": (
+            "<b>VLESS Link: {name}</b>\n"
+            "<blockquote>"
+            "Clients:\n"
+            "iOS/Android: v2RayTun, v2rayNG"
+            "</blockquote>"
+        ),
+        "link_sent": (
+            "<b>VLESS Link: {name}</b>\n"
+            "<blockquote>"
+            "Clients:\n"
+            "iOS/Android: v2RayTun, v2rayNG\n\n"
+            "Link file sent to chat"
+            "</blockquote>"
         ),
         
-        "port_set": (
-            "<b>Port Updated</b>\n"
-            "<blockquote>New port: {port}\n"
-            "Restart required</blockquote>"
+        "padding_menu": (
+            "<b>Padding Bytes: {name}</b>\n"
+            "<blockquote>"
+            "Current: {min}-{max}\n"
+            "Set minimum and maximum values"
+            "</blockquote>"
+        ),
+        
+        "padding_set": (
+            "<b>Padding Updated</b>\n"
+            "<blockquote>{min}-{max} bytes</blockquote>"
         ),
         
         "sni_set": (
             "<b>SNI Updated</b>\n"
-            "<blockquote>New SNI: {sni}\n"
-            "Restart required</blockquote>"
+            "<blockquote>{sni}</blockquote>"
         ),
         
         "dest_set": (
             "<b>Dest Updated</b>\n"
-            "<blockquote>New dest: {dest}\n"
-            "Restart required</blockquote>"
+            "<blockquote>{dest}</blockquote>"
         ),
         
-        "ip_detected": (
-            "<b>IP Detected</b>\n"
-            "<blockquote>External IP: {ip}</blockquote>"
+        "path_set": (
+            "<b>Path Updated</b>\n"
+            "<blockquote>{path}</blockquote>"
         ),
         
-        "ip_fail": (
-            "<b>IP Detection Failed</b>\n"
-            "<blockquote>Cannot detect external IP</blockquote>"
+        "fp_set": (
+            "<b>Fingerprint Updated</b>\n"
+            "<blockquote>{fp}</blockquote>"
         ),
         
-        "link_message": (
-            "<b>Your VLESS Link</b>\n"
-            "<blockquote>Download client:\n"
-            "iOS: v2RayTun\n"
-            "Android: v2RayTun\n\n"
-            "Tap button to copy link</blockquote>"
+        "limit_set": (
+            "<b>Device Limit Updated</b>\n"
+            "<blockquote>{limit}</blockquote>"
         ),
         
-        "link_not_ready": (
-            "<b>Link Not Ready</b>\n"
-            "<blockquote>Setup and start XRay first</blockquote>"
+        "btn_setup": "Setup",
+        "btn_users": "Users",
+        "btn_add_user": "Add User",
+        "btn_back": "Back",
+        "btn_close": "Close",
+        "btn_start": "Start",
+        "btn_stop": "Stop",
+        "btn_restart": "Restart",
+        "btn_get_link": "Get Link",
+        "btn_get_logs": "Get Logs",
+        "btn_settings": "Settings",
+        "btn_delete": "Delete User",
+        "btn_xhttp": "XHTTP",
+        "btn_tcp": "TCP+Vision",
+        "btn_set_sni": "Set SNI",
+        "btn_set_dest": "Set Dest",
+        "btn_set_path": "Set Path",
+        "btn_set_padding": "Padding",
+        "btn_set_fp": "Fingerprint",
+        "btn_set_limit": "Device Limit",
+        "btn_toggle_transport": "Switch Transport",
+        "btn_chrome": "Chrome",
+        "btn_firefox": "Firefox",
+        "btn_safari": "Safari",
+        "btn_install_xray": "Install XRay Core",
+        "btn_reinstall_xray": "Reinstall XRay Core",
+        
+        "input_name": "Enter username:",
+        "input_limit": "Enter device limit:",
+        "input_sni": "Enter SNI (e.g. www.microsoft.com):",
+        "input_dest": "Enter dest (e.g. www.microsoft.com:443):",
+        "input_path": "Enter path (e.g. /xhttps):",
+        "input_padding_min": "Enter minimum padding bytes:",
+        "input_padding_max": "Enter maximum padding bytes:",
+        
+        "err_docker": (
+            "<b>Docker Detected</b>\n"
+            "<blockquote>Module cannot work in containers</blockquote>"
         ),
         
-        "no_users": "No users added",
+        "err_name_exists": (
+            "<b>Error</b>\n"
+            "<blockquote>Username already exists</blockquote>"
+        ),
         
-        "status_running": "Running",
-        "status_stopped": "Stopped",
+        "err_invalid_name": (
+            "<b>Error</b>\n"
+            "<blockquote>Invalid username format</blockquote>"
+        ),
         
-        "bot_copy_button": "COPY LINK",
+        "err_invalid_limit": (
+            "<b>Error</b>\n"
+            "<blockquote>Limit must be a number</blockquote>"
+        ),
+        
+        "err_invalid_padding": (
+            "<b>Error</b>\n"
+            "<blockquote>Max must be greater than min</blockquote>"
+        ),
+        
+        "err_port_busy": (
+            "<b>Error</b>\n"
+            "<blockquote>Port {port} is busy</blockquote>"
+        ),
+        
+        "err_not_running": (
+            "<b>Error</b>\n"
+            "<blockquote>User is not running</blockquote>"
+        ),
+        
+        "err_already_running": (
+            "<b>Error</b>\n"
+            "<blockquote>User is already running</blockquote>"
+        ),
+        
+        "setup_done": (
+            "<b>Installation Complete</b>\n"
+            "<blockquote>XRay {version} installed successfully</blockquote>"
+        ),
+        
+        "setup_fail": (
+            "<b>Installation Failed</b>\n"
+            "<blockquote>{error}</blockquote>"
+        ),
+        
+        "device_limit_exceeded": (
+            "<b>Device Limit Exceeded</b>\n"
+            "<blockquote>"
+            "User: {name}\n"
+            "Limit: {limit}\n"
+            "Active: {active}\n"
+            "Process killed"
+            "</blockquote>"
+        ),
+        
+        "status_online": "Online",
+        "status_offline": "Offline",
+
+        "gh_auth_pending": (
+            "<b>GitHub Authorization</b>\n"
+            "<blockquote>"
+            "Open: {url}\n"
+            "Enter code: <code>{code}</code>\n\n"
+            "Waiting for confirmation..."
+            "</blockquote>"
+        ),
+        "gh_auth_done": (
+            "<b>GitHub Authorized</b>\n"
+            "<blockquote>Token saved. Rate limit is now higher.</blockquote>"
+        ),
+        "gh_auth_fail": (
+            "<b>GitHub Auth Failed</b>\n"
+            "<blockquote>{error}</blockquote>"
+        ),
+        "gh_auth_already": (
+            "<b>GitHub Already Authorized</b>\n"
+            "<blockquote>Token is active. To re-authorize, revoke it first.</blockquote>"
+        ),
+        "btn_gh_auth": "GitHub Auth",
+        "btn_gh_revoke": "Revoke Token",
     }
 
     strings_ru = {
         "main_menu": (
-            "<b>XRay VLESS+Reality</b>\n"
-            "<blockquote>Статус: {status}\n"
-            "Порт: {port}\n"
-            "Аптайм: {uptime}</blockquote>"
+            "<b>XRay Мультиюзерный VPN</b>\n"
+            "<blockquote>Всего юзеров: {total}\n"
+            "Активных: {active}\n"
+            "Версия XRay: {version}</blockquote>"
         ),
         
-        "status_menu": (
-            "<b>Статус XRay</b>\n"
-            "<blockquote>Состояние: {state}\n"
-            "PID: {pid}\n"
-            "Аптайм: {uptime}\n"
-            "Трафик RX: {rx}\n"
-            "Трафик TX: {tx}\n"
-            "Активные клиенты: {active}\n"
-            "Уникальные IP (24ч): {unique}\n"
-            "Порт: {port}</blockquote>"
+        "setup_menu": (
+            "<b>Установка и настройка</b>\n"
+            "<blockquote>"
+            "XRay Core: {xray_status}\n"
+            "GitHub API: {gh_status}"
+            "</blockquote>"
         ),
         
-        "settings_menu": (
-            "<b>Настройки XRay</b>\n"
-            "<blockquote>Порт: {port}\n"
-            "SNI: {sni}\n"
-            "Dest: {dest}\n"
-            "IP: {ip}</blockquote>"
+        "xray_install_menu": (
+            "<b>Установка XRay Core</b>\n"
+            "<blockquote>"
+            "Текущая: {current}\n"
+            "Выберите версию для установки:"
+            "</blockquote>"
         ),
+        
+        "xray_installing": (
+            "<b>Установка XRay</b>\n"
+            "<blockquote>Версия: {version}\nПодождите...</blockquote>"
+        ),
+        
+        "loading": "<b>Загрузка...</b>",
+        
+        "collecting_versions": "<b>Сбор версий...</b>",
+        
+        "user_item": "{status} {name} ({port})",
         
         "users_menu": (
-            "<b>Доверенные пользователи</b>\n"
-            "<blockquote>Всего: {count}\n"
-            "{users}</blockquote>"
+            "<b>Управление юзерами</b>\n"
+            "<blockquote>Всего: {total}\nАктивных: {active}</blockquote>"
         ),
         
-        "cleanup_confirm": (
-            "<b>Полная очистка - Предупреждение</b>\n"
-            "<blockquote>Будет выполнено:\n"
-            "- Убийство всех процессов XRay\n"
-            "- Удаление всех файлов и конфигов\n"
-            "- Очистка базы данных\n"
-            "- Удаление всех следов\n\n"
-            "Это действие необратимо!</blockquote>"
+        "user_menu": (
+            "<b>Юзер: {name}</b>\n"
+            "<blockquote>"
+            "Статус: {status}\n"
+            "Транспорт: {transport}\n"
+            "Порт: {port}\n"
+            "Лимит устройств: {limit}\n"
+            "Активных устройств: {active}\n"
+            "Аптайм: {uptime}"
+            "</blockquote>"
         ),
         
-        "cleanup_done": (
-            "<b>Очистка завершена</b>\n"
-            "<blockquote>Все данные XRay удалены</blockquote>"
+        "user_settings": (
+            "<b>Настройки: {name}</b>\n"
+            "<blockquote>"
+            "Транспорт: {transport}\n"
+            "SNI: {sni}\n"
+            "Dest: {dest}\n"
+            "Путь: {path}\n"
+            "Padding: {padding}\n"
+            "Fingerprint: {fp}\n"
+            "Лимит: {limit}"
+            "</blockquote>"
         ),
         
-        "btn_status": "Статус",
+        "add_user_name": (
+            "<b>Добавить юзера</b>\n"
+            "<blockquote>Введите имя (латиница, без пробелов):</blockquote>"
+        ),
+        
+        "add_user_transport": (
+            "<b>Добавить: {name}</b>\n"
+            "<blockquote>Выберите транспорт:</blockquote>"
+        ),
+        
+        "add_user_limit": (
+            "<b>Добавить: {name}</b>\n"
+            "<blockquote>Лимит устройств (0 = безлимит):</blockquote>"
+        ),
+        
+        "user_created": (
+            "<b>Юзер создан</b>\n"
+            "<blockquote>"
+            "Имя: {name}\n"
+            "Порт: {port}\n"
+            "Транспорт: {transport}\n"
+            "Лимит: {limit}"
+            "</blockquote>"
+        ),
+        
+        "user_deleted": (
+            "<b>Юзер удалён</b>\n"
+            "<blockquote>{name} удалён</blockquote>"
+        ),
+        
+        "user_started": (
+            "<b>Запущен</b>\n"
+            "<blockquote>{name} онлайн</blockquote>"
+        ),
+        
+        "user_stopped": (
+            "<b>Остановлен</b>\n"
+            "<blockquote>{name} офлайн</blockquote>"
+        ),
+        
+        "link_message": (
+            "<b>VLESS ссылка: {name}</b>\n"
+            "<blockquote>"
+            "Клиенты:\n"
+            "iOS/Android: v2RayTun, v2rayNG\n\n"
+            "Нажмите для копирования"
+            "</blockquote>"
+        ),
+        
+        "padding_menu": (
+            "<b>Padding Bytes: {name}</b>\n"
+            "<blockquote>"
+            "Текущий: {min}-{max}\n"
+            "Установите мин. и макс. значения"
+            "</blockquote>"
+        ),
+        
+        "padding_set": (
+            "<b>Padding обновлён</b>\n"
+            "<blockquote>{min}-{max} байт</blockquote>"
+        ),
+        
+        "sni_set": (
+            "<b>SNI обновлён</b>\n"
+            "<blockquote>{sni}</blockquote>"
+        ),
+        
+        "dest_set": (
+            "<b>Dest обновлён</b>\n"
+            "<blockquote>{dest}</blockquote>"
+        ),
+        
+        "path_set": (
+            "<b>Путь обновлён</b>\n"
+            "<blockquote>{path}</blockquote>"
+        ),
+        
+        "fp_set": (
+            "<b>Fingerprint обновлён</b>\n"
+            "<blockquote>{fp}</blockquote>"
+        ),
+        
+        "limit_set": (
+            "<b>Лимит обновлён</b>\n"
+            "<blockquote>{limit}</blockquote>"
+        ),
+        
+        "btn_setup": "Настройка",
+        "btn_users": "Юзеры",
+        "btn_add_user": "Добавить юзера",
+        "btn_back": "Назад",
+        "btn_close": "Закрыть",
         "btn_start": "Запустить",
         "btn_stop": "Остановить",
         "btn_restart": "Перезапустить",
-        "btn_settings": "Настройки",
-        "btn_users": "Пользователи",
         "btn_get_link": "Получить ссылку",
-        "btn_cleanup": "Полная очистка",
-        "btn_back": "Назад",
-        "btn_close": "Закрыть",
-        "btn_confirm_cleanup": "Подтвердить очистку",
-        "btn_cancel": "Отмена",
+        "btn_get_logs": "Получить логи",
+        "btn_settings": "Настройки",
+        "btn_delete": "Удалить",
+        "btn_xhttp": "XHTTP",
+        "btn_tcp": "TCP+Vision",
+        "btn_set_sni": "SNI",
+        "btn_set_dest": "Dest",
+        "btn_set_path": "Путь",
+        "btn_set_padding": "Padding",
+        "btn_set_fp": "Fingerprint",
+        "btn_set_limit": "Лимит",
+        "btn_toggle_transport": "Сменить транспорт",
+        "btn_chrome": "Chrome",
+        "btn_firefox": "Firefox",
+        "btn_safari": "Safari",
+        "btn_install_xray": "Установить XRay Core",
+        "btn_reinstall_xray": "Переустановить XRay Core",
         
-        "btn_set_port": "Установить порт",
-        "btn_set_sni": "Установить SNI",
-        "btn_set_dest": "Установить Dest",
-        "btn_detect_ip": "Определить IP",
+        "input_name": "Введите имя:",
+        "input_limit": "Введите лимит:",
+        "input_sni": "Введите SNI (напр. www.microsoft.com):",
+        "input_dest": "Введите dest (напр. www.microsoft.com:443):",
+        "input_path": "Введите путь (напр. /xhttps):",
+        "input_padding_min": "Минимальный padding (байты):",
+        "input_padding_max": "Максимальный padding (байты):",
         
-        "input_port": "Введите порт (1025-65535):",
-        "input_sni": "Введите SNI домен:",
-        "input_dest": "Введите назначение (домен:порт):",
+        "err_docker": (
+            "<b>Обнаружен Docker</b>\n"
+            "<blockquote>Модуль не работает в контейнерах</blockquote>"
+        ),
         
-        "not_installed": (
-            "<b>XRay не установлен</b>\n"
-            "<blockquote>Сначала выполните установку</blockquote>"
+        "err_name_exists": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Имя уже занято</blockquote>"
+        ),
+        
+        "err_invalid_name": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Неверный формат имени</blockquote>"
+        ),
+        
+        "err_invalid_limit": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Лимит должен быть числом</blockquote>"
+        ),
+        
+        "err_invalid_padding": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Макс должен быть больше мин</blockquote>"
+        ),
+        
+        "err_port_busy": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Порт {port} занят</blockquote>"
+        ),
+        
+        "err_not_running": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Юзер не запущен</blockquote>"
+        ),
+        
+        "err_already_running": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Юзер уже запущен</blockquote>"
         ),
         
         "setup_done": (
             "<b>Установка завершена</b>\n"
-            "<blockquote>XRay установлен и настроен</blockquote>"
+            "<blockquote>XRay {version} успешно установлен</blockquote>"
         ),
         
         "setup_fail": (
-            "<b>Установка не удалась</b>\n"
+            "<b>Ошибка установки</b>\n"
             "<blockquote>{error}</blockquote>"
         ),
         
-        "setup_docker": (
-            "<b>Обнаружен Docker</b>\n"
-            "<blockquote>Модуль не может работать в Docker</blockquote>"
+        "device_limit_exceeded": (
+            "<b>Превышен лимит устройств</b>\n"
+            "<blockquote>"
+            "Юзер: {name}\n"
+            "Лимит: {limit}\n"
+            "Активных: {active}\n"
+            "Процесс убит"
+            "</blockquote>"
         ),
         
-        "started": (
-            "<b>XRay запущен</b>\n"
-            "<blockquote>Порт: {port}\n"
-            "IP: {ip}</blockquote>"
+        "status_online": "Онлайн",
+        "status_offline": "Офлайн",
+
+        "gh_auth_pending": (
+            "<b>Авторизация GitHub</b>\n"
+            "<blockquote>"
+            "Откройте: {url}\n"
+            "Введите код: <code>{code}</code>\n\n"
+            "Ожидание подтверждения..."
+            "</blockquote>"
         ),
-        
-        "stopped": (
-            "<b>XRay остановлен</b>\n"
-            "<blockquote>Сервис не активен</blockquote>"
+        "gh_auth_done": (
+            "<b>GitHub авторизован</b>\n"
+            "<blockquote>Токен сохранён. Лимит запросов повышен.</blockquote>"
         ),
-        
-        "already_running": (
-            "<b>Уже запущен</b>\n"
-            "<blockquote>XRay активен</blockquote>"
+        "gh_auth_fail": (
+            "<b>Ошибка авторизации GitHub</b>\n"
+            "<blockquote>{error}</blockquote>"
         ),
-        
-        "not_running": (
-            "<b>Не запущен</b>\n"
-            "<blockquote>Сначала запустите XRay</blockquote>"
+        "gh_auth_already": (
+            "<b>GitHub уже авторизован</b>\n"
+            "<blockquote>Токен активен. Для повторной авторизации сначала отзовите его.</blockquote>"
         ),
+        "btn_gh_auth": "Авторизация GitHub",
+        "btn_gh_revoke": "Отозвать токен",
         
-        "port_set": (
-            "<b>Порт обновлен</b>\n"
-            "<blockquote>Новый порт: {port}\n"
-            "Требуется перезапуск</blockquote>"
-        ),
-        
-        "sni_set": (
-            "<b>SNI обновлен</b>\n"
-            "<blockquote>Новый SNI: {sni}\n"
-            "Требуется перезапуск</blockquote>"
-        ),
-        
-        "dest_set": (
-            "<b>Dest обновлен</b>\n"
-            "<blockquote>Новый dest: {dest}\n"
-            "Требуется перезапуск</blockquote>"
-        ),
-        
-        "ip_detected": (
-            "<b>IP определен</b>\n"
-            "<blockquote>Внешний IP: {ip}</blockquote>"
-        ),
-        
-        "ip_fail": (
-            "<b>Определение IP не удалось</b>\n"
-            "<blockquote>Не удается определить внешний IP</blockquote>"
-        ),
-        
-        "link_message": (
-            "<b>Ваша VLESS ссылка</b>\n"
-            "<blockquote>Загрузите клиент:\n"
-            "iOS: v2RayTun\n"
-            "Android: v2RayTun\n\n"
-            "Нажмите кнопку для копирования</blockquote>"
-        ),
-        
-        "link_not_ready": (
-            "<b>Ссылка не готова</b>\n"
-            "<blockquote>Сначала установите и запустите XRay</blockquote>"
-        ),
-        
-        "no_users": "Нет добавленных пользователей",
-        
-        "status_running": "Запущен",
-        "status_stopped": "Остановлен",
-        
-        "bot_copy_button": "КОПИРОВАТЬ ССЫЛКУ",
+        "loading": "<b>Загрузка...</b>",
+        "collecting_versions": "<b>Сбор версий...</b>",
     }
 
     def __init__(self):
-        self._proc = None
-        self._start_time = 0
-        self._log_lines = []
-        self._max_log_lines = 500
         self._root = None
         self._xray_path = None
-        self._config_path = None
-        self._log_reader_task = None
-        self._log_fd = None
-        self._proxy_lock = asyncio.Lock()
-        self._traffic_rx = 0
-        self._traffic_tx = 0
-        self._traffic_task = None
-        self._log_rotation_task = None
-        self._process_marker = None
+        self._users: Dict[str, Dict] = {}
+        self._processes: Dict[str, subprocess.Popen] = {}
+        self._monitor_task = None
+        self._external_ip = ""
+        self._link_cache: Dict[str, str] = {}
 
     async def client_ready(self, client, db):
         self._client = client
@@ -427,199 +636,43 @@ class XRay(loader.Module):
         self._me = await client.get_me()
 
         tg_user_id = self._me.id
-        self._root = os.path.join(
-            tempfile.gettempdir(), f"XRay_{tg_user_id}"
-        )
+        self._root = os.path.join(tempfile.gettempdir(), f"XRay_{tg_user_id}")
         self._xray_path = os.path.join(self._root, "xray")
-        self._config_path = os.path.join(self._root, "config.json")
-        self._process_marker = f"XRAY_MODULE_{tg_user_id}"
-
+        
         os.makedirs(self._root, exist_ok=True)
+        os.makedirs(os.path.join(self._root, "users"), exist_ok=True)
 
-        defaults = {
-            "port": 8443,
-            "sni": "www.google.com",
-            "dest": "www.google.com:443",
-            "trusted_users": [],
-            "external_ip": "",
-            "vless_uuid": "",
-            "private_key": "",
-            "public_key": "",
-            "short_id": "",
-        }
-        for k, v in defaults.items():
-            if self._db.get("XR", k) is None:
-                self._db.set("XR", k, v)
-
-        self._start_log_rotation_scheduler()
-
-        if self._db.get("XR", "proxy_autostart", False):
-            if self._xray_installed() and os.path.exists(self._config_path):
-                try:
-                    await self._do_start_proxy()
-                except Exception as e:
-                    logger.error("[XR] Proxy autostart error: %s", e)
+        self._users = self._db.get("XR", "users", {})
+        self._external_ip = await self._detect_external_ip()
+        
+        if not self._xray_installed():
+            logger.warning("[XR] XRay not installed")
+        
+        self._start_monitor()
 
     async def on_unload(self):
-        await self._full_cleanup()
-
-    async def _full_cleanup(self):
-        if self._log_rotation_task:
-            self._log_rotation_task.cancel()
+        if self._monitor_task:
+            self._monitor_task.cancel()
             try:
-                await self._log_rotation_task
-            except (asyncio.CancelledError, Exception):
+                await self._monitor_task
+            except asyncio.CancelledError:
                 pass
-            self._log_rotation_task = None
-
-        if self._traffic_task:
-            self._traffic_task.cancel()
-            try:
-                await self._traffic_task
-            except (asyncio.CancelledError, Exception):
-                pass
-            self._traffic_task = None
-
-        if self._log_reader_task:
-            self._log_reader_task.cancel()
-            try:
-                await self._log_reader_task
-            except (asyncio.CancelledError, Exception):
-                pass
-            self._log_reader_task = None
-
-        await self._kill_module_processes()
-
-        if self._log_fd:
-            try:
-                self._log_fd.close()
-            except Exception:
-                pass
-            self._log_fd = None
-
-        self._db.set("XR", "proxy_autostart", False)
-
-    async def _kill_module_processes(self):
-        if self._proc:
-            pid = self._proc.pid
-            try:
-                if hasattr(os, "killpg"):
-                    os.killpg(os.getpgid(pid), signal.SIGTERM)
-                else:
-                    self._proc.terminate()
-                try:
-                    self._proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    if hasattr(os, "killpg"):
-                        os.killpg(os.getpgid(pid), signal.SIGKILL)
-                    else:
-                        self._proc.kill()
-                    self._proc.wait(timeout=3)
-            except Exception:
-                try:
-                    self._proc.kill()
-                except Exception:
-                    pass
-            self._proc = None
-            self._start_time = 0
-
-        if self._process_marker:
-            try:
-                p = await asyncio.create_subprocess_exec(
-                    "pkill", "-f", self._process_marker,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                await asyncio.wait_for(p.communicate(), timeout=5)
-            except Exception:
-                pass
-
-    async def _full_module_cleanup(self):
-        await self._kill_module_processes()
-
-        if self._root and os.path.exists(self._root):
-            try:
-                shutil.rmtree(self._root, ignore_errors=True)
-            except Exception:
-                pass
-
-        for key in ["port", "sni", "dest", "trusted_users", "external_ip", 
-                    "vless_uuid", "private_key", "public_key", "short_id", 
-                    "proxy_autostart"]:
-            try:
-                self._db.set("XR", key, None)
-            except Exception:
-                pass
-
-    def _proxy_running(self):
-        if not self._proc:
-            return False
         
-        poll = self._proc.poll()
-        if poll is not None:
-            self._proc = None
-            self._start_time = 0
-            return False
-        
-        try:
-            os.kill(self._proc.pid, 0)
-            return True
-        except (ProcessLookupError, OSError):
-            self._proc = None
-            self._start_time = 0
-            return False
+        for name in list(self._processes.keys()):
+            await self._stop_user(name)
 
-    def _get_uptime(self):
-        if not self._proxy_running() or self._start_time == 0:
-            return "n/a"
-        e = int(time.time() - self._start_time)
-        d, e = divmod(e, 86400)
-        h, r = divmod(e, 3600)
-        m, s = divmod(r, 60)
-        parts = []
-        if d:
-            parts.append(f"{d}d")
-        if h:
-            parts.append(f"{h}h")
-        if m:
-            parts.append(f"{m}m")
-        parts.append(f"{s}s")
-        return " ".join(parts)
-
-    def _xray_installed(self):
+    def _xray_installed(self) -> bool:
         return (
             self._xray_path
             and os.path.isfile(self._xray_path)
             and os.access(self._xray_path, os.X_OK)
         )
 
-    def _validate_ip(self, ip_str):
-        try:
-            addr = ipaddress.IPv4Address(ip_str)
-            return not addr.is_private and not addr.is_loopback
-        except ValueError:
-            return False
-
-    async def _check_port_listening(self, port):
-        try:
-            _, writer = await asyncio.wait_for(
-                asyncio.open_connection("127.0.0.1", port), timeout=2
-            )
-            writer.close()
-            await writer.wait_closed()
-            return True
-        except Exception:
-            return False
-
-    async def _get_external_ip(self):
-        saved = self._db.get("XR", "external_ip", "")
-        if saved:
-            return saved
+    async def _detect_external_ip(self) -> str:
         for svc in [
             "https://api.ipify.org",
             "https://ifconfig.me/ip",
             "https://icanhazip.com",
-            "https://ident.me",
         ]:
             for tool in [
                 ["curl", "-4", "-s", "--max-time", "5", svc],
@@ -634,16 +687,256 @@ class XRay(loader.Module):
                     out, _ = await p.communicate()
                     if p.returncode == 0:
                         ip = out.decode().strip()
-                        if self._validate_ip(ip):
-                            self._db.set("XR", "external_ip", ip)
+                        try:
+                            ipaddress.IPv4Address(ip)
                             return ip
+                        except:
+                            continue
                 except FileNotFoundError:
                     continue
                 except Exception:
                     continue
         return ""
 
-    async def _get_xray_version(self):
+    def _gh_token(self) -> str:
+        return self._db.get("XR", "gh_token", "")
+
+    async def _gh_get_releases(self) -> List[Dict]:
+        gh_token = self._gh_token()
+        curl_cmd = ["curl", "-sL", "--max-time", "15"]
+        if gh_token:
+            curl_cmd += ["-H", f"Authorization: Bearer {gh_token}"]
+        curl_cmd.append("https://api.github.com/repos/XTLS/Xray-core/releases")
+        
+        p = await asyncio.create_subprocess_exec(
+            *curl_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, _ = await p.communicate()
+        
+        if p.returncode != 0:
+            return []
+        
+        try:
+            data = json.loads(out.decode())
+            if isinstance(data, list):
+                return data[:5]
+        except:
+            pass
+        
+        return []
+
+    async def _gh_device_flow(self, call: InlineCall):
+        token = self._gh_token()
+        if token:
+            await call.edit(
+                self.strings["gh_auth_already"],
+                reply_markup=[[
+                    {"text": self.strings["btn_gh_revoke"], "callback": self._cb_gh_revoke, "style": "danger"},
+                    {"text": self.strings["btn_back"], "callback": self._cb_setup_menu, "style": "primary"},
+                ]]
+            )
+            return
+
+        client_id = "178c6fc778ccc68e1d6a"
+
+        p = await asyncio.create_subprocess_exec(
+            "curl", "-sX", "POST",
+            "https://github.com/login/device/code",
+            "-H", "Accept: application/json",
+            "-H", "Content-Type: application/x-www-form-urlencoded",
+            "-d", f"client_id={client_id}&scope=repo",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await p.communicate()
+
+        if p.returncode != 0:
+            await call.edit(
+                self.strings["gh_auth_fail"].format(error=f"curl error: {err.decode()[:200]}"),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_setup_menu, "style": "primary"}]]
+            )
+            return
+
+        try:
+            data = json.loads(out.decode())
+        except Exception as e:
+            await call.edit(
+                self.strings["gh_auth_fail"].format(error=f"JSON parse error: {str(e)[:200]}"),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_setup_menu, "style": "primary"}]]
+            )
+            return
+
+        if "error" in data:
+            await call.edit(
+                self.strings["gh_auth_fail"].format(error=str(data)[:200]),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_setup_menu, "style": "primary"}]]
+            )
+            return
+
+        device_code = data.get("device_code")
+        user_code = data.get("user_code")
+        verification_uri = data.get("verification_uri", "https://github.com/login/device")
+        interval = int(data.get("interval", 5))
+        expires_in = int(data.get("expires_in", 900))
+
+        if not device_code or not user_code:
+            await call.edit(
+                self.strings["gh_auth_fail"].format(error="Missing device_code or user_code"),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_setup_menu, "style": "primary"}]]
+            )
+            return
+
+        await call.edit(
+            self.strings["gh_auth_pending"].format(url=verification_uri, code=user_code),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_setup_menu, "style": "primary"}]]
+        )
+
+        deadline = time.time() + expires_in
+        while time.time() < deadline:
+            await asyncio.sleep(interval)
+
+            p = await asyncio.create_subprocess_exec(
+                "curl", "-sX", "POST",
+                "https://github.com/login/oauth/access_token",
+                "-H", "Accept: application/json",
+                "-H", "Content-Type: application/x-www-form-urlencoded",
+                "-d", f"client_id={client_id}&device_code={device_code}&grant_type=urn:ietf:params:oauth:grant-type:device_code",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await p.communicate()
+
+            try:
+                resp = json.loads(out.decode())
+            except Exception:
+                continue
+
+            err = resp.get("error")
+            if err == "authorization_pending":
+                continue
+            if err == "slow_down":
+                interval += 5
+                continue
+            if err in ("expired_token", "access_denied"):
+                break
+
+            access_token = resp.get("access_token")
+            if access_token:
+                self._db.set("XR", "gh_token", access_token)
+                await call.edit(
+                    self.strings["gh_auth_done"],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_setup_menu, "style": "primary"}]]
+                )
+                return
+
+        await call.edit(
+            self.strings["gh_auth_fail"].format(error="Expired or denied"),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_setup_menu, "style": "primary"}]]
+        )
+
+    async def _cb_gh_revoke(self, call: InlineCall):
+        self._db.set("XR", "gh_token", "")
+        await self._cb_setup_menu(call)
+
+    async def _install_xray(self, tag: str) -> Tuple[bool, str]:
+        if _in_docker():
+            return False, "docker"
+        
+        arch = platform.machine().lower()
+        arch_map = {
+            "x86_64": "64",
+            "amd64": "64",
+            "aarch64": "arm64-v8a",
+            "arm64": "arm64-v8a",
+        }
+        go_arch = arch_map.get(arch)
+        if not go_arch:
+            return False, f"Unsupported arch: {arch}"
+        
+        try:
+            tmp = None
+            gh_token = self._gh_token()
+            curl_cmd = ["curl", "-sL", "--max-time", "15"]
+            if gh_token:
+                curl_cmd += ["-H", f"Authorization: Bearer {gh_token}"]
+            curl_cmd.append(f"https://api.github.com/repos/XTLS/Xray-core/releases/tags/{tag}")
+            
+            p = await asyncio.create_subprocess_exec(
+                *curl_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await p.communicate()
+            if p.returncode != 0:
+                return False, "GitHub API failed"
+            
+            raw = out.decode()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                return False, f"GitHub API bad response: {raw[:200]}"
+
+            if "message" in data:
+                return False, f"GitHub API: {data['message']}"
+
+            assets = data.get("assets", [])
+            download_url = None
+
+            for asset in assets:
+                name = asset.get("name", "").lower()
+                if "linux" in name and go_arch.lower() in name and name.endswith(".zip"):
+                    download_url = asset["browser_download_url"]
+                    break
+
+            if not download_url:
+                available = [a.get("name", "") for a in assets]
+                return False, f"No download URL for arch={go_arch} in {available}"
+            
+            tmp = os.path.join(self._root, "tmp_install")
+            os.makedirs(tmp, exist_ok=True)
+            
+            dl = os.path.join(tmp, "xray.zip")
+            p = await asyncio.create_subprocess_exec(
+                "curl", "-sL", "--max-time", "120", "-o", dl, download_url,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await p.communicate()
+            
+            if not os.path.exists(dl):
+                return False, "Download failed"
+            
+            p = await asyncio.create_subprocess_exec(
+                "python3", "-m", "zipfile", "-e", dl, tmp,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await p.communicate()
+            
+            binary = None
+            for root_dir, _, files in os.walk(tmp):
+                if "xray" in files:
+                    binary = os.path.join(root_dir, "xray")
+                    break
+            
+            if not binary:
+                return False, "Binary not found in archive"
+            
+            shutil.copy2(binary, self._xray_path)
+            os.chmod(self._xray_path, 0o755)
+            
+            version = await self._get_xray_version()
+            return True, version
+            
+        except Exception as e:
+            return False, str(e)
+        finally:
+            if tmp and os.path.exists(tmp):
+                shutil.rmtree(tmp, ignore_errors=True)
+
+    async def _get_xray_version(self) -> str:
         if not self._xray_installed():
             return "not installed"
         try:
@@ -652,30 +945,13 @@ class XRay(loader.Module):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            out, err = await p.communicate()
-            text = (out or err or b"").decode().strip()
-            return text.split("\n")[0][:200] if text else "unknown"
-        except Exception:
+            out, _ = await p.communicate()
+            text = out.decode().strip()
+            return text.split("\n")[0][:50] if text else "unknown"
+        except:
             return "unknown"
 
-    def _parse_xray_x25519_output(self, text):
-        result = {}
-        for line in text.split("\n"):
-            line = line.strip()
-            if not line or ":" not in line:
-                continue
-            key, _, val = line.partition(":")
-            key = key.strip().lower()
-            val = val.strip()
-            if "private" in key:
-                result["private"] = val
-            elif "password" in key:
-                result["public"] = val
-            elif "public" in key:
-                result["public"] = val
-        return result
-
-    async def _generate_x25519(self):
+    async def _generate_x25519(self) -> Tuple[Optional[str], Optional[str]]:
         if not self._xray_installed():
             return None, None
         try:
@@ -684,991 +960,1137 @@ class XRay(loader.Module):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            out, err = await p.communicate()
-            text = (out or b"").decode().strip()
-            if not text:
-                text = (err or b"").decode().strip()
-
-            parsed = self._parse_xray_x25519_output(text)
-            private_key = parsed.get("private", "")
-            public_key = parsed.get("public", "")
-
-            if private_key and public_key:
-                return private_key, public_key
-
+            out, _ = await p.communicate()
+            text = out.decode().strip()
+            
+            private_key = None
+            public_key = None
+            
+            for line in text.split("\n"):
+                line = line.strip().lower()
+                if "private" in line and ":" in line:
+                    private_key = line.split(":", 1)[1].strip()
+                elif "public" in line and ":" in line:
+                    public_key = line.split(":", 1)[1].strip()
+            
+            return private_key, public_key
+        except:
             return None, None
 
-        except Exception as e:
-            logger.error("[XR] x25519 error: %s", e)
-            return None, None
+    def _generate_short_id(self) -> str:
+        return os.urandom(8).hex()[:16]
 
-    def _generate_short_id(self):
-        return os.urandom(4).hex()
+    async def _get_next_port(self) -> int:
+        used_ports = {u["port"] for u in self._users.values()}
+        port = BASE_PORT
+        
+        if await self._check_port_available(port) and port not in used_ports:
+            return port
+        
+        for _ in range(100):
+            port = random.randint(BASE_PORT, 50000)
+            if port not in used_ports and await self._check_port_available(port):
+                return port
+        
+        return port
 
-    def _generate_uuid(self):
-        return str(uuid.uuid4())
-
-    def _build_config(self):
-        port = self._db.get("XR", "port", 8443)
-        vless_uuid = self._db.get("XR", "vless_uuid", "")
-        private_key = self._db.get("XR", "private_key", "")
-        short_id = self._db.get("XR", "short_id", "")
-        dest = self._db.get("XR", "dest", "www.google.com:443")
-        sni = self._db.get("XR", "sni", "www.google.com")
-
-        return {
-            "stats": {},
-            "api": {
-                "tag": STATS_API_TAG,
-                "services": [
-                    "StatsService",
-                ],
-            },
-            "policy": {
-                "system": {
-                    "statsInboundUplink": True,
-                    "statsInboundDownlink": True,
-                    "statsOutboundUplink": True,
-                    "statsOutboundDownlink": True,
-                },
-            },
-            "log": {
-                "loglevel": "info",
-                "access": os.path.join(self._root, "access.log"),
-                "error": os.path.join(self._root, "error.log"),
-            },
-            "inbounds": [
-                {
-                    "tag": "vless-reality",
-                    "listen": "0.0.0.0",
-                    "port": port,
-                    "protocol": "vless",
-                    "settings": {
-                        "clients": [
-                            {
-                                "id": vless_uuid,
-                                "flow": "xtls-rprx-vision",
-                            }
-                        ],
-                        "decryption": "none",
-                    },
-                    "streamSettings": {
-                        "network": "tcp",
-                        "security": "reality",
-                        "realitySettings": {
-                            "show": False,
-                            "dest": dest,
-                            "xver": 0,
-                            "serverNames": [sni],
-                            "privateKey": private_key,
-                            "shortIds": [short_id, ""],
-                        },
-                    },
-                    "sniffing": {
-                        "enabled": True,
-                        "destOverride": [
-                            "http", "tls", "quic",
-                        ],
-                    },
-                },
-                {
-                    "tag": STATS_API_TAG,
-                    "listen": "127.0.0.1",
-                    "port": STATS_API_PORT,
-                    "protocol": "dokodemo-door",
-                    "settings": {
-                        "address": "127.0.0.1",
-                    },
-                },
-            ],
-            "outbounds": [
-                {"tag": "direct", "protocol": "freedom"},
-                {"tag": "block", "protocol": "blackhole"},
-            ],
-            "routing": {
-                "rules": [
-                    {
-                        "inboundTag": [STATS_API_TAG],
-                        "outboundTag": STATS_API_TAG,
-                        "type": "field",
-                    },
-                ],
-            },
-        }
-
-    def _write_config(self):
-        config = self._build_config()
-        tmp = self._config_path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(config, f, indent=2)
-        os.replace(tmp, self._config_path)
-
-    def _build_vless_link(self, ip):
-        vless_uuid = self._db.get("XR", "vless_uuid", "")
-        port = self._db.get("XR", "port", 8443)
-        sni = self._db.get("XR", "sni", "www.google.com")
-        public_key = self._db.get("XR", "public_key", "")
-        short_id = self._db.get("XR", "short_id", "")
-
-        if not all([vless_uuid, ip, public_key]):
-            return None
-
-        return (
-            f"vless://{vless_uuid}@{ip}:{port}"
-            f"?encryption=none"
-            f"&flow=xtls-rprx-vision"
-            f"&security=reality"
-            f"&sni={sni}"
-            f"&fp=chrome"
-            f"&pbk={public_key}"
-            f"&sid={short_id}"
-            f"&type=tcp"
-            f"&headerType=none"
-            f"#I-execute"
-        )
-
-    def _format_bytes(self, b):
-        if b < 1024:
-            return f"{b} B"
-        if b < 1024 * 1024:
-            return f"{b / 1024:.1f} KB"
-        if b < 1024 * 1024 * 1024:
-            return f"{b / (1024 * 1024):.1f} MB"
-        return f"{b / (1024 * 1024 * 1024):.2f} GB"
-
-    async def _query_xray_stats(self):
-        if not self._proxy_running():
-            return 0, 0
+    async def _check_port_available(self, port: int) -> bool:
         try:
             p = await asyncio.create_subprocess_exec(
-                self._xray_path, "api", "statsquery",
-                f"--server=127.0.0.1:{STATS_API_PORT}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            out, _ = await asyncio.wait_for(p.communicate(), timeout=5)
-            if p.returncode != 0:
-                return self._traffic_rx, self._traffic_tx
-
-            text = out.decode()
-            rx = 0
-            tx = 0
-            lines = text.strip().split("\n")
-            i = 0
-            while i < len(lines):
-                line = lines[i].strip()
-                if "inbound" in line and "downlink" in line.lower():
-                    if i + 1 < len(lines):
-                        val_line = lines[i + 1].strip()
-                        m = re.search(r"(\d+)", val_line)
-                        if m:
-                            rx += int(m.group(1))
-                elif "inbound" in line and "uplink" in line.lower():
-                    if i + 1 < len(lines):
-                        val_line = lines[i + 1].strip()
-                        m = re.search(r"(\d+)", val_line)
-                        if m:
-                            tx += int(m.group(1))
-                i += 1
-
-            return rx, tx
-
-        except (asyncio.TimeoutError, Exception):
-            return self._traffic_rx, self._traffic_tx
-
-    def _start_traffic_monitor(self):
-        self._traffic_rx = 0
-        self._traffic_tx = 0
-
-        async def monitor():
-            try:
-                while self._proxy_running():
-                    rx, tx = await self._query_xray_stats()
-                    self._traffic_rx = rx
-                    self._traffic_tx = tx
-                    await asyncio.sleep(5)
-            except asyncio.CancelledError:
-                pass
-
-        if self._traffic_task:
-            self._traffic_task.cancel()
-        self._traffic_task = asyncio.ensure_future(monitor())
-
-    def _extract_ip_from_ss_peer(self, peer):
-        m = re.match(r"\[::ffff:(\d+\.\d+\.\d+\.\d+)\]:\d+", peer)
-        if m:
-            return m.group(1)
-        m = re.match(r"(\d+\.\d+\.\d+\.\d+):\d+", peer)
-        if m:
-            return m.group(1)
-        m = re.match(r"\[([0-9a-fA-F:]+)\]:\d+", peer)
-        if m:
-            return None
-        return None
-
-    def _get_active_clients(self):
-        port = self._db.get("XR", "port", 8443)
-        unique_ips = set()
-        try:
-            p = subprocess.run(
-                ["ss", "-tn", "state", "established", f"sport = :{port}"],
-                capture_output=True, text=True, timeout=5
-            )
-            if p.returncode == 0:
-                lines = p.stdout.strip().split("\n")
-                for line in lines[1:]:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    parts = line.split()
-                    if len(parts) >= 4:
-                        peer = parts[3]
-                        ip_str = self._extract_ip_from_ss_peer(peer)
-                        if ip_str:
-                            try:
-                                addr = ipaddress.IPv4Address(ip_str)
-                                if not addr.is_loopback and not addr.is_private:
-                                    unique_ips.add(ip_str)
-                            except ValueError:
-                                continue
-        except Exception:
-            pass
-        return len(unique_ips)
-
-    def _get_unique_ips_24h(self):
-        acc_log = os.path.join(self._root, "access.log")
-        ips = set()
-        if not os.path.exists(acc_log):
-            return ips
-
-        cutoff = datetime.now() - timedelta(hours=24)
-
-        try:
-            with open(acc_log, "r") as f:
-                for line in f:
-                    ts_match = re.match(
-                        r"(\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2})", line
-                    )
-                    if ts_match:
-                        try:
-                            ts = datetime.strptime(
-                                ts_match.group(1), "%Y/%m/%d %H:%M:%S"
-                            )
-                            if ts < cutoff:
-                                continue
-                        except ValueError:
-                            pass
-
-                    ip_match = re.findall(
-                        r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", line
-                    )
-                    for ip in ip_match:
-                        try:
-                            addr = ipaddress.IPv4Address(ip)
-                            if (
-                                not addr.is_private
-                                and not addr.is_loopback
-                                and str(addr) != "0.0.0.0"
-                            ):
-                                ips.add(str(addr))
-                        except ValueError:
-                            pass
-        except Exception:
-            pass
-
-        return ips
-
-    async def _install_xray(self):
-        arch = platform.machine().lower()
-        arch_map = {
-            "x86_64": "64", "amd64": "64",
-            "aarch64": "arm64-v8a", "arm64": "arm64-v8a",
-            "armv7l": "arm32-v7a", "armv6l": "arm32-v6",
-        }
-        go_arch = arch_map.get(arch)
-        if not go_arch:
-            return False, f"Unsupported arch: {arch}"
-        if platform.system().lower() != "linux":
-            return False, "Linux only"
-
-        tag = None
-        download_url = None
-
-        try:
-            p = await asyncio.create_subprocess_exec(
-                "curl", "-sL", "--max-time", "15",
-                "https://api.github.com/repos/XTLS/Xray-core/releases/latest",
+                "ss", "-tuln",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             out, _ = await p.communicate()
-            if p.returncode == 0:
-                data = json.loads(out.decode())
-                tag = data.get("tag_name", "")
-                for asset in data.get("assets", []):
-                    name = asset.get("name", "").lower()
-                    if (
-                        "linux" in name
-                        and go_arch.lower() in name
-                        and name.endswith(".zip")
-                    ):
-                        download_url = asset["browser_download_url"]
-                        break
-        except Exception as e:
-            logger.warning("[XR] GitHub API: %s", e)
+            return f":{port}" not in out.decode()
+        except:
+            return True
 
-        if not tag or not download_url:
-            return False, "Failed to get download URL from GitHub API"
+    def _build_config(self, user: Dict) -> Dict:
+        transport = user["transport"]
+        sni = user.get("sni", "www.microsoft.com")
+        dest = user.get("dest", "www.microsoft.com:443")
+        short_id = user["short_id"]
 
-        tmp = os.path.join(self._root, "tmp_install")
-        os.makedirs(tmp, exist_ok=True)
+        config = {
+            "log": {
+                "loglevel": "warning",
+                "access": os.path.join(self._root, "users", user["name"], "access.log"),
+                "error": os.path.join(self._root, "users", user["name"], "error.log"),
+            },
+            "inbounds": [{
+                "listen": "0.0.0.0",
+                "port": user["port"],
+                "protocol": "vless",
+                "settings": {
+                    "clients": [{
+                        "id": user["uuid"],
+                    }],
+                    "decryption": "none",
+                },
+                "sniffing": {
+                    "enabled": True,
+                    "destOverride": ["http", "tls", "quic"],
+                },
+            }],
+            "outbounds": [
+                {"protocol": "freedom", "tag": "direct"},
+            ],
+        }
+
+        if transport == "xhttp":
+            padding = user.get("padding", "100-1000")
+            config["inbounds"][0]["streamSettings"] = {
+                "network": "xhttp",
+                "security": "reality",
+                "xhttpSettings": {
+                    "path": user.get("path", "/xhttps"),
+                    "mode": "auto",
+                    "xPaddingBytes": padding,
+                },
+                "realitySettings": {
+                    "show": False,
+                    "dest": dest,
+                    "xver": 0,
+                    "serverNames": [sni],
+                    "privateKey": user["private_key"],
+                    "shortIds": [short_id],
+                },
+            }
+        else:
+            config["inbounds"][0]["settings"]["clients"][0]["flow"] = "xtls-rprx-vision"
+            config["inbounds"][0]["streamSettings"] = {
+                "network": "raw",
+                "security": "reality",
+                "realitySettings": {
+                    "show": False,
+                    "dest": dest,
+                    "xver": 0,
+                    "serverNames": [sni],
+                    "privateKey": user["private_key"],
+                    "shortIds": [short_id],
+                },
+            }
+
+        return config
+
+    def _build_vless_link(self, user: Dict) -> str:
+        import urllib.parse
+        
+        name = user["name"]
+        uuid_str = user["uuid"]
+        ip = self._external_ip
+        port = user["port"]
+        transport = user["transport"]
+        sni = user.get("sni", "www.microsoft.com")
+        dest = user.get("dest", "www.microsoft.com:443")
+        public_key = user["public_key"]
+        short_id = user["short_id"]
+        fp = user.get("fingerprint", "chrome")
+        
+        import json as _json
+
+        if transport == "xhttp":
+            path = user.get("path", "/xhttps")
+            padding = user.get("padding", "100-1000")
+            extra = _json.dumps({"xPaddingBytes": padding}, separators=(",", ":"))
+
+            params = urllib.parse.urlencode({
+                "type": "xhttp",
+                "encryption": "none",
+                "security": "reality",
+                "path": path,
+                "host": sni,
+                "mode": "auto",
+                "extra": extra,
+                "pbk": public_key,
+                "fp": fp,
+                "sni": sni,
+                "sid": short_id,
+                "spx": "/",
+            })
+            return f"vless://{uuid_str}@{ip}:{port}?{params}#{urllib.parse.quote(name, safe='')}"
+        else:
+            params = urllib.parse.urlencode({
+                "type": "raw",
+                "security": "reality",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision",
+                "sni": sni,
+                "fp": fp,
+                "pbk": public_key,
+                "sid": short_id,
+                "spx": "/",
+            })
+            return f"vless://{uuid_str}@{ip}:{port}?{params}#{urllib.parse.quote(name, safe='')}"
+
+    async def _start_user(self, name: str) -> Tuple[bool, str]:
+        if name in self._processes:
+            return False, "already_running"
+        
+        user = self._users.get(name)
+        if not user:
+            return False, "user_not_found"
+        
+        if not self._xray_installed():
+            return False, "xray_not_installed"
+        
+        port_ok = await self._check_port_available(user["port"])
+        if not port_ok:
+            return False, f"port_busy_{user['port']}"
+        
+        user_dir = os.path.join(self._root, "users", name)
+        os.makedirs(user_dir, exist_ok=True)
+        
+        config = self._build_config(user)
+        config_path = os.path.join(user_dir, "config.json")
+        
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=2)
+        
+        run_log_path = os.path.join(user_dir, "run.log")
+        error_log_path = os.path.join(user_dir, "error.log")
 
         try:
-            dl = os.path.join(tmp, "xray.zip")
-            ok = False
-            for tool in [
-                ["curl", "-sL", "--max-time", "120", "-o", dl, download_url],
-                ["wget", "-q", "--timeout=120", "-O", dl, download_url],
-            ]:
-                try:
-                    p = await asyncio.create_subprocess_exec(
-                        *tool,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    await p.communicate()
-                    if (
-                        p.returncode == 0
-                        and os.path.exists(dl)
-                        and os.path.getsize(dl) > 0
-                    ):
-                        ok = True
-                        break
-                except FileNotFoundError:
-                    continue
-            if not ok:
-                return False, "Download failed"
-
-            try:
-                p = await asyncio.create_subprocess_exec(
-                    "unzip", "-o", dl, "-d", tmp,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                await p.communicate()
-                if p.returncode != 0:
-                    raise RuntimeError("unzip failed")
-            except (FileNotFoundError, RuntimeError):
-                import zipfile
-                with zipfile.ZipFile(dl, "r") as zf:
-                    zf.extractall(tmp)
-
-            binary = None
-            for root_dir, _, files in os.walk(tmp):
-                for f in files:
-                    if f == "xray":
-                        binary = os.path.join(root_dir, f)
-                        break
-                if binary:
-                    break
-
-            if not binary:
-                return False, "xray binary not found in archive"
-
-            shutil.copy2(binary, self._xray_path)
-            os.chmod(self._xray_path, 0o755)
-
-            for geo in ["geoip.dat", "geosite.dat"]:
-                src = os.path.join(tmp, geo)
-                if os.path.exists(src):
-                    shutil.copy2(src, os.path.join(self._root, geo))
-
-            return True, await self._get_xray_version()
-
+            run_log_fd = open(run_log_path, "ab")
         except Exception as e:
             return False, str(e)
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    async def _do_setup(self):
-        if _in_docker():
-            return False, "docker"
-
-        if not self._xray_installed():
-            ok, res = await self._install_xray()
-            if not ok:
-                return False, f"Install failed: {res}"
-
-        private_key, public_key = await self._generate_x25519()
-        if not private_key or not public_key:
-            return False, "Failed to generate x25519 keys"
-
-        vless_uuid = self._generate_uuid()
-        short_id = self._generate_short_id()
-
-        self._db.set("XR", "private_key", private_key)
-        self._db.set("XR", "public_key", public_key)
-        self._db.set("XR", "vless_uuid", vless_uuid)
-        self._db.set("XR", "short_id", short_id)
 
         try:
-            self._write_config()
-        except Exception as e:
-            return False, f"Config write error: {e}"
-
-        return True, None
-
-    async def _do_start_proxy(self):
-        async with self._proxy_lock:
-            if self._proxy_running():
-                return False, "already_running"
-            if not self._xray_installed():
-                return False, "not_installed"
-
-            vless_uuid = self._db.get("XR", "vless_uuid", "")
-            private_key = self._db.get("XR", "private_key", "")
-            if not vless_uuid or not private_key:
-                return False, "need_setup"
-
-            port = self._db.get("XR", "port", 8443)
-            listening = await self._check_port_listening(port)
-            if listening:
-                return False, "port_busy"
-
-            try:
-                self._write_config()
-            except Exception as e:
-                return False, f"Config error: {e}"
-
-            self._check_and_rotate_logs()
-
-            env = os.environ.copy()
-            env["XRAY_LOCATION_ASSET"] = self._root
-            env[self._process_marker] = "1"
-
-            log_path = os.path.join(self._root, "xray_run.log")
-            try:
-                with open(log_path, "w") as f:
-                    f.write(
-                        f"--- START {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n"
-                    )
-            except Exception:
-                pass
-
-            cmd = [self._xray_path, "run", "-config", self._config_path]
-
-            try:
-                self._log_fd = open(log_path, "a")
-                self._proc = subprocess.Popen(
-                    cmd,
-                    stdout=self._log_fd,
-                    stderr=subprocess.STDOUT,
-                    env=env,
-                    preexec_fn=os.setsid if hasattr(os, "setsid") else None,
-                )
-                self._start_time = time.time()
-
-                await asyncio.sleep(3)
-
-                if self._proc.poll() is not None:
-                    rc = self._proc.returncode
-                    self._proc = None
-                    self._start_time = 0
-                    self._log_fd.close()
-                    self._log_fd = None
-                    try:
-                        with open(log_path, "r") as f:
-                            err_text = "".join(f.readlines()[-30:])
-                    except Exception:
-                        err_text = f"Exit code {rc}"
-                    return False, err_text[:600]
-
-                self._db.set("XR", "proxy_autostart", True)
-                self._start_log_reader(log_path)
-                self._start_traffic_monitor()
-
-                await asyncio.sleep(1)
-                port_ok = await self._check_port_listening(port)
-                if not port_ok:
-                    logger.warning("[XR] Port %d not listening yet", port)
-
-                return True, None
-
-            except Exception as e:
-                if self._log_fd:
-                    self._log_fd.close()
-                    self._log_fd = None
-                self._proc = None
-                self._start_time = 0
-                return False, str(e)
-
-    async def _do_stop_proxy(self):
-        async with self._proxy_lock:
-            if self._traffic_task:
-                self._traffic_task.cancel()
-                try:
-                    await self._traffic_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-                self._traffic_task = None
-
-            if self._log_reader_task:
-                self._log_reader_task.cancel()
-                try:
-                    await self._log_reader_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-                self._log_reader_task = None
-
-            await self._kill_module_processes()
-
-            if self._log_fd:
-                try:
-                    self._log_fd.close()
-                except Exception:
-                    pass
-                self._log_fd = None
-
-            self._db.set("XR", "proxy_autostart", False)
-
-    def _check_and_rotate_logs(self):
-        for name in ["xray_run.log", "error.log", "access.log"]:
-            lp = os.path.join(self._root, name)
-            if os.path.exists(lp):
-                try:
-                    if os.path.getsize(lp) >= LOG_MAX_SIZE:
-                        self._trim_log_file(lp, LOG_KEEP_SIZE)
-                except Exception:
-                    pass
-
-    def _trim_log_file(self, path, keep_bytes):
-        try:
-            size = os.path.getsize(path)
-            if size <= keep_bytes:
-                return
-
-            tmp_path = path + ".trim_tmp"
-            with open(path, "rb") as f:
-                f.seek(size - keep_bytes)
-                f.readline()
-                tail = f.read()
-
-            with open(tmp_path, "wb") as f:
-                f.write(tail)
-
-            os.replace(tmp_path, path)
-            logger.info(
-                "[XR] Trimmed %s: %s -> %s",
-                os.path.basename(path),
-                self._format_bytes(size),
-                self._format_bytes(len(tail)),
+            proc = subprocess.Popen(
+                [self._xray_path, "run", "-config", config_path],
+                stdout=run_log_fd,
+                stderr=run_log_fd,
+                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
             )
+
+            await asyncio.sleep(2)
+
+            if proc.poll() is not None:
+                run_log_fd.flush()
+                run_log_fd.close()
+                tail = ""
+                for path in (error_log_path, run_log_path):
+                    if os.path.exists(path):
+                        size = os.path.getsize(path)
+                        if size > 0:
+                            with open(path, "rb") as f:
+                                f.seek(max(0, size - 2048))
+                                tail = f.read().decode(errors="replace").strip()
+                            if tail:
+                                break
+                return False, tail or "startup_failed (no output)"
+
+            self._processes[name] = proc
+            user["start_time"] = time.time()
+            self._save_users()
+
+            return True, ""
+
         except Exception as e:
-            logger.error("[XR] Failed to trim %s: %s", path, e)
             try:
-                os.remove(path + ".trim_tmp")
+                run_log_fd.close()
             except Exception:
                 pass
+            return False, str(e)
 
-    def _start_log_rotation_scheduler(self):
-        async def rotation_loop():
+    async def _stop_user(self, name: str) -> bool:
+        proc = self._processes.get(name)
+        if not proc:
+            return False
+        
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            else:
+                proc.terminate()
+            
             try:
-                while True:
-                    now = datetime.now()
-                    next_midnight = (now + timedelta(days=1)).replace(
-                        hour=0, minute=0, second=0, microsecond=0
-                    )
-                    wait_seconds = (next_midnight - now).total_seconds()
-                    await asyncio.sleep(wait_seconds)
-                    self._check_and_rotate_logs()
-            except asyncio.CancelledError:
-                pass
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                if hasattr(os, "killpg"):
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                else:
+                    proc.kill()
+                proc.wait(timeout=3)
+        except:
+            pass
+        
+        del self._processes[name]
+        
+        if name in self._users:
+            self._users[name]["start_time"] = 0
+            self._save_users()
+        
+        return True
 
-        if self._log_rotation_task:
-            self._log_rotation_task.cancel()
-        self._log_rotation_task = asyncio.ensure_future(rotation_loop())
+    def _get_active_connections(self, port: int) -> int:
+        try:
+            p = subprocess.run(
+                ["ss", "-tn", "state", "established", f"sport = :{port}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if p.returncode != 0:
+                return 0
+            
+            unique_ips = set()
+            for line in p.stdout.strip().split("\n")[1:]:
+                parts = line.split()
+                if len(parts) >= 4:
+                    peer = parts[3]
+                    m = re.match(r"(\d+\.\d+\.\d+\.\d+):\d+", peer)
+                    if m:
+                        ip = m.group(1)
+                        try:
+                            addr = ipaddress.IPv4Address(ip)
+                            if not addr.is_private and not addr.is_loopback:
+                                unique_ips.add(ip)
+                        except:
+                            pass
+            
+            return len(unique_ips)
+        except:
+            return 0
 
-    def _read_log_file_sync(self):
-        lines = []
-        for name in ["xray_run.log", "error.log"]:
-            lp = os.path.join(self._root, name)
-            if os.path.exists(lp):
-                try:
-                    with open(lp, "r") as f:
-                        lines.extend(f.readlines()[-200:])
-                except Exception:
-                    pass
-        return lines[-self._max_log_lines:]
+    def _start_monitor(self):
+        async def monitor_loop():
+            while True:
+                await asyncio.sleep(60)
+                
+                for name, proc in list(self._processes.items()):
+                    user = self._users.get(name)
+                    if not user:
+                        continue
+                    
+                    limit = user.get("device_limit", 0)
+                    if limit == 0:
+                        continue
+                    
+                    active = self._get_active_connections(user["port"])
+                    
+                    if active > limit:
+                        await self._stop_user(name)
+                        
+                        try:
+                            await self._client.send_message(
+                                self._me.id,
+                                self.strings["device_limit_exceeded"].format(
+                                    name=_escape(name),
+                                    limit=limit,
+                                    active=active,
+                                ),
+                                parse_mode="html",
+                            )
+                        except:
+                            pass
+        
+        if self._monitor_task:
+            self._monitor_task.cancel()
+        
+        self._monitor_task = asyncio.create_task(monitor_loop())
 
-    async def _read_log_file(self):
-        loop = asyncio.get_running_loop()
-        self._log_lines = await loop.run_in_executor(
-            None, self._read_log_file_sync
+    def _save_users(self):
+        self._db.set("XR", "users", self._users)
+
+    def _get_user_uptime(self, name: str) -> str:
+        user = self._users.get(name)
+        if not user or name not in self._processes:
+            return "offline"
+        
+        start = user.get("start_time", 0)
+        if start == 0:
+            return "n/a"
+        
+        elapsed = int(time.time() - start)
+        d, rem = divmod(elapsed, 86400)
+        h, rem = divmod(rem, 3600)
+        m, s = divmod(rem, 60)
+        
+        parts = []
+        if d:
+            parts.append(f"{d}d")
+        if h:
+            parts.append(f"{h}h")
+        if m:
+            parts.append(f"{m}m")
+        parts.append(f"{s}s")
+        
+        return " ".join(parts)
+
+    async def _cb_setup_menu(self, call: InlineCall):
+        xray_version = await self._get_xray_version()
+        xray_status = f"{xray_version}" if self._xray_installed() else "Not installed"
+        
+        gh_token = self._gh_token()
+        gh_status = "Authorized" if gh_token else "Not authorized"
+        
+        text = self.strings["setup_menu"].format(
+            xray_status=xray_status,
+            gh_status=gh_status,
         )
-
-    def _start_log_reader(self, log_path):
-        async def reader():
-            try:
-                while self._proxy_running():
-                    self._check_and_rotate_logs()
-                    await self._read_log_file()
-                    await asyncio.sleep(5)
-            except asyncio.CancelledError:
-                pass
-
-        if self._log_reader_task:
-            self._log_reader_task.cancel()
-        self._log_reader_task = asyncio.ensure_future(reader())
-
-    def _get_main_markup(self):
-        is_running = self._proxy_running()
         
         markup = []
         
-        markup.append([
-            {"text": self.strings["btn_status"], "callback": self._cb_status, "style": "primary"}
-        ])
-        
-        if is_running:
-            markup.append([
-                {"text": self.strings["btn_stop"], "callback": self._cb_stop, "style": "danger"},
-                {"text": self.strings["btn_restart"], "callback": self._cb_restart, "style": "primary"},
-            ])
+        if self._xray_installed():
+            markup.append([{
+                "text": self.strings["btn_reinstall_xray"],
+                "callback": self._cb_xray_install_menu,
+                "style": "primary",
+            }])
         else:
-            markup.append([
-                {"text": self.strings["btn_start"], "callback": self._cb_start, "style": "success"}
-            ])
+            markup.append([{
+                "text": self.strings["btn_install_xray"],
+                "callback": self._cb_xray_install_menu,
+                "style": "primary",
+            }])
         
-        markup.append([
-            {"text": self.strings["btn_settings"], "callback": self._cb_settings, "style": "primary"},
-            {"text": self.strings["btn_users"], "callback": self._cb_users, "style": "primary"},
-        ])
+        markup.append([{
+            "text": self.strings["btn_gh_auth"],
+            "callback": self._gh_device_flow,
+            "style": "primary",
+        }])
         
-        markup.append([
-            {"text": self.strings["btn_get_link"], "callback": self._cb_get_link, "style": "success"}
-        ])
+        markup.append([{
+            "text": self.strings["btn_back"],
+            "callback": self._cb_main_menu,
+            "style": "primary",
+        }])
         
-        markup.append([
-            {"text": self.strings["btn_cleanup"], "callback": self._cb_cleanup_confirm, "style": "danger"}
-        ])
-        
-        markup.append([
-            {"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}
-        ])
-        
-        return markup
+        await call.edit(text, reply_markup=markup)
 
-    def _format_main_text(self):
-        status = self.strings["status_running"] if self._proxy_running() else self.strings["status_stopped"]
-        port = self._db.get("XR", "port", 8443)
-        uptime = self._get_uptime()
+    async def _cb_xray_install_menu(self, call: InlineCall):
+        await call.edit(self.strings["collecting_versions"])
         
-        return self.strings["main_menu"].format(
-            status=status,
-            port=port,
-            uptime=uptime
+        current_version = await self._get_xray_version()
+        
+        text = self.strings["xray_install_menu"].format(current=current_version)
+        
+        releases = await self._gh_get_releases()
+        
+        markup = []
+        
+        for release in releases:
+            tag = release.get("tag_name", "")
+            if not tag:
+                continue
+            
+            markup.append([{
+                "text": f"{tag}",
+                "callback": self._cb_install_xray_version,
+                "args": (tag,),
+                "style": "primary",
+            }])
+        
+        if not markup:
+            markup.append([{
+                "text": "Failed to load releases",
+                "callback": self._cb_setup_menu,
+                "style": "danger",
+            }])
+        
+        markup.append([{
+            "text": self.strings["btn_back"],
+            "callback": self._cb_setup_menu,
+            "style": "primary",
+        }])
+        
+        await call.edit(text, reply_markup=markup)
+
+    async def _cb_install_xray_version(self, call: InlineCall, tag: str):
+        await call.edit(
+            self.strings["xray_installing"].format(version=tag),
+            reply_markup=[]
         )
+        
+        ok, result = await self._install_xray(tag)
+        
+        if ok:
+            text = self.strings["setup_done"].format(version=result)
+        else:
+            text = self.strings["setup_fail"].format(error=_escape(result[:200]))
+        
+        await call.edit(
+            text,
+            reply_markup=[[{
+                "text": self.strings["btn_back"],
+                "callback": self._cb_setup_menu,
+                "style": "primary",
+            }]]
+        )
+
+    async def _cb_users_menu(self, call: InlineCall):
+        total = len(self._users)
+        active = len(self._processes)
+        
+        text = self.strings["users_menu"].format(
+            total=total,
+            active=active,
+        )
+        
+        markup = []
+        
+        for name, user in self._users.items():
+            status = self.strings["status_online"] if name in self._processes else self.strings["status_offline"]
+            markup.append([{
+                "text": self.strings["user_item"].format(
+                    status=status,
+                    name=name,
+                    port=user["port"],
+                ),
+                "callback": self._cb_user_menu,
+                "args": (name,),
+                "style": "primary",
+            }])
+        
+        markup.append([{
+            "text": self.strings["btn_add_user"],
+            "callback": self._cb_add_user_name,
+            "style": "primary",
+        }])
+        
+        markup.append([{
+            "text": self.strings["btn_back"],
+            "callback": self._cb_main_menu,
+            "style": "primary",
+        }])
+        
+        await call.edit(text, reply_markup=markup)
 
     async def _cb_main_menu(self, call: InlineCall):
-        await call.edit(
-            self._format_main_text(),
-            reply_markup=self._get_main_markup()
-        )
-
-    async def _cb_status(self, call: InlineCall):
-        if self._proxy_running():
-            port = self._db.get("XR", "port", 8443)
-            active = self._get_active_clients()
-            unique_ips = self._get_unique_ips_24h()
-            rx = max(0, self._traffic_rx)
-            tx = max(0, self._traffic_tx)
-            
-            text = self.strings["status_menu"].format(
-                state=self.strings["status_running"],
-                pid=self._proc.pid,
-                uptime=self._get_uptime(),
-                rx=self._format_bytes(rx),
-                tx=self._format_bytes(tx),
-                active=active,
-                unique=len(unique_ips),
-                port=port
-            )
-        else:
-            text = self.strings["status_menu"].format(
-                state=self.strings["status_stopped"],
-                pid="n/a",
-                uptime="n/a",
-                rx="n/a",
-                tx="n/a",
-                active="n/a",
-                unique="n/a",
-                port=self._db.get("XR", "port", 8443)
-            )
+        total = len(self._users)
+        active = len(self._processes)
+        version = await self._get_xray_version()
         
-        await call.edit(
-            text,
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
-        )
-
-    async def _cb_start(self, call: InlineCall):
-        ok, err = await self._do_start_proxy()
-        
-        if ok:
-            port = self._db.get("XR", "port", 8443)
-            ip = await self._get_external_ip()
-            text = self.strings["started"].format(port=port, ip=ip or "?")
-        elif err == "already_running":
-            text = self.strings["already_running"]
-        elif err == "not_installed":
-            text = self.strings["not_installed"]
-        else:
-            text = self.strings["setup_fail"].format(error=_escape(str(err)[:200]))
-        
-        await call.edit(
-            text,
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
-        )
-
-    async def _cb_stop(self, call: InlineCall):
-        if not self._proxy_running():
-            await call.edit(
-                self.strings["not_running"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
-            )
-            return
-        
-        await self._do_stop_proxy()
-        
-        await call.edit(
-            self.strings["stopped"],
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
-        )
-
-    async def _cb_restart(self, call: InlineCall):
-        await self._do_stop_proxy()
-        await asyncio.sleep(1)
-        ok, err = await self._do_start_proxy()
-        
-        if ok:
-            port = self._db.get("XR", "port", 8443)
-            ip = await self._get_external_ip()
-            text = self.strings["started"].format(port=port, ip=ip or "?")
-        else:
-            text = self.strings["setup_fail"].format(error=_escape(str(err)[:200]))
-        
-        await call.edit(
-            text,
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
-        )
-
-    async def _cb_settings(self, call: InlineCall):
-        port = self._db.get("XR", "port", 8443)
-        sni = self._db.get("XR", "sni", "www.google.com")
-        dest = self._db.get("XR", "dest", "www.google.com:443")
-        ip = self._db.get("XR", "external_ip", "") or "not set"
-        
-        text = self.strings["settings_menu"].format(
-            port=port,
-            sni=_escape(sni),
-            dest=_escape(dest),
-            ip=ip
+        text = self.strings["main_menu"].format(
+            total=total,
+            active=active,
+            version=version,
         )
         
         markup = [
-            [{"text": self.strings["btn_set_port"], "input": self.strings["input_port"], "handler": self._cb_set_port, "style": "primary"}],
-            [{"text": self.strings["btn_set_sni"], "input": self.strings["input_sni"], "handler": self._cb_set_sni, "style": "primary"}],
-            [{"text": self.strings["btn_set_dest"], "input": self.strings["input_dest"], "handler": self._cb_set_dest, "style": "primary"}],
-            [{"text": self.strings["btn_detect_ip"], "callback": self._cb_detect_ip, "style": "success"}],
-            [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}],
+            [{
+                "text": self.strings["btn_users"],
+                "callback": self._cb_users_menu,
+                "style": "primary",
+            }],
+            [{
+                "text": self.strings["btn_setup"],
+                "callback": self._cb_setup_menu,
+                "style": "primary",
+            }],
+            [{
+                "text": self.strings["btn_close"],
+                "callback": self._cb_close,
+                "style": "danger",
+            }],
         ]
         
         await call.edit(text, reply_markup=markup)
 
-    async def _cb_set_port(self, call: InlineCall, port_str: str):
-        try:
-            port = int(port_str.strip())
-            if not (1025 <= port <= 65535):
-                raise ValueError
-        except ValueError:
-            await call.answer("Invalid port number", show_alert=True)
+    async def _cb_user_menu(self, call: InlineCall, name: str):
+        await call.edit(self.strings["loading"])
+        
+        user = self._users.get(name)
+        if not user:
+            await call.answer("User not found", show_alert=True)
             return
         
-        self._db.set("XR", "port", port)
+        is_running = name in self._processes
+        status = self.strings["status_online"] if is_running else self.strings["status_offline"]
+        transport = user["transport"].upper()
+        limit = user.get("device_limit", 0)
+        limit_text = "Unlimited" if limit == 0 else str(limit)
+        
+        active = 0
+        if is_running:
+            active = self._get_active_connections(user["port"])
+        
+        uptime = self._get_user_uptime(name)
+        
+        text = self.strings["user_menu"].format(
+            name=_escape(name),
+            status=status,
+            transport=transport,
+            port=user["port"],
+            limit=limit_text,
+            active=active if is_running else "n/a",
+            uptime=uptime,
+        )
+        
+        markup = []
+        
+        if is_running:
+            markup.append([
+                {"text": self.strings["btn_stop"], "callback": self._cb_stop_user, "args": (name,), "style": "danger"},
+                {"text": self.strings["btn_restart"], "callback": self._cb_restart_user, "args": (name,), "style": "primary"},
+            ])
+        else:
+            markup.append([
+                {"text": self.strings["btn_start"], "callback": self._cb_start_user, "args": (name,), "style": "primary"},
+            ])
+        
+        markup.append([
+            {"text": self.strings["btn_get_link"], "callback": self._cb_get_user_link, "args": (name,), "style": "primary"},
+        ])
+        
+        markup.append([
+            {"text": self.strings["btn_get_logs"], "callback": self._cb_get_user_logs, "args": (name,), "style": "primary"},
+        ])
+        
+        markup.append([
+            {"text": self.strings["btn_settings"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"},
+        ])
+        
+        markup.append([
+            {"text": self.strings["btn_delete"], "callback": self._cb_delete_user, "args": (name,), "style": "danger"},
+        ])
+        
+        markup.append([
+            {"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"},
+        ])
+        
+        await call.edit(text, reply_markup=markup)
+
+    async def _cb_start_user(self, call: InlineCall, name: str):
+        await call.edit(self.strings["loading"])
+        
+        ok, err = await self._start_user(name)
+        
+        if ok:
+            text = self.strings["user_started"].format(name=_escape(name))
+        elif "already_running" in err:
+            text = self.strings["err_already_running"]
+        elif "port_busy" in err:
+            port = err.split("_")[-1]
+            text = self.strings["err_port_busy"].format(port=port)
+        else:
+            text = self.strings["setup_fail"].format(error=_escape(err[:200]))
         
         await call.edit(
-            self.strings["port_set"].format(port=port),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_settings, "style": "danger"}]]
+            text,
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
         )
 
-    async def _cb_set_sni(self, call: InlineCall, sni: str):
-        sni = sni.strip().lower()
-        self._db.set("XR", "sni", sni)
+    async def _cb_stop_user(self, call: InlineCall, name: str):
+        await call.edit(self.strings["loading"])
+        
+        ok = await self._stop_user(name)
+        
+        if ok:
+            text = self.strings["user_stopped"].format(name=_escape(name))
+        else:
+            text = self.strings["err_not_running"]
+        
+        await call.edit(
+            text,
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
+        )
+
+    async def _cb_restart_user(self, call: InlineCall, name: str):
+        await call.edit(self.strings["loading"])
+        
+        await self._stop_user(name)
+        await asyncio.sleep(1)
+        ok, err = await self._start_user(name)
+        
+        if ok:
+            text = self.strings["user_started"].format(name=_escape(name))
+        else:
+            text = self.strings["setup_fail"].format(error=_escape(err[:200]))
+        
+        await call.edit(
+            text,
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
+        )
+
+    async def _cb_delete_user(self, call: InlineCall, name: str):
+        await call.edit(self.strings["loading"])
+        
+        await self._stop_user(name)
+        
+        user_dir = os.path.join(self._root, "users", name)
+        if os.path.exists(user_dir):
+            shutil.rmtree(user_dir, ignore_errors=True)
+        
+        del self._users[name]
+        self._save_users()
+        
+        await call.edit(
+            self.strings["user_deleted"].format(name=_escape(name)),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
+        )
+
+    async def _cb_get_user_link(self, call: InlineCall, name: str):
+        await call.edit(self.strings["loading"])
+
+        user = self._users.get(name)
+        if not user:
+            await call.answer("User not found", show_alert=True)
+            return
+
+        if not self._external_ip:
+            await call.edit(
+                self.strings["setup_fail"].format(error="Could not detect external IP"),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
+            )
+            return
+
+        link = self._build_vless_link(user)
+
+        import tempfile, os
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".txt",
+            prefix=f"link_for_{name}_",
+            delete=False,
+        )
+        tmp.write(link)
+        tmp.close()
+
+        try:
+            await self._client.send_file(
+                call.form["chat"],
+                tmp.name,
+                attributes=[],
+                force_document=True,
+                file_name=f"link_for_{name}.txt",
+            )
+        except Exception as e:
+            logger.exception("[XR] send_file failed: %s", e)
+            await call.edit(
+                self.strings["setup_fail"].format(error=f"Failed to send file: {e}"),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
+            )
+            return
+        finally:
+            os.unlink(tmp.name)
+
+        markup = [
+            [{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}],
+        ]
+        await call.edit(
+            self.strings["link_sent"].format(name=_escape(name)),
+            reply_markup=markup,
+        )
+
+    async def _cb_get_user_logs(self, call: InlineCall, name: str):
+        await call.edit(self.strings["loading"])
+
+        user_dir = os.path.join(self._root, "users", name)
+        error_log = os.path.join(user_dir, "error.log")
+        run_log = os.path.join(user_dir, "run.log")
+
+        chosen = None
+        label = None
+        for path, lbl in ((error_log, "error.log"), (run_log, "run.log")):
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                chosen = path
+                label = lbl
+                break
+
+        if not chosen:
+            await call.edit(
+                self.strings["setup_fail"].format(error="No logs found"),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
+            )
+            return
+
+        size = os.path.getsize(chosen)
+
+        import tempfile as _tf
+        with open(chosen, "rb") as f:
+            f.seek(max(0, size - 50 * 1024))
+            tail = f.read()
+
+        tmp = _tf.NamedTemporaryFile(
+            mode="wb",
+            suffix=".txt",
+            prefix=f"xray_{name}_",
+            delete=False,
+        )
+        tmp.write(tail)
+        tmp.close()
+
+        try:
+            await self._client.send_file(
+                call.form["chat"],
+                tmp.name,
+                force_document=True,
+                file_name=f"xray_{name}_{label}.txt",
+                caption=f"<b>XRay {label}:</b> <code>{name}</code>",
+            )
+        except Exception as e:
+            logger.exception("[XR] send_file failed: %s", e)
+        finally:
+            os.unlink(tmp.name)
+
+        markup = [
+            [{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}],
+        ]
+        await call.edit(
+            f"<b>Logs sent for {_escape(name)}</b>",
+            reply_markup=markup,
+        )
+
+    async def _cb_user_settings(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if not user:
+            await call.answer("User not found", show_alert=True)
+            return
+        
+        transport = user["transport"].upper()
+        sni = user.get("sni", "www.microsoft.com")
+        dest = user.get("dest", "www.microsoft.com:443")
+        path = user.get("path", "/xhttps") if user["transport"] == "xhttp" else "n/a"
+        padding = user.get("padding", "100-1000") if user["transport"] == "xhttp" else "n/a"
+        fp = user.get("fingerprint", "chrome")
+        limit = user.get("device_limit", 0)
+        limit_text = "Unlimited" if limit == 0 else str(limit)
+        
+        text = self.strings["user_settings"].format(
+            name=_escape(name),
+            transport=transport,
+            sni=_escape(sni),
+            dest=_escape(dest),
+            path=_escape(path),
+            padding=padding,
+            fp=fp,
+            limit=limit_text,
+        )
+        
+        markup = [
+            [{"text": self.strings["btn_toggle_transport"], "callback": self._cb_toggle_transport, "args": (name,), "style": "primary"}],
+            [{"text": self.strings["btn_set_sni"], "input": self.strings["input_sni"], "handler": self._cb_set_sni, "args": (name,), "style": "primary"}],
+            [{"text": self.strings["btn_set_dest"], "input": self.strings["input_dest"], "handler": self._cb_set_dest, "args": (name,), "style": "primary"}],
+        ]
+        
+        if user["transport"] == "xhttp":
+            markup.append([{"text": self.strings["btn_set_path"], "input": self.strings["input_path"], "handler": self._cb_set_path, "args": (name,), "style": "primary"}])
+            markup.append([{"text": self.strings["btn_set_padding"], "callback": self._cb_padding_menu, "args": (name,), "style": "primary"}])
+        
+        markup.append([{"text": self.strings["btn_set_fp"], "callback": self._cb_fp_menu, "args": (name,), "style": "primary"}])
+        markup.append([{"text": self.strings["btn_set_limit"], "input": self.strings["input_limit"], "handler": self._cb_set_limit, "args": (name,), "style": "primary"}])
+        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}])
+        
+        await call.edit(text, reply_markup=markup)
+
+    async def _cb_toggle_transport(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        
+        user["transport"] = "tcp" if user["transport"] == "xhttp" else "xhttp"
+        self._save_users()
+        
+        await self._cb_user_settings(call, name)
+
+    async def _cb_set_sni(self, call: InlineCall, sni: str, name: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        
+        user["sni"] = _strip_md(sni).strip().lower()
+        self._save_users()
         
         await call.edit(
             self.strings["sni_set"].format(sni=_escape(sni)),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_settings, "style": "danger"}]]
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
         )
 
-    async def _cb_set_dest(self, call: InlineCall, dest: str):
-        dest = dest.strip()
+    async def _cb_set_dest(self, call: InlineCall, dest: str, name: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        
+        dest = _strip_md(dest).strip()
         if ":" not in dest:
             dest += ":443"
-        self._db.set("XR", "dest", dest)
+        
+        user["dest"] = dest
+        self._save_users()
         
         await call.edit(
             self.strings["dest_set"].format(dest=_escape(dest)),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_settings, "style": "danger"}]]
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
         )
 
-    async def _cb_detect_ip(self, call: InlineCall):
-        ip = await self._get_external_ip()
-        
-        if ip:
-            text = self.strings["ip_detected"].format(ip=ip)
-        else:
-            text = self.strings["ip_fail"]
-        
-        await call.edit(
-            text,
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_settings, "style": "danger"}]]
-        )
-
-    async def _cb_users(self, call: InlineCall):
-        users = self._db.get("XR", "trusted_users", [])
-        
-        if users:
-            users_text = "\n".join(f"<code>{u}</code>" for u in users)
-        else:
-            users_text = self.strings["no_users"]
-        
-        text = self.strings["users_menu"].format(
-            count=len(users),
-            users=users_text
-        )
-        
-        await call.edit(
-            text,
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
-        )
-
-    async def _cb_get_link(self, call: InlineCall):
-        ip = await self._get_external_ip()
-        if not ip:
-            await call.edit(
-                self.strings["link_not_ready"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
-            )
+    async def _cb_set_path(self, call: InlineCall, path: str, name: str):
+        user = self._users.get(name)
+        if not user:
             return
         
-        link = self._build_vless_link(ip)
-        if not link:
-            await call.edit(
-                self.strings["link_not_ready"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
-            )
+        path = path.strip()
+        if not path.startswith("/"):
+            path = "/" + path
+        
+        user["path"] = path
+        self._save_users()
+        
+        await call.edit(
+            self.strings["path_set"].format(path=_escape(path)),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
+        )
+
+    async def _cb_padding_menu(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if not user:
             return
+        
+        padding = user.get("padding", "100-1000")
+        min_p, max_p = padding.split("-")
+        
+        text = self.strings["padding_menu"].format(
+            name=_escape(name),
+            min=min_p,
+            max=max_p,
+        )
         
         markup = [
-            [
+            [{"text": self.strings["input_padding_min"], "input": self.strings["input_padding_min"], "handler": self._cb_set_padding_min, "args": (name,), "style": "primary"}],
+            [{"text": self.strings["input_padding_max"], "input": self.strings["input_padding_max"], "handler": self._cb_set_padding_max, "args": (name,), "style": "primary"}],
+            [{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}],
+        ]
+        
+        await call.edit(text, reply_markup=markup)
+
+    async def _cb_set_padding_min(self, call: InlineCall, min_str: str, name: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        
+        try:
+            min_val = int(min_str.strip())
+        except:
+            await call.answer(self.strings["err_invalid_limit"], show_alert=True)
+            return
+        
+        padding = user.get("padding", "100-1000")
+        _, max_val = padding.split("-")
+        max_val = int(max_val)
+        
+        if min_val >= max_val:
+            await call.answer(self.strings["err_invalid_padding"], show_alert=True)
+            return
+        
+        user["padding"] = f"{min_val}-{max_val}"
+        self._save_users()
+        
+        await self._cb_padding_menu(call, name)
+
+    async def _cb_set_padding_max(self, call: InlineCall, max_str: str, name: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        
+        try:
+            max_val = int(max_str.strip())
+        except:
+            await call.answer(self.strings["err_invalid_limit"], show_alert=True)
+            return
+        
+        padding = user.get("padding", "100-1000")
+        min_val, _ = padding.split("-")
+        min_val = int(min_val)
+        
+        if max_val <= min_val:
+            await call.answer(self.strings["err_invalid_padding"], show_alert=True)
+            return
+        
+        user["padding"] = f"{min_val}-{max_val}"
+        self._save_users()
+        
+        await self._cb_padding_menu(call, name)
+
+    async def _cb_fp_menu(self, call: InlineCall, name: str):
+        markup = [
+            [{"text": self.strings["btn_chrome"], "callback": self._cb_set_fp, "args": (name, "chrome"), "style": "primary"}],
+            [{"text": self.strings["btn_firefox"], "callback": self._cb_set_fp, "args": (name, "firefox"), "style": "primary"}],
+            [{"text": self.strings["btn_safari"], "callback": self._cb_set_fp, "args": (name, "safari"), "style": "primary"}],
+            [{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}],
+        ]
+        
+        await call.edit(
+            f"<b>Select Fingerprint</b>\n<blockquote>Current: {self._users[name].get('fingerprint', 'chrome')}</blockquote>",
+            reply_markup=markup
+        )
+
+    async def _cb_set_fp(self, call: InlineCall, name: str, fp: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        
+        user["fingerprint"] = fp
+        self._save_users()
+        
+        await call.edit(
+            self.strings["fp_set"].format(fp=fp),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
+        )
+
+    async def _cb_set_limit(self, call: InlineCall, limit_str: str, name: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        
+        try:
+            limit = int(limit_str.strip())
+            if limit < 0:
+                raise ValueError
+        except:
+            await call.answer(self.strings["err_invalid_limit"], show_alert=True)
+            return
+        
+        user["device_limit"] = limit
+        self._save_users()
+        
+        limit_text = "Unlimited" if limit == 0 else str(limit)
+        
+        await call.edit(
+            self.strings["limit_set"].format(limit=limit_text),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
+        )
+
+    async def _cb_add_user_name(self, call: InlineCall):
+        await call.edit(
+            self.strings["add_user_name"],
+            reply_markup=[[
                 {
-                    "text": self.strings["bot_copy_button"],
-                    "copy": link,
+                    "text": self.strings["input_name"],
+                    "input": self.strings["input_name"],
+                    "handler": self._cb_add_user_transport_choice,
+                    "style": "primary",
                 }
-            ],
-            [
-                {"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}
-            ],
-        ]
-        
-        await call.edit(
-            self.strings["link_message"],
-            reply_markup=markup
+            ]]
         )
 
-    async def _cb_cleanup_confirm(self, call: InlineCall):
+    async def _cb_add_user_transport_choice(self, call: InlineCall, name: str):
+        name = name.strip()
+        
+        if not re.match(r"^[a-zA-Z0-9_-]+$", name):
+            await call.answer(self.strings["err_invalid_name"], show_alert=True)
+            return
+        
+        if name in self._users:
+            await call.answer(self.strings["err_name_exists"], show_alert=True)
+            return
+        
+        text = self.strings["add_user_transport"].format(name=_escape(name))
+        
         markup = [
-            [
-                {"text": self.strings["btn_confirm_cleanup"], "callback": self._cb_cleanup_execute, "style": "danger"}
-            ],
-            [
-                {"text": self.strings["btn_cancel"], "callback": self._cb_main_menu, "style": "primary"}
-            ],
+            [{"text": self.strings["btn_xhttp"], "callback": self._cb_add_user_limit_input, "args": (name, "xhttp"), "style": "primary"}],
+            [{"text": self.strings["btn_tcp"], "callback": self._cb_add_user_limit_input, "args": (name, "tcp"), "style": "primary"}],
+            [{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}],
         ]
         
-        await call.edit(
-            self.strings["cleanup_confirm"],
-            reply_markup=markup
-        )
+        await call.edit(text, reply_markup=markup)
 
-    async def _cb_cleanup_execute(self, call: InlineCall):
-        await self._full_module_cleanup()
+    async def _cb_add_user_limit_input(self, call: InlineCall, name: str, transport: str):
+        text = self.strings["add_user_limit"].format(name=_escape(name))
         
         await call.edit(
-            self.strings["cleanup_done"],
-            reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]]
+            text,
+            reply_markup=[[
+                {
+                    "text": self.strings["input_limit"],
+                    "input": self.strings["input_limit"],
+                    "handler": self._cb_create_user_final,
+                    "args": (name, transport),
+                    "style": "primary",
+                }
+            ]]
+        )
+
+    async def _cb_create_user_final(self, call: InlineCall, limit_str: str, name: str, transport: str):
+        try:
+            limit = int(limit_str.strip())
+            if limit < 0:
+                raise ValueError
+        except:
+            await call.answer(self.strings["err_invalid_limit"], show_alert=True)
+            return
+        
+        await call.edit(self.strings["loading"])
+        
+        if not self._xray_installed():
+            await call.edit(
+                self.strings["setup_fail"].format(error="XRay not installed. Use Setup menu to install."),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
+            )
+            return
+        
+        private_key, public_key = await self._generate_x25519()
+        if not private_key or not public_key:
+            await call.edit(
+                self.strings["setup_fail"].format(error="Key generation failed"),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
+            )
+            return
+        
+        port = await self._get_next_port()
+        
+        user = {
+            "name": name,
+            "uuid": str(uuid.uuid4()),
+            "port": port,
+            "transport": transport,
+            "device_limit": limit,
+            "private_key": private_key,
+            "public_key": public_key,
+            "short_id": self._generate_short_id(),
+            "sni": "www.microsoft.com",
+            "dest": "www.microsoft.com:443",
+            "path": "/xhttps",
+            "padding": "100-1000",
+            "fingerprint": "chrome",
+            "start_time": 0,
+        }
+        
+        self._users[name] = user
+        self._save_users()
+        
+        limit_text = "Unlimited" if limit == 0 else str(limit)
+        
+        await call.edit(
+            self.strings["user_created"].format(
+                name=_escape(name),
+                port=port,
+                transport=transport.upper(),
+                limit=limit_text,
+            ),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
         )
 
     async def _cb_close(self, call: InlineCall):
         await call.delete()
 
-    async def aiogram_watcher(self, message: AiogramMessage):
-        if not message.text:
-            return
-
-        text = message.text.strip()
-        if not text.startswith("/xray"):
-            return
-
-        uid = message.from_user.id
-
-        if uid != self._me.id and uid not in self._db.get("XR", "trusted_users", []):
-            return
-
-        try:
-            ip = await self._get_external_ip()
-            if not ip:
-                await message.answer(
-                    self.strings["link_not_ready"],
-                    parse_mode="HTML",
-                    link_preview_options=LinkPreviewOptions(is_disabled=True),
-                )
-                return
-
-            link = self._build_vless_link(ip)
-            if not link:
-                await message.answer(
-                    self.strings["link_not_ready"],
-                    parse_mode="HTML",
-                    link_preview_options=LinkPreviewOptions(is_disabled=True),
-                )
-                return
-
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=self.strings["bot_copy_button"],
-                            copy_text=CopyTextButton(text=link),
-                        )
-                    ]
-                ]
-            )
-
-            await message.answer(
-                self.strings["link_message"],
-                parse_mode="HTML",
-                reply_markup=keyboard,
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
-            )
-        except Exception as e:
-            logger.error("[XR] aiogram_watcher error: %s", e)
-
     @loader.command()
     async def xr(self, message):
-        """XRay VLESS+Reality VPN management"""
+        """XRay multi-user VPN manager"""
         await self.inline.form(
-            text=self._format_main_text(),
+            text=self.strings["main_menu"].format(
+                total=len(self._users),
+                active=len(self._processes),
+                version=await self._get_xray_version(),
+            ),
             message=message,
-            reply_markup=self._get_main_markup(),
+            reply_markup=[
+                [{
+                    "text": self.strings["btn_users"],
+                    "callback": self._cb_users_menu,
+                    "style": "primary",
+                }],
+                [{
+                    "text": self.strings["btn_setup"],
+                    "callback": self._cb_setup_menu,
+                    "style": "primary",
+                }],
+                [{
+                    "text": self.strings["btn_close"],
+                    "callback": self._cb_close,
+                    "style": "danger",
+                }],
+            ],
             silent=True,
         )
