@@ -26,14 +26,14 @@ class OnlineKeeper(loader.Module):
             "<b>Update interval:</b> {interval} seconds"
         ),
         "status_offline": (
-            "<b>OnlineKeeper Status</b>\n\n"
+            "<b>OnlineKeeper Status</b>\n"
             "<b>Mode:</b> Inactive\n"
             "<b>Account:</b> Offline"
         ),
         "btn_disable": "Disable",
         "btn_enable": "Enable",
-        "enabling": "<b>Activating OnlineKeeper...</b>\n\nYour account will appear online",
-        "disabling": "<b>Deactivating OnlineKeeper...</b>\n\nYour account will go offline",
+        "enabling": "<b>Activating OnlineKeeper...</b>\nYour account will appear online",
+        "disabling": "<b>Deactivating OnlineKeeper...</b>\nYour account will go offline",
     }
 
     strings_ru = {
@@ -44,14 +44,14 @@ class OnlineKeeper(loader.Module):
             "<b>Интервал обновления:</b> {interval} секунд"
         ),
         "status_offline": (
-            "<b>Статус OnlineKeeper</b>\n\n"
+            "<b>Статус OnlineKeeper</b>\n"
             "<b>Режим:</b> Неактивен\n"
             "<b>Аккаунт:</b> Оффлайн"
         ),
         "btn_disable": "Выключить",
         "btn_enable": "Включить",
-        "enabling": "<b>Активация OnlineKeeper...</b>\n\nВаш аккаунт появится в сети",
-        "disabling": "<b>Деактивация OnlineKeeper...</b>\n\nВаш аккаунт пропадет из сети",
+        "enabling": "<b>Активация OnlineKeeper...</b>\nВаш аккаунт появится в сети",
+        "disabling": "<b>Деактивация OnlineKeeper...</b>\nВаш аккаунт пропадет из сети",
     }
 
     def __init__(self):
