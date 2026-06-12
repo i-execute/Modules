@@ -28,8 +28,7 @@ Session
 StarsX
 Statistics
 Stories
-Telega 
-TGWatcher
+Telega
 Token
 TONScanner
 Twin
