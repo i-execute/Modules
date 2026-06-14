@@ -1,6 +1,5 @@
 __version__ = (1, 4, 3)
 # meta developer: I_execute.t.me
-# requires: aiohttp, Pillow
 
 import re
 import io

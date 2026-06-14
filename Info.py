@@ -1,5 +1,6 @@
 __version__ = (2, 1, 3)
 # meta developer: I_execute.t.me
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Info/MetaBanner.jpeg
 
 from telethon.tl.types import User, Channel, Message, InputPhotoFileLocation
 from telethon.tl.functions.photos import GetUserPhotosRequest
