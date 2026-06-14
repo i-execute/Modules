@@ -1,6 +1,6 @@
 __version__ = (4, 0, 4)
 # meta developer: I_execute.t.me 
-# meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
+# meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner_new.jpeg
 
 import os
 import asyncio
@@ -648,6 +648,7 @@ class XRay(loader.Module):
         if not self._xray_installed():
             logger.warning("[XR] XRay not installed")
         
+        await self._reattach_processes()
         self._start_monitor()
 
     async def on_unload(self):
@@ -660,6 +661,60 @@ class XRay(loader.Module):
         
         for name in list(self._processes.keys()):
             await self._stop_user(name)
+
+
+    async def _reattach_processes(self):
+        if not self._xray_installed():
+            return
+        import re as _re
+        try:
+            p = await asyncio.create_subprocess_exec(
+                "ss", "-tlnp",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await p.communicate()
+            ss_output = out.decode()
+        except Exception:
+            return
+
+        for name, user in self._users.items():
+            if name in self._processes:
+                continue
+            port = user.get("port")
+            if not port:
+                continue
+            if f":{port}" not in ss_output:
+                continue
+            try:
+                p2 = await asyncio.create_subprocess_exec(
+                    "ss", "-tlnp", f"sport = :{port}",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                out2, _ = await p2.communicate()
+                line = out2.decode()
+                m = _re.search(r'pid=(\d+)', line)
+                if not m:
+                    continue
+                pid = int(m.group(1))
+                proc_path = f"/proc/{pid}/exe"
+                if not os.path.exists(proc_path):
+                    continue
+                exe = os.readlink(proc_path)
+                if "xray" not in exe.lower():
+                    continue
+                try:
+                    os.kill(pid, 0)
+                except OSError:
+                    continue
+                fake = subprocess.Popen.__new__(subprocess.Popen)
+                object.__setattr__(fake, 'pid', pid)
+                fake._child_created = False
+                self._processes[name] = fake
+                logger.info(f"[XR] Reattached {name} pid={pid} port={port}")
+            except Exception as e:
+                logger.warning(f"[XR] Reattach failed for {name}: {e}")
 
     def _xray_installed(self) -> bool:
         return (
@@ -967,11 +1022,12 @@ class XRay(loader.Module):
             public_key = None
             
             for line in text.split("\n"):
-                line = line.strip().lower()
-                if "private" in line and ":" in line:
-                    private_key = line.split(":", 1)[1].strip()
-                elif "public" in line and ":" in line:
-                    public_key = line.split(":", 1)[1].strip()
+                stripped = line.strip()
+                lower = stripped.lower()
+                if "private" in lower and ":" in lower:
+                    private_key = stripped.split(":", 1)[1].strip()
+                elif "public" in lower and ":" in lower:
+                    public_key = stripped.split(":", 1)[1].strip()
             
             return private_key, public_key
         except:
@@ -1027,6 +1083,7 @@ class XRay(loader.Module):
                         "id": user["uuid"],
                     }],
                     "decryption": "none",
+                    "encryption": "none",
                 },
                 "sniffing": {
                     "enabled": True,
@@ -1050,7 +1107,7 @@ class XRay(loader.Module):
                 },
                 "realitySettings": {
                     "show": False,
-                    "dest": dest,
+                    "target": dest,
                     "xver": 0,
                     "serverNames": [sni],
                     "privateKey": user["private_key"],
@@ -1064,7 +1121,7 @@ class XRay(loader.Module):
                 "security": "reality",
                 "realitySettings": {
                     "show": False,
-                    "dest": dest,
+                    "target": dest,
                     "xver": 0,
                     "serverNames": [sni],
                     "privateKey": user["private_key"],
@@ -1137,6 +1194,9 @@ class XRay(loader.Module):
         
         port_ok = await self._check_port_available(user["port"])
         if not port_ok:
+            await self._reattach_processes()
+            if name in self._processes:
+                return True, ""
             return False, f"port_busy_{user['port']}"
         
         user_dir = os.path.join(self._root, "users", name)
