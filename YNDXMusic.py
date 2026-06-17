@@ -17,6 +17,7 @@ import asyncio
 import subprocess
 import sys
 import traceback
+import uuid
 
 from telethon.tl.types import Message, DocumentAttributeAudio
 from telethon import functions
@@ -468,13 +469,26 @@ class YMApiClient:
                     return url
         return None
 
-    async def download_track_file(self, track, filepath):
-        try:
-            await track.download_async(filepath)
-            return os.path.exists(filepath) and os.path.getsize(filepath) > 0
-        except Exception as e:
-            _log("DOWNLOAD", f"download_track_file failed: {e}")
-            return False
+    async def download_track_file(self, track, filepath, retries=3):
+        last_err = None
+        for attempt in range(retries):
+            try:
+                if os.path.exists(filepath):
+                    try:
+                        os.remove(filepath)
+                    except Exception:
+                        pass
+                await track.download_async(filepath)
+                if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                    return True
+                last_err = "empty file"
+            except Exception as e:
+                last_err = e
+                _log("DOWNLOAD", f"download_track_file attempt {attempt + 1}/{retries} failed: {e}")
+            if attempt != retries - 1:
+                await asyncio.sleep(2 * (attempt + 1))
+        _log("DOWNLOAD", f"download_track_file gave up after {retries} attempts: {last_err}")
+        return False
 
     async def search_track(self, query, count=5):
         if not self._client:
@@ -594,6 +608,7 @@ class YNDXMusic(loader.Module):
         "ymb_cancel": "Cancel",
         "ymb_kill": "Kill",
         "ymb_no_books": "<b>No audiobooks in library</b>",
+        "ymb_skipped": "<b>Warning: {count} part(s) failed to download/send after retries:</b>\n<blockquote>{list}</blockquote>",
         "btn_left": "⬅️",
         "btn_right": "➡️",
         "unknown_device": "Unknown",
@@ -675,6 +690,7 @@ class YNDXMusic(loader.Module):
         "ymb_cancel": "Отмена",
         "ymb_kill": "Остановить",
         "ymb_no_books": "<b>Нет аудиокниг в библиотеке</b>",
+        "ymb_skipped": "<b>Внимание: {count} часть(и) не удалось скачать/отправить после повторных попыток:</b>\n<blockquote>{list}</blockquote>",
         "btn_left": "⬅️",
         "btn_right": "➡️",
         "unknown_device": "Неизвестно",
@@ -754,12 +770,16 @@ class YNDXMusic(loader.Module):
                     "wss://ynison.music.yandex.ru/redirector.YnisonRedirectService/GetRedirectToYnison",
                     headers={
                         "Sec-WebSocket-Protocol": f"Bearer, v2, {json.dumps(ws_proto)}",
-                        "Origin": "https://music.yandex.ru",
+                        "Origin": "http://music.yandex.ru",
                         "Authorization": f"OAuth {token}",
                     },
-                    timeout=aiohttp.ClientWSTimeout(ws_close=10),
+                    timeout=10,
                 ) as ws:
-                    redirect_data = json.loads(await ws.receive_str())
+                    response = await asyncio.wait_for(ws.receive(), timeout=10)
+                    if response.type != aiohttp.WSMsgType.TEXT:
+                        _log("YNISON", f"Unexpected redirect frame type: {response.type}")
+                        return None
+                    redirect_data = json.loads(response.data)
                 host = redirect_data.get("host")
                 ticket = redirect_data.get("redirect_ticket")
                 if not host or not ticket:
@@ -770,13 +790,13 @@ class YNDXMusic(loader.Module):
                     "Ynison-Device-Info": json.dumps({"app_name": "Chrome", "type": 1}),
                 }
                 async with session.ws_connect(
-                    f"wss://{host}/ynison.YnisonStateService/PutYnisonState",
+                    f"wss://{host}/ynison_state.YnisonStateService/PutYnisonState",
                     headers={
                         "Sec-WebSocket-Protocol": f"Bearer, v2, {json.dumps(ws_proto2)}",
-                        "Origin": "https://music.yandex.ru",
+                        "Origin": "http://music.yandex.ru",
                         "Authorization": f"OAuth {token}",
                     },
-                    timeout=aiohttp.ClientWSTimeout(ws_close=10),
+                    timeout=10,
                 ) as ws2:
                     await ws2.send_str(json.dumps({
                         "update_full_state": {
@@ -787,7 +807,13 @@ class YNDXMusic(loader.Module):
                                     "entity_type": "VARIOUS",
                                     "playable_list": [],
                                     "options": {"repeat_mode": "NONE"},
-                                    "queue_revision": 1,
+                                    "entity_context": "BASED_ON_ENTITY_BY_DEFAULT",
+                                    "version": {
+                                        "device_id": device_id,
+                                        "version": random.randint(1, 9999999999999999),
+                                        "timestamp_ms": 0,
+                                    },
+                                    "from_optional": "",
                                 },
                                 "status": {
                                     "duration_ms": 0,
@@ -796,24 +822,47 @@ class YNDXMusic(loader.Module):
                                     "progress_ms": 0,
                                     "version": {
                                         "device_id": device_id,
+                                        "version": random.randint(1, 9999999999999999),
                                         "timestamp_ms": 0,
-                                        "queue_revision": 1,
                                     },
                                 },
                             },
+                            "device": {
+                                "capabilities": {
+                                    "can_be_player": True,
+                                    "can_be_remote_controller": False,
+                                    "volume_granularity": 16,
+                                },
+                                "info": {
+                                    "device_id": device_id,
+                                    "type": "WEB",
+                                    "title": "Chrome Browser",
+                                    "app_name": "Chrome",
+                                },
+                                "volume_info": {"volume": 0},
+                                "is_shadow": True,
+                            },
+                            "is_currently_active": False,
                         },
-                        "rid": "".join(random.choices(string.ascii_lowercase + string.digits, k=16)),
+                        "rid": str(uuid.uuid4()),
                         "player_action_timestamp_ms": 0,
                         "activity_interception_type": "DO_NOT_INTERCEPT_BY_DEFAULT",
                     }))
-                    return json.loads(await ws2.receive_str())
+                    response2 = await asyncio.wait_for(ws2.receive(), timeout=10)
+                    if response2.type != aiohttp.WSMsgType.TEXT:
+                        _log("YNISON", f"Unexpected state frame type: {response2.type}")
+                        return None
+                    return json.loads(response2.data)
+        except asyncio.TimeoutError:
+            _log("YNISON", "Timed out waiting for Ynison response")
+            return None
         except Exception as e:
             _log("YNISON", f"Failed to get now playing: {e}")
             return None
 
     async def _get_now_playing_track(self):
         try:
-            ynison = await self._get_ynison()
+            ynison = await asyncio.wait_for(self._get_ynison(), timeout=25)
             if not ynison:
                 return None
             player_state = ynison.get("player_state", {})
@@ -855,6 +904,9 @@ class YNDXMusic(loader.Module):
                 "entity_id": queue.get("entity_id", ""),
                 "from_optional": queue.get("from_optional", ""),
             }
+        except asyncio.TimeoutError:
+            _log("NOW_PLAYING", "Timed out fetching now playing")
+            return None
         except Exception as e:
             _log("NOW_PLAYING", f"Error: {e}")
             return None
@@ -1046,30 +1098,42 @@ class YNDXMusic(loader.Module):
             "thumb_data": thumb_data,
         }, None
 
-    async def _send_audio(self, chat_id, info, reply_to=None):
+    async def _send_audio(self, chat_id, info, reply_to=None, retries=3):
         with open(info["path"], "rb") as f:
             mp3_bytes = f.read()
-        audio_buf = io.BytesIO(mp3_bytes)
-        audio_buf.name = os.path.basename(info["path"])
-        thumb_buf = None
-        if info.get("thumb_data"):
-            thumb_buf = io.BytesIO(info["thumb_data"])
-            thumb_buf.name = "cover.jpg"
-        await self._client.send_file(
-            chat_id,
-            file=audio_buf,
-            caption=None,
-            attributes=[
-                DocumentAttributeAudio(
-                    duration=info["dur_s"],
-                    title=info["title"],
-                    performer=info["artist"],
+        thumb_bytes = info.get("thumb_data")
+        last_err = None
+        for attempt in range(retries):
+            try:
+                audio_buf = io.BytesIO(mp3_bytes)
+                audio_buf.name = os.path.basename(info["path"])
+                thumb_buf = None
+                if thumb_bytes:
+                    thumb_buf = io.BytesIO(thumb_bytes)
+                    thumb_buf.name = "cover.jpg"
+                await self._client.send_file(
+                    chat_id,
+                    file=audio_buf,
+                    caption=None,
+                    attributes=[
+                        DocumentAttributeAudio(
+                            duration=info["dur_s"],
+                            title=info["title"],
+                            performer=info["artist"],
+                        )
+                    ],
+                    thumb=thumb_buf,
+                    voice=False,
+                    reply_to=reply_to,
                 )
-            ],
-            thumb=thumb_buf,
-            voice=False,
-            reply_to=reply_to,
-        )
+                return True
+            except Exception as e:
+                last_err = e
+                _log("SEND_AUDIO", f"attempt {attempt + 1}/{retries} failed: {e}")
+                if attempt != retries - 1:
+                    await asyncio.sleep(2 * (attempt + 1))
+        _log("SEND_AUDIO", f"gave up after {retries} attempts: {last_err}")
+        return False
 
     @loader.command(
         ru_doc="Авторизация Yandex Music",
@@ -2225,18 +2289,25 @@ class YNDXMusic(loader.Module):
             reply_markup=[[{"text": self.strings["ymb_kill"], "callback": self._ymb_kill, "args": (session_id,), "style": "danger"}]],
         )
         done = 0
-        for track in tracks:
+        skipped = []
+        for idx, track in enumerate(tracks, start=1):
             if sess.get("kill"):
                 break
+            part_title = YMApiClient.track_title(track)
             try:
                 ddir = tempfile.mkdtemp(dir=self._tmp)
                 try:
                     info, err = await self._prepare_book_part(track, ddir, cover_data, book_title)
                     if err:
-                        _log("BOOK", f"Skipped {YMApiClient.track_title(track)}: {err}")
+                        _log("BOOK", f"Skipped part {idx} ({part_title}): {err}")
+                        skipped.append((idx, part_title))
                         continue
                     info["artist"] = artist
-                    await self._send_audio(chat_id, info, reply_to=reply_to)
+                    sent_ok = await self._send_audio(chat_id, info, reply_to=reply_to)
+                    if not sent_ok:
+                        _log("BOOK", f"Skipped part {idx} ({part_title}): send_fail")
+                        skipped.append((idx, part_title))
+                        continue
                     done += 1
                 finally:
                     if os.path.exists(ddir):
@@ -2250,13 +2321,25 @@ class YNDXMusic(loader.Module):
                     except Exception:
                         pass
             except Exception as e:
-                _log("YMB", f"Part error: {e}")
+                _log("YMB", f"Part {idx} ({part_title}) error: {e}")
+                skipped.append((idx, part_title))
                 continue
         self._ymb_sessions.pop(session_id, None)
         try:
             await call.delete()
         except Exception:
             pass
+        if skipped:
+            lines = "\n".join(f"{i}. {escape_html(t)}" for i, t in skipped)
+            try:
+                await self._client.send_message(
+                    chat_id,
+                    self.strings["ymb_skipped"].format(count=len(skipped), list=lines),
+                    parse_mode="html",
+                    reply_to=reply_to,
+                )
+            except Exception:
+                pass
 
     async def _ymb_kill(self, call, session_id: str):
         sess = self._ymb_sessions.get(session_id)
