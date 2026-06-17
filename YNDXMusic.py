@@ -1,4 +1,4 @@
-__version__ = (1, 1, 0)
+__version__ = (1, 1, 1)
 # meta developer: I_execute.t.me forked from @codrago_m
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/YNDXMusic/MetaBanner_new.jpeg
 
@@ -26,8 +26,6 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-INLINE_QUERY_BANNER = "https://github.com/i-execute/Modules/raw/main/Storage/YNDXMusic/Inline_query.png"
-DOWNLOADING_STUB = "https://github.com/i-execute/Modules/raw/main/Storage/YNDXMusic/Downloading.mp3"
 FAVORITE_COVER_URL = "https://github.com/i-execute/Modules/raw/main/Storage/YNDXMusic/Favorite.jpeg"
 
 YM_CLIENT_ID = "23cabbbdc6cd418abb4b39c32c41195d"
@@ -52,7 +50,6 @@ YM_ALBUM_RE = re.compile(
 )
 
 REQUEST_OK = 200
-MAX_FILE_SIZE = 200 * 1024 * 1024
 CACHE_TTL = 600
 COVER_SIZES = [1000, 900, 800, 700, 600, 400, 300, 200]
 
@@ -335,7 +332,8 @@ class YMApiClient:
             self._has_plus = bool(getattr(plus, 'has_plus', False)) if plus else False
             self._ok = True
             return True
-        except Exception:
+        except Exception as e:
+            _log("AUTH", f"Auth failed: {e}")
             self.reset()
             return False
 
@@ -353,7 +351,8 @@ class YMApiClient:
         try:
             tracks = await self._client.tracks(track_id, with_positions=False)
             return tracks[0] if tracks else None
-        except Exception:
+        except Exception as e:
+            _log("FETCH", f"fetch_track error: {e}")
             return None
 
     async def fetch_playlist(self, user_login, playlist_id):
@@ -361,7 +360,8 @@ class YMApiClient:
             return None
         try:
             return await self._client.users_playlists(playlist_id, user_login)
-        except Exception:
+        except Exception as e:
+            _log("FETCH", f"fetch_playlist error: {e}")
             return None
 
     async def fetch_playlist_by_uuid(self, uuid):
@@ -379,7 +379,8 @@ class YMApiClient:
                     if login and kind is not None:
                         return await self._client.users_playlists(kind, login)
             return None
-        except Exception:
+        except Exception as e:
+            _log("FETCH", f"fetch_playlist_by_uuid error: {e}")
             return None
 
     async def fetch_all_playlists_meta(self):
@@ -387,7 +388,8 @@ class YMApiClient:
             return []
         try:
             return await self._client.users_playlists_list(self._uid) or []
-        except Exception:
+        except Exception as e:
+            _log("FETCH", f"fetch_all_playlists_meta error: {e}")
             return []
 
     async def fetch_liked_tracks(self):
@@ -447,7 +449,8 @@ class YMApiClient:
             return None
         try:
             return await self._client.albums_with_tracks(album_id)
-        except Exception:
+        except Exception as e:
+            _log("FETCH", f"fetch_album_with_tracks error: {e}")
             return None
 
     async def fetch_playlist_cover_url(self, pl):
@@ -469,7 +472,8 @@ class YMApiClient:
         try:
             await track.download_async(filepath)
             return os.path.exists(filepath) and os.path.getsize(filepath) > 0
-        except Exception:
+        except Exception as e:
+            _log("DOWNLOAD", f"download_track_file failed: {e}")
             return False
 
     async def search_track(self, query, count=5):
@@ -480,7 +484,8 @@ class YMApiClient:
             if not result or not result.tracks or not result.tracks.results:
                 return []
             return result.tracks.results[:count]
-        except Exception:
+        except Exception as e:
+            _log("SEARCH", f"search failed: {e}")
             try:
                 self._client = None
                 self._ok = False
@@ -489,7 +494,8 @@ class YMApiClient:
                 if not result or not result.tracks or not result.tracks.results:
                     return []
                 return result.tracks.results[:count]
-            except Exception:
+            except Exception as e2:
+                _log("SEARCH", f"retry failed: {e2}")
                 return []
 
     @staticmethod
@@ -539,7 +545,7 @@ class YNDXMusic(loader.Module):
         "fetching": "<b>Fetching current track...</b>",
         "uploading": "<b>Uploading...</b>",
         "error": "<b>Error:</b> {msg}",
-        "download_fail": "<b>Download failed.</b> Check your Yandex Plus subscription.",
+        "download_fail": "<b>Download failed.</b> Check your Yandex Plus subscription or try again.",
         "track_text": (
             "<blockquote>"
             "<b>Listening on:</b> {device}\n"
@@ -620,7 +626,7 @@ class YNDXMusic(loader.Module):
         "fetching": "<b>Получение текущего трека...</b>",
         "uploading": "<b>Загрузка...</b>",
         "error": "<b>Ошибка:</b> {msg}",
-        "download_fail": "<b>Ошибка скачивания.</b> Проверьте подписку Яндекс Плюс.",
+        "download_fail": "<b>Ошибка скачивания.</b> Проверьте подписку Яндекс Плюс или попробуйте позже.",
         "track_text": (
             "<blockquote>"
             "<b>Слушаю на:</b> {device}\n"
@@ -689,11 +695,8 @@ class YNDXMusic(loader.Module):
                 validator=loader.validators.Integer(minimum=1, maximum=10),
             ),
         )
-        self.inline_bot = None
-        self.inline_bot_username = None
         self._tmp = None
         self._covers_dir = None
-        self._stub_path = None
         self._ym = None
         self._upload_lock = None
         self._now_track_id = None
@@ -721,30 +724,7 @@ class YNDXMusic(loader.Module):
         self._tmp = os.path.join(tempfile.gettempdir(), f"YNDXMusic_{me.id}")
         self._init_dirs()
         self._ym = YMApiClient()
-        if hasattr(self, "inline") and hasattr(self.inline, "bot"):
-            self.inline_bot = self.inline.bot
-            try:
-                bi = await self.inline_bot.get_me()
-                self.inline_bot_username = bi.username
-            except Exception:
-                pass
         await self._ensure_ym()
-        asyncio.ensure_future(self._download_stub())
-
-    async def _download_stub(self):
-        if not self._tmp:
-            return
-        stub_path = os.path.join(self._tmp, "stub.mp3")
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(DOWNLOADING_STUB, timeout=aiohttp.ClientTimeout(total=30)) as r:
-                    if r.status == 200:
-                        data = await r.read()
-                        with open(stub_path, "wb") as f:
-                            f.write(data)
-                        self._stub_path = stub_path
-        except Exception as e:
-            _log("STUB", f"download failed: {e}")
 
     async def _ensure_ym(self):
         token = self.config["YM_TOKEN"]
@@ -827,7 +807,8 @@ class YNDXMusic(loader.Module):
                         "activity_interception_type": "DO_NOT_INTERCEPT_BY_DEFAULT",
                     }))
                     return json.loads(await ws2.receive_str())
-        except Exception:
+        except Exception as e:
+            _log("YNISON", f"Failed to get now playing: {e}")
             return None
 
     async def _get_now_playing_track(self):
@@ -874,7 +855,8 @@ class YNDXMusic(loader.Module):
                 "entity_id": queue.get("entity_id", ""),
                 "from_optional": queue.get("from_optional", ""),
             }
-        except Exception:
+        except Exception as e:
+            _log("NOW_PLAYING", f"Error: {e}")
             return None
 
     def _device_str(self, now):
@@ -933,7 +915,14 @@ class YNDXMusic(loader.Module):
         album_title = track.albums[0].title if track.albums else ""
         dur_s = (track.duration_ms or 0) // 1000
         raw_path = os.path.join(ddir, "raw_track")
+        
         dl_ok = await self._ym.download_track_file(track, raw_path)
+        if not dl_ok:
+            return None, "download_fail"
+            
+        if not os.path.exists(raw_path) or os.path.getsize(raw_path) == 0:
+            return None, "download_fail"
+        
         cover_data = None
         thumb_data = None
         if with_cover and track.cover_uri:
@@ -941,10 +930,7 @@ class YNDXMusic(loader.Module):
             if raw_cover:
                 cover_data = normalize_cover(raw_cover)
                 thumb_data = normalize_cover(raw_cover, max_size=320, force_jpeg=True)
-        if not dl_ok or os.path.getsize(raw_path) == 0:
-            return None, "download_fail"
-        if os.path.getsize(raw_path) > MAX_FILE_SIZE:
-            return None, "File > 50 MB"
+        
         clean_name = sanitize_fn(f"{artist} - {title}")
         final_mp3 = os.path.join(ddir, f"{clean_name}.mp3")
         try:
@@ -953,6 +939,7 @@ class YNDXMusic(loader.Module):
             is_mp3 = header[:3] == b"ID3" or header[:2] in (b"\xff\xfb", b"\xff\xf3")
         except Exception:
             is_mp3 = True
+        
         if is_mp3:
             try:
                 os.rename(raw_path, final_mp3)
@@ -967,8 +954,7 @@ class YNDXMusic(loader.Module):
                     pass
             else:
                 final_mp3 = raw_path
-        if os.path.getsize(final_mp3) > MAX_FILE_SIZE:
-            return None, "File > 50 MB"
+        
         if with_cover and cover_data and final_mp3.endswith(".mp3"):
             cover_path = os.path.join(ddir, "cover.jpg")
             with open(cover_path, "wb") as cf:
@@ -985,6 +971,7 @@ class YNDXMusic(loader.Module):
                 _write_id3_tags(final_mp3, title, artist, album_title or None, cover_data)
         elif final_mp3.endswith(".mp3"):
             _write_id3_tags(final_mp3, title, artist, album_title or None, None)
+        
         return {
             "path": final_mp3,
             "title": title,
@@ -1000,9 +987,14 @@ class YNDXMusic(loader.Module):
         artist = YMApiClient.track_artist(track)
         dur_s = (track.duration_ms or 0) // 1000
         raw_path = os.path.join(ddir, "raw_track")
+        
         dl_ok = await self._ym.download_track_file(track, raw_path)
-        if not dl_ok or os.path.getsize(raw_path) == 0:
+        if not dl_ok:
             return None, "download_fail"
+            
+        if not os.path.exists(raw_path) or os.path.getsize(raw_path) == 0:
+            return None, "download_fail"
+        
         clean_name = sanitize_fn(f"{title}")
         final_mp3 = os.path.join(ddir, f"{clean_name}.mp3")
         try:
@@ -1011,6 +1003,7 @@ class YNDXMusic(loader.Module):
             is_mp3 = header[:3] == b"ID3" or header[:2] in (b"\xff\xfb", b"\xff\xf3")
         except Exception:
             is_mp3 = True
+        
         if is_mp3:
             try:
                 os.rename(raw_path, final_mp3)
@@ -1025,6 +1018,7 @@ class YNDXMusic(loader.Module):
                     pass
             else:
                 final_mp3 = raw_path
+        
         thumb_data = None
         if cover_data and final_mp3.endswith(".mp3"):
             cover_path = os.path.join(ddir, "cover.jpg")
@@ -1042,6 +1036,7 @@ class YNDXMusic(loader.Module):
             else:
                 _write_id3_tags(final_mp3, title, artist, album_title, cover_data)
             thumb_data = normalize_cover(cover_data, max_size=320, force_jpeg=True)
+        
         return {
             "path": final_mp3,
             "title": title,
@@ -1152,8 +1147,7 @@ class YNDXMusic(loader.Module):
             try:
                 info, err = await self._prepare_track_file(track, ddir, with_cover=True)
                 if err:
-                    err_str = self.strings["download_fail"] if err == "download_fail" else self.strings["error"].format(msg=err)
-                    await utils.answer(msg, err_str)
+                    await utils.answer(msg, self.strings["download_fail"] if err == "download_fail" else self.strings["error"].format(msg=err))
                     return
                 try:
                     await msg.delete()
@@ -1173,8 +1167,7 @@ class YNDXMusic(loader.Module):
             try:
                 info, err = await self._prepare_track_file(track, ddir, with_cover=False)
                 if err:
-                    err_str = self.strings["download_fail"] if err == "download_fail" else self.strings["error"].format(msg=err)
-                    await utils.answer(msg, err_str)
+                    await utils.answer(msg, self.strings["download_fail"] if err == "download_fail" else self.strings["error"].format(msg=err))
                     return
                 with open(info["path"], "rb") as f:
                     mp3_bytes = f.read()
@@ -1586,9 +1579,8 @@ class YNDXMusic(loader.Module):
             try:
                 info, err = await self._prepare_track_file(track, ddir, with_cover=True)
                 if err:
-                    err_str = self.strings["download_fail"] if err == "download_fail" else self.strings["error"].format(msg=err)
                     try:
-                        await call.edit(err_str, reply_markup=self._yms_done_markup(session_id))
+                        await call.edit(self.strings["download_fail"] if err == "download_fail" else self.strings["error"].format(msg=err), reply_markup=self._yms_done_markup(session_id))
                     except Exception:
                         pass
                     return
@@ -2241,6 +2233,7 @@ class YNDXMusic(loader.Module):
                 try:
                     info, err = await self._prepare_book_part(track, ddir, cover_data, book_title)
                     if err:
+                        _log("BOOK", f"Skipped {YMApiClient.track_title(track)}: {err}")
                         continue
                     info["artist"] = artist
                     await self._send_audio(chat_id, info, reply_to=reply_to)
