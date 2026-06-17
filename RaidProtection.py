@@ -214,7 +214,7 @@ class RaidProtection(loader.Module):
                     self._asset_channel,
                     "Raid Logs",
                     description="Raid protection logs.",
-                    icon_emoji_id=5188466187448650036,
+                    icon_emoji_id=5303057349425013341,
                 )
                 self._setup_failed = False
             except Exception as e:
