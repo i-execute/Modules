@@ -1,4 +1,4 @@
-__version__ = (3, 0, 0)
+__version__ = (3, 0, 1)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/QRAuthDumper/MetaBanner.jpeg
 
@@ -85,46 +85,37 @@ class QRAuthDumper(loader.Module):
 
     strings = {
         "name": "QRAuthDumper",
-        "help": (
-            "<b>QR Auth Dumper v{ver}</b>\n\n"
-            "<b>Commands:</b>\n"
-            "<code>{prefix}dumpqr</code> - start QR auth\n\n"
-            "<b>Config:</b>\n"
-            "<code>{prefix}qrauth</code> - this help\n"
-            "<code>{prefix}qrauth status</code> - status\n"
-            "<code>{prefix}qrauth id [val]</code> - set API_ID\n"
-            "<code>{prefix}qrauth hash [val]</code> - set API_HASH\n"
-            "<code>{prefix}qrauth timeout [sec]</code> - QR timeout\n"
-        ),
-        "status": (
-            "<b>QRAuthDumper Status</b>\n\n"
-            "API_ID: <code>{api_id}</code>\n"
-            "API_HASH: <code>{api_hash}</code>\n"
-            "Timeout: <code>{timeout}</code> sec\n"
-            "Refresh: <code>{refresh}</code> sec\n"
-            "Password attempts: <code>{max_attempts}</code>\n"
-            "Status: {status}\n"
+        "menu_title": "<b>QRAuthDumper</b>\nSelect action:",
+        "usage_title": (
+            "<b>QRAuthDumper</b>\n"
+            "<blockquote>"
+            "This module allows you to obtain Telegram session data via QR code authorization.\n"
+            "How it works:\n"
+            "1. Generate QR code\n"
+            "2. Scan it with your phone (Settings - Devices - Link Desktop Device)\n"
+            "3. Get auth key and session data\n\n"
+            "Requirements: API_ID and API_HASH in module config\n"
+            "</blockquote>"
         ),
         "no_config": (
             "<b>Config not set</b>\n\n"
             "API_ID and API_HASH required.\n"
-            "<code>{prefix}qrauth id YOUR_API_ID</code>\n"
-            "<code>{prefix}qrauth hash YOUR_API_HASH</code>\n"
+            "Configure them in module settings."
         ),
         "qr_prompt": (
-            "<b>Scan this QR code</b>\n\n"
+            "<b>Scan this QR code</b>\n"
             "1. Open Telegram on phone\n"
             "2. Settings - Devices - Link Desktop Device\n"
             "3. Point camera at QR\n\n"
-            "Time left: <b>{timeout} sec</b>\n"
+            "Time left: <b>{timeout} sec</b>"
         ),
         "qr_refreshed": (
-            "<b>QR refreshed</b>\n\n"
+            "<b>QR refreshed</b>\n"
             "Old one expired, scan new one.\n"
-            "Time left: <b>{time_left} sec</b>\n"
+            "Time left: <b>{time_left} sec</b>"
         ),
         "auth_success": (
-            "<b>Auth Success</b>\n\n"
+            "<b>Auth Success</b>\n"
             "Name: {name}\n"
             "ID: <code>{user_id}</code>\n"
             "Username: {username}\n"
@@ -135,73 +126,63 @@ class QRAuthDumper(loader.Module):
             "<code>{auth_key_sha}</code>\n\n"
             "<b>Save this and delete this message.</b>"
         ),
-        "auth_timeout": "<b>Timeout</b>\n\nQR expired. Try again.\n",
-        "auth_error": "<b>Error</b>\n\nDetails: <code>{error}</code>\n\nTry again.\n",
-        "already_running": "<b>Wait</b>\n\nAuth already running. Wait.\n",
+        "auth_timeout": "<b>Timeout</b>\n\nQR expired.",
+        "auth_error": "<b>Error</b>\n\nDetails: <code>{error}</code>",
+        "already_running": "<b>Wait</b>\n\nAuth already running.",
         "generating": "<b>Generating QR...</b>",
-        "config_updated": "<b>{key} updated.</b>",
-        "provide_value": "<b>Provide value.</b>",
         "password_needed": (
             "<b>2FA Password Required</b>\n\n"
             "Enter password below.\n"
-            "Attempts left: <b>{attempts}</b>\n"
+            "Attempts left: <b>{attempts}</b>"
         ),
         "wrong_password": (
             "<b>Wrong password!</b>\n\n"
             "Attempts left: <b>{attempts}</b>\n"
-            "Enter password below.\n"
+            "Enter password below."
         ),
         "attempts_exhausted": (
-            "<b>All password attempts used.</b>\n\n"
-            "Process terminated. Try again.\n"
+            "<b>All password attempts used.</b>\n"
+            "Process terminated."
         ),
-        "provide_password": "<b>Provide password.</b>",
-        "no_active_process": "<b>No active QR auth process.</b>",
-        "installing_deps": "<b>Installing dependencies...</b>\n{status}",
+        "session_cancelled": "<b>Auth cancelled.</b>",
+        "btn_start": "Start",
+        "btn_usage": "Usage",
+        "btn_back": "Back",
         "btn_cancel": "Cancel",
+        "btn_retry": "Retry",
         "btn_enter_pass": "Enter Password",
         "input_password": "Enter your 2FA password:",
-        "session_cancelled": "<b>Auth cancelled.</b>",
     }
 
     strings_ru = {
-        "help": (
-            "<b>QR Auth Dumper v{ver}</b>\n\n"
-            "<b>Команды:</b>\n"
-            "<code>{prefix}dumpqr</code> - запустить QR авторизацию\n\n"
-            "<b>Настройки:</b>\n"
-            "<code>{prefix}qrauth</code> - эта справка\n"
-            "<code>{prefix}qrauth status</code> - статус\n"
-            "<code>{prefix}qrauth id [значение]</code> - установить API_ID\n"
-            "<code>{prefix}qrauth hash [значение]</code> - установить API_HASH\n"
-            "<code>{prefix}qrauth timeout [сек]</code> - таймаут QR\n"
-        ),
-        "status": (
-            "<b>Статус QRAuthDumper</b>\n\n"
-            "API_ID: <code>{api_id}</code>\n"
-            "API_HASH: <code>{api_hash}</code>\n"
-            "Таймаут: <code>{timeout}</code> сек\n"
-            "Обновление: <code>{refresh}</code> сек\n"
-            "Попытки пароля: <code>{max_attempts}</code>\n"
-            "Статус: {status}\n"
+        "menu_title": "<b>QRAuthDumper</b>\nВыберите действие:",
+        "usage_title": (
+            "<b>QRAuthDumper</b>\n"
+            "<blockquote>"
+            "Этот модуль позволяет получить данные сессии Telegram через QR авторизацию.\n\n"
+            "Как работает:\n"
+            "1. Генерируется QR код\n"
+            "2. Сканируете его телефоном (Настройки - Устройства - Подключить устройство)\n"
+            "3. Получаете auth key и данные сессии\n\n"
+            "Требования: API_ID и API_HASH в конфиге модуля\n"
+            "</blockquote>"
         ),
         "no_config": (
             "<b>Настройки не заданы</b>\n\n"
             "Требуются API_ID и API_HASH.\n"
-            "<code>{prefix}qrauth id ВАШ_API_ID</code>\n"
-            "<code>{prefix}qrauth hash ВАШ_API_HASH</code>\n"
+            "Настройте их в настройках модуля."
         ),
         "qr_prompt": (
             "<b>Отсканируйте этот QR код</b>\n\n"
             "1. Откройте Telegram на телефоне\n"
             "2. Настройки - Устройства - Подключить устройство\n"
-            "3. Наведите камеру на QR\n\n"
-            "Осталось: <b>{timeout} сек</b>\n"
+            "3. Наведите камеру на QR\n"
+            "Осталось: <b>{timeout} сек</b>"
         ),
         "qr_refreshed": (
-            "<b>QR обновлён</b>\n\n"
+            "<b>QR обновлён</b>\n"
             "Старый истёк, сканируйте новый.\n"
-            "Осталось: <b>{time_left} сек</b>\n"
+            "Осталось: <b>{time_left} сек</b>"
         ),
         "auth_success": (
             "<b>Авторизация успешна</b>\n\n"
@@ -215,33 +196,32 @@ class QRAuthDumper(loader.Module):
             "<code>{auth_key_sha}</code>\n\n"
             "<b>Сохраните это и удалите сообщение.</b>"
         ),
-        "auth_timeout": "<b>Таймаут</b>\n\nQR истёк. Попробуйте снова.\n",
-        "auth_error": "<b>Ошибка</b>\n\nДетали: <code>{error}</code>\n\nПопробуйте снова.\n",
-        "already_running": "<b>Подождите</b>\n\nАвторизация уже запущена. Ожидайте.\n",
+        "auth_timeout": "<b>Таймаут</b>\n\nQR истёк.",
+        "auth_error": "<b>Ошибка</b>\n\nДетали: <code>{error}</code>",
+        "already_running": "<b>Подождите</b>\n\nАвторизация уже запущена.",
         "generating": "<b>Генерация QR...</b>",
-        "config_updated": "<b>{key} обновлён.</b>",
-        "provide_value": "<b>Укажите значение.</b>",
         "password_needed": (
             "<b>Требуется 2FA пароль</b>\n\n"
             "Введите пароль ниже.\n"
-            "Осталось попыток: <b>{attempts}</b>\n"
+            "Осталось попыток: <b>{attempts}</b>"
         ),
         "wrong_password": (
-            "<b>Неверный пароль!</b>\n\n"
+            "<b>Неверный пароль!</b>\n"
             "Осталось попыток: <b>{attempts}</b>\n"
-            "Введите пароль ниже.\n"
+            "Введите пароль ниже."
         ),
         "attempts_exhausted": (
             "<b>Все попытки пароля исчерпаны.</b>\n\n"
-            "Процесс завершён. Попробуйте снова.\n"
+            "Процесс завершён."
         ),
-        "provide_password": "<b>Укажите пароль.</b>",
-        "no_active_process": "<b>Нет активного процесса QR авторизации.</b>",
-        "installing_deps": "<b>Установка зависимостей...</b>\n{status}",
+        "session_cancelled": "<b>Авторизация отменена.</b>",
+        "btn_start": "Старт",
+        "btn_usage": "Описание",
+        "btn_back": "Назад",
         "btn_cancel": "Отмена",
+        "btn_retry": "Повторить",
         "btn_enter_pass": "Ввести пароль",
         "input_password": "Введите ваш 2FA пароль:",
-        "session_cancelled": "<b>Авторизация отменена.</b>",
     }
 
     def __init__(self):
@@ -415,7 +395,13 @@ class QRAuthDumper(loader.Module):
                 except Exception:
                     pass
                 logger.info("[QRAuth] Timeout")
-                await form_call.edit(self.strings["auth_timeout"], reply_markup=[])
+                await form_call.edit(
+                    self.strings["auth_timeout"],
+                    reply_markup=[[
+                        {"text": self.strings["btn_retry"], "callback": self._retry_qr, "args": (uid,), "style": "success"},
+                        {"text": self.strings["btn_cancel"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"},
+                    ]]
+                )
                 return
 
             await self._finalize_auth(tc, user, form_call)
@@ -427,7 +413,13 @@ class QRAuthDumper(loader.Module):
             except Exception:
                 pass
             try:
-                await form_call.edit(self.strings["auth_error"].format(error=escape_html(str(e))), reply_markup=[])
+                await form_call.edit(
+                    self.strings["auth_error"].format(error=escape_html(str(e))),
+                    reply_markup=[[
+                        {"text": self.strings["btn_retry"], "callback": self._retry_qr, "args": (uid,), "style": "success"},
+                        {"text": self.strings["btn_cancel"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"},
+                    ]]
+                )
             except Exception:
                 pass
 
@@ -492,7 +484,50 @@ class QRAuthDumper(loader.Module):
                 pass
             if uid in self._pending_2fa:
                 del self._pending_2fa[uid]
-            await form_call.edit(self.strings["auth_error"].format(error=escape_html(str(e))), reply_markup=[])
+            await form_call.edit(
+                self.strings["auth_error"].format(error=escape_html(str(e))),
+                reply_markup=[[
+                    {"text": self.strings["btn_retry"], "callback": self._retry_qr, "args": (uid,), "style": "success"},
+                    {"text": self.strings["btn_cancel"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"},
+                ]]
+            )
+
+    async def _show_menu(self, call, uid):
+        await call.edit(
+            self.strings["menu_title"],
+            reply_markup=[
+                [{"text": self.strings["btn_start"], "callback": self._start_qr, "args": (uid,), "style": "success"}],
+                [{"text": self.strings["btn_usage"], "callback": self._show_usage, "args": (uid,), "style": "primary"}],
+            ]
+        )
+
+    async def _show_usage(self, call, uid):
+        await call.edit(
+            self.strings["usage_title"],
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._show_menu, "args": (uid,), "style": "primary"}]]
+        )
+
+    async def _start_qr(self, call, uid):
+        api_id = self.config["API_ID"]
+        api_hash = self.config["API_HASH"]
+
+        if not api_id or not api_hash:
+            await call.edit(
+                self.strings["no_config"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._show_menu, "args": (uid,), "style": "primary"}]]
+            )
+            return
+
+        self._active_sessions[uid] = True
+        await call.edit(self.strings["generating"], reply_markup=[])
+        
+        task = asyncio.create_task(self._run_qr(int(api_id), str(api_hash), uid, call))
+        self._tasks.add(task)
+        task.add_done_callback(lambda t: (self._tasks.discard(t), self._active_sessions.pop(uid, None)))
+
+    async def _retry_qr(self, call, uid):
+        self._active_sessions.pop(uid, None)
+        await self._start_qr(call, uid)
 
     async def _qr_cancel(self, call, uid: int):
         pending = self._pending_2fa.pop(uid, None)
@@ -513,103 +548,27 @@ class QRAuthDumper(loader.Module):
                 pass
         self._active_sessions.pop(uid, None)
 
-    @loader.command(ru_doc="QR Auth Dumper - справка и настройки", en_doc="QR Auth Dumper - help and config")
-    async def qrauth(self, message: Message):
-        """QR Auth Dumper help and configuration"""
-        args = utils.get_args_raw(message).split()
-        prefix = self.get_prefix()
-        if not args:
-            ver = ".".join(map(str, __version__))
-            await utils.answer(message, self.strings["help"].format(ver=ver, prefix=prefix))
-            return
-
-        cmd = args[0].lower()
-        if cmd == "status":
-            await self._cmd_status(message)
-        elif cmd == "id":
-            await self._cmd_set(message, args, "API_ID", is_int=True)
-        elif cmd == "hash":
-            await self._cmd_set(message, args, "API_HASH", is_int=False)
-        elif cmd == "timeout":
-            await self._cmd_set(message, args, "QR_TIMEOUT", is_int=True)
-        else:
-            ver = ".".join(map(str, __version__))
-            await utils.answer(message, self.strings["help"].format(ver=ver, prefix=prefix))
-
-    async def _cmd_status(self, message: Message):
-        api_id = self.config["API_ID"]
-        api_hash = str(self.config["API_HASH"])
-        if api_id and api_hash:
-            masked = api_hash[:4] + "..." + api_hash[-4:] if len(api_hash) > 8 else "***"
-            status = "Ready"
-        else:
-            masked = "Not set"
-            status = "Not configured"
-        await utils.answer(
-            message,
-            self.strings["status"].format(
-                api_id=api_id or "Not set",
-                api_hash=masked,
-                timeout=self.config["QR_TIMEOUT"],
-                refresh=QR_REFRESH,
-                max_attempts=self.config["MAX_PASSWORD_ATTEMPTS"],
-                status=status,
-            ),
-        )
-
-    async def _cmd_set(self, message: Message, args, key, is_int=False):
-        val = args[1] if len(args) > 1 else None
-        if not val:
-            reply = await message.get_reply_message()
-            if reply:
-                val = (reply.text or "").strip()
-        if not val:
-            await utils.answer(message, self.strings["provide_value"])
-            return
-        try:
-            if is_int:
-                val = int(val)
-            self.config[key] = val
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            await self._client.send_message(message.chat_id, self.strings["config_updated"].format(key=key), parse_mode="html")
-        except ValueError:
-            await utils.answer(message, "<b>Error:</b> Invalid value")
-
     @loader.command(ru_doc="Запуск QR авторизации", en_doc="Start QR authentication")
     async def dumpqr(self, message: Message):
         """Start QR authentication"""
         uid = self._owner_id
-        prefix = self.get_prefix()
 
         if uid in self._pending_2fa:
             await self._cleanup_session(uid)
-
-        api_id = self.config["API_ID"]
-        api_hash = self.config["API_HASH"]
-
-        if not api_id or not api_hash:
-            await utils.answer(message, self.strings["no_config"].format(prefix=prefix))
-            return
 
         if self._active_sessions.get(uid):
             await utils.answer(message, self.strings["already_running"])
             return
 
-        self._active_sessions[uid] = True
-
-        form = await self.inline.form(
-            text=self.strings["generating"],
+        await self.inline.form(
+            text=self.strings["menu_title"],
             message=message,
-            reply_markup=[],
+            reply_markup=[
+                [{"text": self.strings["btn_start"], "callback": self._start_qr, "args": (uid,), "style": "success"}],
+                [{"text": self.strings["btn_usage"], "callback": self._show_usage, "args": (uid,), "style": "primary"}],
+            ],
             silent=True,
         )
-
-        task = asyncio.create_task(self._run_qr(int(api_id), str(api_hash), uid, form))
-        self._tasks.add(task)
-        task.add_done_callback(lambda t: (self._tasks.discard(t), self._active_sessions.pop(uid, None)))
 
     async def on_unload(self):
         for task in list(self._tasks):
