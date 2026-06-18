@@ -1,4 +1,4 @@
-__version__ = (3, 0, 5)
+__version__ = (3, 0, 6)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/QRAuthDumper/MetaBanner.jpeg
 
@@ -330,6 +330,11 @@ class QRAuthDumper(loader.Module):
             auth_key_sha=sha,
         )
 
+    async def _send_new_message(self, chat_id, topic_id, is_forum, text):
+        reply_to = topic_id if is_forum and topic_id else None
+        msg = await self._client.send_message(chat_id, text, parse_mode="html", reply_to=reply_to)
+        return msg
+
     async def _run_qr(self, api_id, api_hash, uid, form_call):
         timeout = int(self.config["QR_TIMEOUT"])
         refresh = QR_REFRESH
@@ -427,8 +432,7 @@ class QRAuthDumper(loader.Module):
                 except Exception:
                     pass
                 if chat_id:
-                    reply_to = topic_id if is_forum and topic_id else None
-                    await self._client.send_message(chat_id, self.strings["auth_timeout"], parse_mode="html", reply_to=reply_to)
+                    await self._send_new_message(chat_id, topic_id, is_forum, self.strings["auth_timeout"])
                 return
 
             await self._finalize_auth(tc, user, form_call)
@@ -445,8 +449,7 @@ class QRAuthDumper(loader.Module):
                 except Exception:
                     pass
                 if chat_id:
-                    reply_to = topic_id if is_forum and topic_id else None
-                    await self._client.send_message(chat_id, self.strings["auth_error"].format(error=escape_html(str(e))), parse_mode="html", reply_to=reply_to)
+                    await self._send_new_message(chat_id, topic_id, is_forum, self.strings["auth_error"].format(error=escape_html(str(e))))
             except Exception as ex:
                 logger.error("[QRAuth] Failed to send error message: %s", ex)
 
@@ -521,8 +524,7 @@ class QRAuthDumper(loader.Module):
             except Exception:
                 pass
             if chat_id:
-                reply_to = topic_id if is_forum and topic_id else None
-                await self._client.send_message(chat_id, self.strings["auth_error"].format(error=escape_html(str(e))), parse_mode="html", reply_to=reply_to)
+                await self._send_new_message(chat_id, topic_id, is_forum, self.strings["auth_error"].format(error=escape_html(str(e))))
 
     async def _show_menu(self, call, uid):
         await call.edit(
