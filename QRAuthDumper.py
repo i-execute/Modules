@@ -1,4 +1,4 @@
-__version__ = (3, 0, 4)
+__version__ = (3, 0, 5)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/QRAuthDumper/MetaBanner.jpeg
 
@@ -236,6 +236,7 @@ class QRAuthDumper(loader.Module):
         self._owner_id = None
         self._active_sessions = {}
         self._pending_2fa = {}
+        self._session_data = {}
         self._tasks = set()
         self._tmp_dir = None
 
@@ -329,12 +330,14 @@ class QRAuthDumper(loader.Module):
             auth_key_sha=sha,
         )
 
-    async def _run_qr(self, api_id, api_hash, uid, form_call, session_data):
+    async def _run_qr(self, api_id, api_hash, uid, form_call):
         timeout = int(self.config["QR_TIMEOUT"])
         refresh = QR_REFRESH
-        chat_id = session_data["chat_id"]
-        topic_id = session_data["topic_id"]
-        is_forum = session_data["is_forum"]
+        
+        session_data = self._session_data.get(uid, {})
+        chat_id = session_data.get("chat_id")
+        topic_id = session_data.get("topic_id")
+        is_forum = session_data.get("is_forum", False)
 
         tc = TelegramClient(
             StringSession(),
@@ -403,7 +406,6 @@ class QRAuthDumper(loader.Module):
                     "client": tc,
                     "attempts_left": max_attempts,
                     "form_call": form_call,
-                    "session_data": session_data
                 }
                 await form_call.edit(
                     self.strings["password_needed"].format(attempts=max_attempts),
@@ -424,8 +426,9 @@ class QRAuthDumper(loader.Module):
                     await form_call.delete()
                 except Exception:
                     pass
-                reply_to = topic_id if is_forum and topic_id else None
-                await self._client.send_message(chat_id, self.strings["auth_timeout"], parse_mode="html", reply_to=reply_to)
+                if chat_id:
+                    reply_to = topic_id if is_forum and topic_id else None
+                    await self._client.send_message(chat_id, self.strings["auth_timeout"], parse_mode="html", reply_to=reply_to)
                 return
 
             await self._finalize_auth(tc, user, form_call)
@@ -441,10 +444,11 @@ class QRAuthDumper(loader.Module):
                     await form_call.delete()
                 except Exception:
                     pass
-                reply_to = topic_id if is_forum and topic_id else None
-                await self._client.send_message(chat_id, self.strings["auth_error"].format(error=escape_html(str(e))), parse_mode="html", reply_to=reply_to)
-            except Exception:
-                pass
+                if chat_id:
+                    reply_to = topic_id if is_forum and topic_id else None
+                    await self._client.send_message(chat_id, self.strings["auth_error"].format(error=escape_html(str(e))), parse_mode="html", reply_to=reply_to)
+            except Exception as ex:
+                logger.error("[QRAuth] Failed to send error message: %s", ex)
 
     async def _finalize_auth(self, tc, user, form_call):
         try:
@@ -476,10 +480,11 @@ class QRAuthDumper(loader.Module):
 
         tc = pending["client"]
         form_call = pending["form_call"]
-        session_data = pending["session_data"]
-        chat_id = session_data["chat_id"]
-        topic_id = session_data["topic_id"]
-        is_forum = session_data["is_forum"]
+        
+        session_data = self._session_data.get(uid, {})
+        chat_id = session_data.get("chat_id")
+        topic_id = session_data.get("topic_id")
+        is_forum = session_data.get("is_forum", False)
 
         try:
             await tc.sign_in(password=password)
@@ -515,8 +520,9 @@ class QRAuthDumper(loader.Module):
                 await form_call.delete()
             except Exception:
                 pass
-            reply_to = topic_id if is_forum and topic_id else None
-            await self._client.send_message(chat_id, self.strings["auth_error"].format(error=escape_html(str(e))), parse_mode="html", reply_to=reply_to)
+            if chat_id:
+                reply_to = topic_id if is_forum and topic_id else None
+                await self._client.send_message(chat_id, self.strings["auth_error"].format(error=escape_html(str(e))), parse_mode="html", reply_to=reply_to)
 
     async def _show_menu(self, call, uid):
         await call.edit(
@@ -547,9 +553,7 @@ class QRAuthDumper(loader.Module):
         self._active_sessions[uid] = True
         await call.edit(self.strings["generating"], reply_markup=[])
         
-        session_data = getattr(call, "_session_data", {})
-        
-        task = asyncio.create_task(self._run_qr(int(api_id), str(api_hash), uid, call, session_data))
+        task = asyncio.create_task(self._run_qr(int(api_id), str(api_hash), uid, call))
         self._tasks.add(task)
         task.add_done_callback(lambda t: (self._tasks.discard(t), self._active_sessions.pop(uid, None)))
 
@@ -561,6 +565,7 @@ class QRAuthDumper(loader.Module):
             except Exception:
                 pass
         self._active_sessions.pop(uid, None)
+        self._session_data.pop(uid, None)
         await call.delete()
 
     async def _cleanup_session(self, uid):
@@ -571,6 +576,7 @@ class QRAuthDumper(loader.Module):
             except Exception:
                 pass
         self._active_sessions.pop(uid, None)
+        self._session_data.pop(uid, None)
 
     @loader.command(ru_doc="Запуск QR авторизации", en_doc="Start QR authentication")
     async def dumpqr(self, message: Message):
@@ -588,7 +594,13 @@ class QRAuthDumper(loader.Module):
         topic_id = self._get_topic_id(message) if is_forum else None
         chat_id = message.chat_id
 
-        form = await self.inline.form(
+        self._session_data[uid] = {
+            "chat_id": chat_id,
+            "topic_id": topic_id,
+            "is_forum": is_forum
+        }
+
+        await self.inline.form(
             text=self.strings["menu_title"],
             message=message,
             reply_markup=[
@@ -597,12 +609,6 @@ class QRAuthDumper(loader.Module):
             ],
             silent=True,
         )
-        
-        form._session_data = {
-            "chat_id": chat_id,
-            "topic_id": topic_id,
-            "is_forum": is_forum
-        }
 
     async def on_unload(self):
         for task in list(self._tasks):
