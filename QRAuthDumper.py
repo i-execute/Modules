@@ -1,4 +1,4 @@
-__version__ = (3, 0, 1)
+__version__ = (3, 0, 2)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/QRAuthDumper/MetaBanner.jpeg
 
@@ -93,12 +93,12 @@ class QRAuthDumper(loader.Module):
             "How it works:\n"
             "1. Generate QR code\n"
             "2. Scan it with your phone (Settings - Devices - Link Desktop Device)\n"
-            "3. Get auth key and session data\n\n"
-            "Requirements: API_ID and API_HASH in module config\n"
+            "3. Get auth key and session data\n"
+            "Requirements: API_ID and API_HASH in module config"
             "</blockquote>"
         ),
         "no_config": (
-            "<b>Config not set</b>\n\n"
+            "<b>Config not set</b>\n"
             "API_ID and API_HASH required.\n"
             "Configure them in module settings."
         ),
@@ -106,7 +106,7 @@ class QRAuthDumper(loader.Module):
             "<b>Scan this QR code</b>\n"
             "1. Open Telegram on phone\n"
             "2. Settings - Devices - Link Desktop Device\n"
-            "3. Point camera at QR\n\n"
+            "3. Point camera at QR\n"
             "Time left: <b>{timeout} sec</b>"
         ),
         "qr_refreshed": (
@@ -126,17 +126,17 @@ class QRAuthDumper(loader.Module):
             "<code>{auth_key_sha}</code>\n\n"
             "<b>Save this and delete this message.</b>"
         ),
-        "auth_timeout": "<b>Timeout</b>\n\nQR expired.",
-        "auth_error": "<b>Error</b>\n\nDetails: <code>{error}</code>",
-        "already_running": "<b>Wait</b>\n\nAuth already running.",
+        "auth_timeout": "<b>Timeout</b>\nQR expired.",
+        "auth_error": "<b>Error</b>\nDetails: <code>{error}</code>",
+        "already_running": "<b>Wait</b>\nAuth already running.",
         "generating": "<b>Generating QR...</b>",
         "password_needed": (
-            "<b>2FA Password Required</b>\n\n"
+            "<b>2FA Password Required</b>\n"
             "Enter password below.\n"
             "Attempts left: <b>{attempts}</b>"
         ),
         "wrong_password": (
-            "<b>Wrong password!</b>\n\n"
+            "<b>Wrong password!</b>\n"
             "Attempts left: <b>{attempts}</b>\n"
             "Enter password below."
         ),
@@ -149,6 +149,7 @@ class QRAuthDumper(loader.Module):
         "btn_usage": "Usage",
         "btn_back": "Back",
         "btn_cancel": "Cancel",
+        "btn_kill": "Kill",
         "btn_retry": "Retry",
         "btn_enter_pass": "Enter Password",
         "input_password": "Enter your 2FA password:",
@@ -159,21 +160,21 @@ class QRAuthDumper(loader.Module):
         "usage_title": (
             "<b>QRAuthDumper</b>\n"
             "<blockquote>"
-            "Этот модуль позволяет получить данные сессии Telegram через QR авторизацию.\n\n"
+            "Этот модуль позволяет получить данные сессии Telegram через QR авторизацию.\n"
             "Как работает:\n"
             "1. Генерируется QR код\n"
             "2. Сканируете его телефоном (Настройки - Устройства - Подключить устройство)\n"
-            "3. Получаете auth key и данные сессии\n\n"
-            "Требования: API_ID и API_HASH в конфиге модуля\n"
+            "3. Получаете auth key и данные сессии\n"
+            "Требования: API_ID и API_HASH в конфиге модуля"
             "</blockquote>"
         ),
         "no_config": (
-            "<b>Настройки не заданы</b>\n\n"
+            "<b>Настройки не заданы</b>\n"
             "Требуются API_ID и API_HASH.\n"
             "Настройте их в настройках модуля."
         ),
         "qr_prompt": (
-            "<b>Отсканируйте этот QR код</b>\n\n"
+            "<b>Отсканируйте этот QR код</b>\n"
             "1. Откройте Telegram на телефоне\n"
             "2. Настройки - Устройства - Подключить устройство\n"
             "3. Наведите камеру на QR\n"
@@ -185,7 +186,7 @@ class QRAuthDumper(loader.Module):
             "Осталось: <b>{time_left} сек</b>"
         ),
         "auth_success": (
-            "<b>Авторизация успешна</b>\n\n"
+            "<b>Авторизация успешна</b>\n"
             "Имя: {name}\n"
             "ID: <code>{user_id}</code>\n"
             "Юзернейм: {username}\n"
@@ -196,12 +197,12 @@ class QRAuthDumper(loader.Module):
             "<code>{auth_key_sha}</code>\n\n"
             "<b>Сохраните это и удалите сообщение.</b>"
         ),
-        "auth_timeout": "<b>Таймаут</b>\n\nQR истёк.",
-        "auth_error": "<b>Ошибка</b>\n\nДетали: <code>{error}</code>",
-        "already_running": "<b>Подождите</b>\n\nАвторизация уже запущена.",
+        "auth_timeout": "<b>Таймаут</b>\nQR истёк.",
+        "auth_error": "<b>Ошибка</b>\nДетали: <code>{error}</code>",
+        "already_running": "<b>Подождите</b>\nАвторизация уже запущена.",
         "generating": "<b>Генерация QR...</b>",
         "password_needed": (
-            "<b>Требуется 2FA пароль</b>\n\n"
+            "<b>Требуется 2FA пароль</b>\n"
             "Введите пароль ниже.\n"
             "Осталось попыток: <b>{attempts}</b>"
         ),
@@ -211,7 +212,7 @@ class QRAuthDumper(loader.Module):
             "Введите пароль ниже."
         ),
         "attempts_exhausted": (
-            "<b>Все попытки пароля исчерпаны.</b>\n\n"
+            "<b>Все попытки пароля исчерпаны.</b>\n"
             "Процесс завершён."
         ),
         "session_cancelled": "<b>Авторизация отменена.</b>",
@@ -219,6 +220,7 @@ class QRAuthDumper(loader.Module):
         "btn_usage": "Описание",
         "btn_back": "Назад",
         "btn_cancel": "Отмена",
+        "btn_kill": "Остановить",
         "btn_retry": "Повторить",
         "btn_enter_pass": "Ввести пароль",
         "input_password": "Введите ваш 2FA пароль:",
@@ -250,6 +252,21 @@ class QRAuthDumper(loader.Module):
             logger.info("[QRAuth] Dependencies check:\n" + "\n".join(status_lines))
         except Exception as e:
             logger.error("[QRAuth] Dependency installation error: %s", e)
+
+    async def _is_forum_chat(self, message):
+        try:
+            chat = await message.get_chat()
+            return getattr(chat, "forum", False)
+        except Exception:
+            return False
+
+    def _get_topic_id(self, message):
+        try:
+            if message.reply_to and hasattr(message.reply_to, "reply_to_top_id"):
+                return message.reply_to.reply_to_top_id or message.reply_to.reply_to_msg_id
+        except Exception:
+            pass
+        return None
 
     def _make_qr(self, url: str) -> bytes:
         import qrcode
@@ -312,7 +329,7 @@ class QRAuthDumper(loader.Module):
             auth_key_sha=sha,
         )
 
-    async def _run_qr(self, api_id, api_hash, uid, form_call):
+    async def _run_qr(self, api_id, api_hash, uid, form_call, chat_id, topic_id):
         timeout = int(self.config["QR_TIMEOUT"])
         refresh = QR_REFRESH
 
@@ -336,7 +353,7 @@ class QRAuthDumper(loader.Module):
             
             edit_kwargs = {
                 "text": self.strings["qr_prompt"].format(timeout=timeout),
-                "reply_markup": [[{"text": self.strings["btn_cancel"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"}]],
+                "reply_markup": [[{"text": self.strings["btn_kill"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"}]],
             }
             if qr_url:
                 edit_kwargs["photo"] = qr_url
@@ -369,7 +386,7 @@ class QRAuthDumper(loader.Module):
                         tl = timeout - elapsed
                         edit_kwargs = {
                             "text": self.strings["qr_refreshed"].format(time_left=tl),
-                            "reply_markup": [[{"text": self.strings["btn_cancel"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"}]],
+                            "reply_markup": [[{"text": self.strings["btn_kill"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"}]],
                         }
                         if new_qr_url:
                             edit_kwargs["photo"] = new_qr_url
@@ -379,12 +396,12 @@ class QRAuthDumper(loader.Module):
 
             if need_2fa:
                 max_attempts = int(self.config["MAX_PASSWORD_ATTEMPTS"])
-                self._pending_2fa[uid] = {"client": tc, "attempts_left": max_attempts, "form_call": form_call}
+                self._pending_2fa[uid] = {"client": tc, "attempts_left": max_attempts, "form_call": form_call, "chat_id": chat_id, "topic_id": topic_id}
                 await form_call.edit(
                     self.strings["password_needed"].format(attempts=max_attempts),
                     reply_markup=[[
                         {"text": self.strings["btn_enter_pass"], "input": self.strings["input_password"], "handler": self._password_input, "args": (uid,), "style": "primary"},
-                        {"text": self.strings["btn_cancel"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"},
+                        {"text": self.strings["btn_kill"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"},
                     ]]
                 )
                 return
@@ -395,12 +412,15 @@ class QRAuthDumper(loader.Module):
                 except Exception:
                     pass
                 logger.info("[QRAuth] Timeout")
-                await form_call.edit(
+                try:
+                    await form_call.delete()
+                except Exception:
+                    pass
+                await self._client.send_message(
+                    chat_id,
                     self.strings["auth_timeout"],
-                    reply_markup=[[
-                        {"text": self.strings["btn_retry"], "callback": self._retry_qr, "args": (uid,), "style": "success"},
-                        {"text": self.strings["btn_cancel"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"},
-                    ]]
+                    parse_mode="html",
+                    reply_to=topic_id,
                 )
                 return
 
@@ -413,12 +433,15 @@ class QRAuthDumper(loader.Module):
             except Exception:
                 pass
             try:
-                await form_call.edit(
+                try:
+                    await form_call.delete()
+                except Exception:
+                    pass
+                await self._client.send_message(
+                    chat_id,
                     self.strings["auth_error"].format(error=escape_html(str(e))),
-                    reply_markup=[[
-                        {"text": self.strings["btn_retry"], "callback": self._retry_qr, "args": (uid,), "style": "success"},
-                        {"text": self.strings["btn_cancel"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"},
-                    ]]
+                    parse_mode="html",
+                    reply_to=topic_id,
                 )
             except Exception:
                 pass
@@ -453,6 +476,8 @@ class QRAuthDumper(loader.Module):
 
         tc = pending["client"]
         form_call = pending["form_call"]
+        chat_id = pending["chat_id"]
+        topic_id = pending["topic_id"]
 
         try:
             await tc.sign_in(password=password)
@@ -473,7 +498,7 @@ class QRAuthDumper(loader.Module):
                 self.strings["wrong_password"].format(attempts=pending["attempts_left"]),
                 reply_markup=[[
                     {"text": self.strings["btn_enter_pass"], "input": self.strings["input_password"], "handler": self._password_input, "args": (uid,), "style": "primary"},
-                    {"text": self.strings["btn_cancel"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"},
+                    {"text": self.strings["btn_kill"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"},
                 ]]
             )
         except Exception as e:
@@ -484,12 +509,15 @@ class QRAuthDumper(loader.Module):
                 pass
             if uid in self._pending_2fa:
                 del self._pending_2fa[uid]
-            await form_call.edit(
+            try:
+                await form_call.delete()
+            except Exception:
+                pass
+            await self._client.send_message(
+                chat_id,
                 self.strings["auth_error"].format(error=escape_html(str(e))),
-                reply_markup=[[
-                    {"text": self.strings["btn_retry"], "callback": self._retry_qr, "args": (uid,), "style": "success"},
-                    {"text": self.strings["btn_cancel"], "callback": self._qr_cancel, "args": (uid,), "style": "danger"},
-                ]]
+                parse_mode="html",
+                reply_to=topic_id,
             )
 
     async def _show_menu(self, call, uid):
@@ -521,13 +549,12 @@ class QRAuthDumper(loader.Module):
         self._active_sessions[uid] = True
         await call.edit(self.strings["generating"], reply_markup=[])
         
-        task = asyncio.create_task(self._run_qr(int(api_id), str(api_hash), uid, call))
+        chat_id = getattr(call, "_chat_id", None)
+        topic_id = getattr(call, "_topic_id", None)
+        
+        task = asyncio.create_task(self._run_qr(int(api_id), str(api_hash), uid, call, chat_id, topic_id))
         self._tasks.add(task)
         task.add_done_callback(lambda t: (self._tasks.discard(t), self._active_sessions.pop(uid, None)))
-
-    async def _retry_qr(self, call, uid):
-        self._active_sessions.pop(uid, None)
-        await self._start_qr(call, uid)
 
     async def _qr_cancel(self, call, uid: int):
         pending = self._pending_2fa.pop(uid, None)
@@ -537,7 +564,7 @@ class QRAuthDumper(loader.Module):
             except Exception:
                 pass
         self._active_sessions.pop(uid, None)
-        await call.edit(self.strings["session_cancelled"], reply_markup=[])
+        await call.delete()
 
     async def _cleanup_session(self, uid):
         pending = self._pending_2fa.pop(uid, None)
@@ -560,7 +587,11 @@ class QRAuthDumper(loader.Module):
             await utils.answer(message, self.strings["already_running"])
             return
 
-        await self.inline.form(
+        is_forum = await self._is_forum_chat(message)
+        topic_id = self._get_topic_id(message) if is_forum else None
+        chat_id = message.chat_id
+
+        form = await self.inline.form(
             text=self.strings["menu_title"],
             message=message,
             reply_markup=[
@@ -569,6 +600,9 @@ class QRAuthDumper(loader.Module):
             ],
             silent=True,
         )
+        
+        form._chat_id = chat_id
+        form._topic_id = topic_id
 
     async def on_unload(self):
         for task in list(self._tasks):
