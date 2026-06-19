@@ -22,7 +22,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/TONScanner/Inline_query.png"
+BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/TONScanner/InlineQuery.png"
 
 TONAPI_BASE = "https://tonapi.io/v2"
 

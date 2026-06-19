@@ -18,7 +18,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/Inline_query.png"
+BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/InlineQuery.png"
 THUMB_IG = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/Instagram.png"
 THUMB_TT = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/TikTok.png"
 
