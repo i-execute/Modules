@@ -88,6 +88,7 @@ _ensure_all_deps()
 
 import aiohttp
 from yandex_music import ClientAsync
+from yandex_music.exceptions import TimedOutError as YMTimedOutError
 from PIL import Image
 
 try:
@@ -469,7 +470,20 @@ class YMApiClient:
                     return url
         return None
 
-    async def download_track_file(self, track, filepath, retries=3):
+    async def download_track_file(self, track, filepath):
+        try:
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
+            await track.download_async(filepath)
+            return os.path.exists(filepath) and os.path.getsize(filepath) > 0
+        except Exception as e:
+            _log("DOWNLOAD", f"download_track_file failed: {e}")
+            return False
+
+    async def download_book_part_file(self, track, filepath, retries=10, timeout_pause=60):
         last_err = None
         for attempt in range(retries):
             try:
@@ -482,12 +496,19 @@ class YMApiClient:
                 if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
                     return True
                 last_err = "empty file"
+            except (YMTimedOutError, asyncio.TimeoutError) as e:
+                last_err = e
+                _log("DOWNLOAD", f"download_book_part_file attempt {attempt + 1}/{retries} timed out: {e}")
+                if attempt != retries - 1:
+                    _log("DOWNLOAD", f"Pausing {timeout_pause}s before retry due to timeout")
+                    await asyncio.sleep(timeout_pause)
+                continue
             except Exception as e:
                 last_err = e
-                _log("DOWNLOAD", f"download_track_file attempt {attempt + 1}/{retries} failed: {e}")
-            if attempt != retries - 1:
-                await asyncio.sleep(2 * (attempt + 1))
-        _log("DOWNLOAD", f"download_track_file gave up after {retries} attempts: {last_err}")
+                _log("DOWNLOAD", f"download_book_part_file attempt {attempt + 1}/{retries} failed: {e}")
+                if attempt != retries - 1:
+                    await asyncio.sleep(2 * (attempt + 1))
+        _log("DOWNLOAD", f"download_book_part_file gave up after {retries} attempts: {last_err}")
         return False
 
     async def search_track(self, query, count=5):
@@ -608,7 +629,7 @@ class YNDXMusic(loader.Module):
         "ymb_cancel": "Cancel",
         "ymb_kill": "Kill",
         "ymb_no_books": "<b>No audiobooks in library</b>",
-        "ymb_skipped": "<b>Warning: {count} part(s) failed to download/send after retries:</b>\n<blockquote>{list}</blockquote>",
+        "ymb_stopped": "<b>Download stopped: {done}/{total} parts sent.</b>\n<blockquote>Failed on part {idx}: {name}\nReason: {error}</blockquote>",
         "btn_left": "⬅️",
         "btn_right": "➡️",
         "unknown_device": "Unknown",
@@ -690,7 +711,7 @@ class YNDXMusic(loader.Module):
         "ymb_cancel": "Отмена",
         "ymb_kill": "Остановить",
         "ymb_no_books": "<b>Нет аудиокниг в библиотеке</b>",
-        "ymb_skipped": "<b>Внимание: {count} часть(и) не удалось скачать/отправить после повторных попыток:</b>\n<blockquote>{list}</blockquote>",
+        "ymb_stopped": "<b>Загрузка остановлена: {done}/{total} частей отправлено.</b>\n<blockquote>Ошибка на части {idx}: {name}\nПричина: {error}</blockquote>",
         "btn_left": "⬅️",
         "btn_right": "➡️",
         "unknown_device": "Неизвестно",
@@ -1040,7 +1061,7 @@ class YNDXMusic(loader.Module):
         dur_s = (track.duration_ms or 0) // 1000
         raw_path = os.path.join(ddir, "raw_track")
         
-        dl_ok = await self._ym.download_track_file(track, raw_path)
+        dl_ok = await self._ym.download_book_part_file(track, raw_path)
         if not dl_ok:
             return None, "download_fail"
             
@@ -2289,7 +2310,7 @@ class YNDXMusic(loader.Module):
             reply_markup=[[{"text": self.strings["ymb_kill"], "callback": self._ymb_kill, "args": (session_id,), "style": "danger"}]],
         )
         done = 0
-        skipped = []
+        stopped_at = None
         for idx, track in enumerate(tracks, start=1):
             if sess.get("kill"):
                 break
@@ -2299,15 +2320,15 @@ class YNDXMusic(loader.Module):
                 try:
                     info, err = await self._prepare_book_part(track, ddir, cover_data, book_title)
                     if err:
-                        _log("BOOK", f"Skipped part {idx} ({part_title}): {err}")
-                        skipped.append((idx, part_title))
-                        continue
+                        _log("BOOK", f"Stopped at part {idx} ({part_title}): {err}")
+                        stopped_at = (idx, part_title, err)
+                        break
                     info["artist"] = artist
                     sent_ok = await self._send_audio(chat_id, info, reply_to=reply_to)
                     if not sent_ok:
-                        _log("BOOK", f"Skipped part {idx} ({part_title}): send_fail")
-                        skipped.append((idx, part_title))
-                        continue
+                        _log("BOOK", f"Stopped at part {idx} ({part_title}): send_fail")
+                        stopped_at = (idx, part_title, "send_fail")
+                        break
                     done += 1
                 finally:
                     if os.path.exists(ddir):
@@ -2321,20 +2342,22 @@ class YNDXMusic(loader.Module):
                     except Exception:
                         pass
             except Exception as e:
-                _log("YMB", f"Part {idx} ({part_title}) error: {e}")
-                skipped.append((idx, part_title))
-                continue
+                _log("YMB", f"Stopped at part {idx} ({part_title}) error: {e}")
+                stopped_at = (idx, part_title, str(e))
+                break
         self._ymb_sessions.pop(session_id, None)
         try:
             await call.delete()
         except Exception:
             pass
-        if skipped:
-            lines = "\n".join(f"{i}. {escape_html(t)}" for i, t in skipped)
+        if stopped_at:
+            idx, part_title, err = stopped_at
             try:
                 await self._client.send_message(
                     chat_id,
-                    self.strings["ymb_skipped"].format(count=len(skipped), list=lines),
+                    self.strings["ymb_stopped"].format(
+                        done=done, total=count, idx=idx, name=escape_html(part_title), error=escape_html(str(err))
+                    ),
                     parse_mode="html",
                     reply_to=reply_to,
                 )
