@@ -1,5 +1,6 @@
 __version__ = (3, 2, 3)
 # meta developer: I_execute.t.me
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Logger/MetaBanner.jpeg
 
 import logging
 import asyncio
