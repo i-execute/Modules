@@ -30,8 +30,8 @@ class AutoAvka(loader.Module):
 
     strings = {
         "name": "AutoAvka",
-        "help": "AutoAvka Help\n\n.avka - Open control menu\n.avkashow - Download and show current avatars",
-        "config_missing": "Error: Please set ONLINE_AVKA_URL and OFFLINE_AVKA_URL in config",
+        "help": "<b>AutoAvka Help:</b>\n<blockquote>.avka - Open control menu\n.avkashow - Download and show current avatars</blockquote>",
+        "config_missing": "<b>Error:</b> Please set ONLINE_AVKA_URL and OFFLINE_AVKA_URL in config",
         "session_not_selected": "Error: No session selected",
         "avatars_sent": "Avatars sent",
         "no_avatars": "No avatars to show",
@@ -48,7 +48,7 @@ class AutoAvka(loader.Module):
         "btn_back": "Back",
         "btn_next": "Next",
         "btn_select_session": "Select",
-        "session_info_title": "Session Info\n\n{}",
+        "session_info_title": "<b>Session Info</b>\n<blockquote>{}</blockquote>",
         "testflight_wait": "Testflight, please wait",
         "testflight_success": "Testflight completed successfully",
         "testflight_partial": "Testflight partial success\n{}",
@@ -63,8 +63,8 @@ class AutoAvka(loader.Module):
 
     strings_ru = {
         "name": "AutoAvka",
-        "help": "AutoAvka Помощь\n\n.avka - Открыть меню управления\n.avkashow - Скачать и показать текущие аватарки",
-        "config_missing": "Ошибка: Укажите ONLINE_AVKA_URL и OFFLINE_AVKA_URL в конфиге",
+        "help": "<b>AutoAvka использование:</b>\n<blockquote>.avka - Открыть меню управления\n.avkashow - Скачать и показать текущие аватарки</blockquote>",
+        "config_missing": "<b>Ошибка:</b> Укажите ONLINE_AVKA_URL и OFFLINE_AVKA_URL в конфиге",
         "session_not_selected": "Ошибка: Сессия не выбрана",
         "avatars_sent": "Аватарки отправлены",
         "no_avatars": "Нет аватарок для показа",
@@ -81,7 +81,7 @@ class AutoAvka(loader.Module):
         "btn_back": "Назад",
         "btn_next": "Далее",
         "btn_select_session": "Выбрать",
-        "session_info_title": "Инфо сессии\n\n{}",
+        "session_info_title": "<b>Инфа о сессии</b>\n<blockquote>{}</blockquote>",
         "testflight_wait": "Testflight, please wait",
         "testflight_success": "Testflight завершен успешно",
         "testflight_partial": "Testflight частично успешен\n{}",
