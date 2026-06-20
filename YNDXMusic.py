@@ -1,4 +1,4 @@
-__version__ = (1, 1, 1)
+__version__ = (2, 0, 0)
 # meta developer: I_execute.t.me forked from @codrago_m
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/YNDXMusic/MetaBanner_new.jpeg
 
@@ -556,18 +556,21 @@ class YNDXMusic(loader.Module):
 
     strings = {
         "name": "YNDXMusic",
-        "auth_instruction": (
-            "<b>YNDXMusic - Authorization</b>\n\n"
+        "ymauth_menu_title": (
+            "<b>YNDXMusic - Authorization</b>\n"
             "<blockquote>"
             "1. Open the link below\n"
             "2. Sign in and grant permissions\n"
             "3. Copy the full URL from the address bar\n"
-            "4. Paste it: <code>{prefix}ymauth URL</code>"
-            "</blockquote>\n\n"
+            "4. Tap the button below and paste the URL"
+            "</blockquote>\n"
             '<a href="{ym_url}">Authorize via Yandex</a>'
         ),
+        "ymauth_paste_btn": "Paste URL",
+        "ymauth_enter_url": "Paste full URL from address bar:",
+        "ymauth_cancel": "Cancel",
         "token_ok": (
-            "<b>Yandex Music authorized!</b>\n\n"
+            "<b>Yandex Music authorized!</b>\n"
             "<blockquote>UID: <code>{uid}</code>\n"
             "Login: <code>{login}</code>\n"
             "Plus: {plus}</blockquote>"
@@ -638,18 +641,21 @@ class YNDXMusic(loader.Module):
     }
 
     strings_ru = {
-        "auth_instruction": (
-            "<b>YNDXMusic - Авторизация</b>\n\n"
+        "ymauth_menu_title": (
+            "<b>YNDXMusic - Авторизация</b>\n"
             "<blockquote>"
             "1. Откройте ссылку ниже\n"
             "2. Войдите в аккаунт и дайте разрешения\n"
             "3. Скопируйте полный URL из адресной строки\n"
-            "4. Вставьте его: <code>{prefix}ymauth URL</code>"
-            "</blockquote>\n\n"
+            "4. Нажмите кнопку ниже и вставьте URL"
+            "</blockquote>\n"
             '<a href="{ym_url}">Авторизация через Яндекс</a>'
         ),
+        "ymauth_paste_btn": "Вставить URL",
+        "ymauth_enter_url": "Вставьте полный URL из адресной строки:",
+        "ymauth_cancel": "Отмена",
         "token_ok": (
-            "<b>Yandex Music авторизован!</b>\n\n"
+            "<b>Yandex Music авторизован!</b>\n"
             "<blockquote>UID: <code>{uid}</code>\n"
             "Логин: <code>{login}</code>\n"
             "Плюс: {plus}</blockquote>"
@@ -738,6 +744,7 @@ class YNDXMusic(loader.Module):
         self._upload_lock = None
         self._now_track_id = None
         self._now_mp3_url = None
+        self._ymauth_sessions = {}
         self._yms_sessions = {}
         self._yms_locks = {}
         self._ymp_sessions = {}
@@ -1162,46 +1169,87 @@ class YNDXMusic(loader.Module):
     )
     async def ymauth(self, message: Message):
         """Yandex Music authorization"""
-        prefix = self.get_prefix()
         args = utils.get_args_raw(message).strip()
-        if not args:
-            await utils.answer(
-                message,
-                self.strings["auth_instruction"].format(
-                    prefix=prefix,
-                    ym_url=_build_ym_auth_url(),
-                ),
-            )
-            return
-        token = extract_ym_token(args)
-        if not token:
-            if not args.startswith("http") and len(args) > 10:
-                token = args
+        if args:
+            token = extract_ym_token(args)
+            if not token:
+                if not args.startswith("http") and len(args) > 10:
+                    token = args
+                else:
+                    await utils.answer(message, self.strings["token_bad_format"])
+                    return
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            ok = await self._ym.auth(token)
+            if ok:
+                self.config["YM_TOKEN"] = token
+                await self._client.send_message(
+                    message.chat_id,
+                    self.strings["token_ok"].format(
+                        uid=self._ym._uid or "?",
+                        login=self._ym._login or "?",
+                        plus="OK" if self._ym.has_plus else "ERR",
+                    ),
+                    parse_mode="html",
+                )
             else:
-                await utils.answer(message, self.strings["token_bad_format"])
+                await self._client.send_message(
+                    message.chat_id,
+                    self.strings["token_fail"],
+                    parse_mode="html",
+                )
+            return
+        session_id = str(id(message))
+        self._ymauth_sessions[session_id] = {"chat_id": message.chat_id}
+        await self.inline.form(
+            text=self.strings["ymauth_menu_title"].format(ym_url=_build_ym_auth_url()),
+            message=message,
+            reply_markup=[[
+                {
+                    "text": self.strings["ymauth_paste_btn"],
+                    "input": self.strings["ymauth_enter_url"],
+                    "handler": self._ymauth_input,
+                    "args": (session_id,),
+                    "style": "primary",
+                },
+                {
+                    "text": self.strings["ymauth_cancel"],
+                    "callback": self._ymauth_cancel,
+                    "args": (session_id,),
+                    "style": "danger",
+                },
+            ]],
+            silent=True,
+        )
+
+    async def _ymauth_input(self, call, text: str, session_id: str):
+        self._ymauth_sessions.pop(session_id, None)
+        url_or_token = text.strip()
+        token = extract_ym_token(url_or_token)
+        if not token:
+            if not url_or_token.startswith("http") and len(url_or_token) > 10:
+                token = url_or_token
+            else:
+                await call.edit(self.strings["token_bad_format"])
                 return
-        try:
-            await message.delete()
-        except Exception:
-            pass
         ok = await self._ym.auth(token)
         if ok:
             self.config["YM_TOKEN"] = token
-            await self._client.send_message(
-                message.chat_id,
+            await call.edit(
                 self.strings["token_ok"].format(
                     uid=self._ym._uid or "?",
                     login=self._ym._login or "?",
                     plus="OK" if self._ym.has_plus else "ERR",
-                ),
-                parse_mode="html",
+                )
             )
         else:
-            await self._client.send_message(
-                message.chat_id,
-                self.strings["token_fail"],
-                parse_mode="html",
-            )
+            await call.edit(self.strings["token_fail"])
+
+    async def _ymauth_cancel(self, call, session_id: str):
+        self._ymauth_sessions.pop(session_id, None)
+        await call.delete()
 
     @loader.command(
         ru_doc="Текущий трек. Флаг -f отправить файл",
@@ -2376,6 +2424,7 @@ class YNDXMusic(loader.Module):
         await call.delete()
 
     async def on_unload(self):
+        self._ymauth_sessions.clear()
         self._yms_sessions.clear()
         self._yms_locks.clear()
         self._ymp_sessions.clear()
