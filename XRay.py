@@ -667,6 +667,7 @@ class XRay(loader.Module):
         if not self._xray_installed():
             return
         import re as _re
+
         try:
             p = await asyncio.create_subprocess_exec(
                 "ss", "-tlnp",
@@ -703,6 +704,13 @@ class XRay(loader.Module):
                     continue
                 exe = os.readlink(proc_path)
                 if "xray" not in exe.lower():
+                    continue
+                try:
+                    with open(f"/proc/{pid}/environ", "rb") as f:
+                        env = f.read()
+                    if b"XRAY_MODULE_MANAGED" not in env:
+                        continue
+                except OSError:
                     continue
                 try:
                     os.kill(pid, 0)
@@ -898,7 +906,10 @@ class XRay(loader.Module):
     async def _install_xray(self, tag: str) -> Tuple[bool, str]:
         if _in_docker():
             return False, "docker"
-        
+
+        for name in list(self._processes.keys()):
+            await self._stop_user(name)
+
         arch = platform.machine().lower()
         arch_map = {
             "x86_64": "64",
@@ -978,7 +989,11 @@ class XRay(loader.Module):
             
             if not binary:
                 return False, "Binary not found in archive"
-            
+
+            try:
+                os.remove(self._xray_path)
+            except OSError:
+                pass
             shutil.copy2(binary, self._xray_path)
             os.chmod(self._xray_path, 0o755)
             
@@ -1064,8 +1079,12 @@ class XRay(loader.Module):
 
     def _build_config(self, user: Dict) -> Dict:
         transport = user["transport"]
-        sni = user.get("sni", "www.microsoft.com")
-        dest = user.get("dest", "www.microsoft.com:443")
+        if transport == "tcp":
+            sni = user.get("sni", "www.sony.com")
+            dest = user.get("dest", "www.sony.com:443")
+        else:
+            sni = user.get("sni", "www.microsoft.com")
+            dest = user.get("dest", "www.microsoft.com:443")
         short_id = user["short_id"]
 
         config = {
@@ -1086,8 +1105,10 @@ class XRay(loader.Module):
                     "encryption": "none",
                 },
                 "sniffing": {
-                    "enabled": True,
-                    "destOverride": ["http", "tls", "quic"],
+                    "enabled": False,
+                    "destOverride": ["http", "tls", "quic", "fakedns"],
+                    "metadataOnly": False,
+                    "routeOnly": False,
                 },
             }],
             "outbounds": [
@@ -1102,8 +1123,13 @@ class XRay(loader.Module):
                 "security": "reality",
                 "xhttpSettings": {
                     "path": user.get("path", "/xhttps"),
+                    "host": sni,
                     "mode": "auto",
+                    "noSSEHeader": False,
                     "xPaddingBytes": padding,
+                    "scMaxBufferedPosts": 30,
+                    "scMaxEachPostBytes": "1000000",
+                    "scStreamUpServerSecs": "20-80",
                 },
                 "realitySettings": {
                     "show": False,
@@ -1117,8 +1143,12 @@ class XRay(loader.Module):
         else:
             config["inbounds"][0]["settings"]["clients"][0]["flow"] = "xtls-rprx-vision"
             config["inbounds"][0]["streamSettings"] = {
-                "network": "raw",
+                "network": "tcp",
                 "security": "reality",
+                "tcpSettings": {
+                    "acceptProxyProtocol": False,
+                    "header": {"type": "none"},
+                },
                 "realitySettings": {
                     "show": False,
                     "target": dest,
@@ -1139,15 +1169,14 @@ class XRay(loader.Module):
         ip = self._external_ip
         port = user["port"]
         transport = user["transport"]
-        sni = user.get("sni", "www.microsoft.com")
-        dest = user.get("dest", "www.microsoft.com:443")
         public_key = user["public_key"]
         short_id = user["short_id"]
-        fp = user.get("fingerprint", "chrome")
-        
+        fp = user.get("fingerprint", "firefox")
+
         import json as _json
 
         if transport == "xhttp":
+            sni = user.get("sni", "www.microsoft.com")
             path = user.get("path", "/xhttps")
             padding = user.get("padding", "100-1000")
             extra = _json.dumps({"xPaddingBytes": padding}, separators=(",", ":"))
@@ -1168,14 +1197,15 @@ class XRay(loader.Module):
             })
             return f"vless://{uuid_str}@{ip}:{port}?{params}#{urllib.parse.quote(name, safe='')}"
         else:
+            sni = user.get("sni", "www.sony.com")
             params = urllib.parse.urlencode({
-                "type": "raw",
-                "security": "reality",
+                "type": "tcp",
                 "encryption": "none",
+                "security": "reality",
                 "flow": "xtls-rprx-vision",
-                "sni": sni,
-                "fp": fp,
                 "pbk": public_key,
+                "fp": fp,
+                "sni": sni,
                 "sid": short_id,
                 "spx": "/",
             })
@@ -1222,6 +1252,7 @@ class XRay(loader.Module):
                 stdout=run_log_fd,
                 stderr=run_log_fd,
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+                env={**os.environ, "XRAY_MODULE_MANAGED": self._root},
             )
 
             await asyncio.sleep(2)
@@ -1805,7 +1836,7 @@ class XRay(loader.Module):
         dest = user.get("dest", "www.microsoft.com:443")
         path = user.get("path", "/xhttps") if user["transport"] == "xhttp" else "n/a"
         padding = user.get("padding", "100-1000") if user["transport"] == "xhttp" else "n/a"
-        fp = user.get("fingerprint", "chrome")
+        fp = user.get("fingerprint", "firefox")
         limit = user.get("device_limit", 0)
         limit_text = "Unlimited" if limit == 0 else str(limit)
         
@@ -1972,7 +2003,7 @@ class XRay(loader.Module):
         ]
         
         await call.edit(
-            f"<b>Select Fingerprint</b>\n<blockquote>Current: {self._users[name].get('fingerprint', 'chrome')}</blockquote>",
+            f"<b>Select Fingerprint</b>\n<blockquote>Current: {self._users[name].get('fingerprint', 'firefox')}</blockquote>",
             reply_markup=markup
         )
 
@@ -2090,6 +2121,13 @@ class XRay(loader.Module):
         
         port = await self._get_next_port()
         
+        if transport == "tcp":
+            default_sni = "www.sony.com"
+            default_dest = "www.sony.com:443"
+        else:
+            default_sni = "www.microsoft.com"
+            default_dest = "www.microsoft.com:443"
+
         user = {
             "name": name,
             "uuid": str(uuid.uuid4()),
@@ -2099,11 +2137,11 @@ class XRay(loader.Module):
             "private_key": private_key,
             "public_key": public_key,
             "short_id": self._generate_short_id(),
-            "sni": "www.microsoft.com",
-            "dest": "www.microsoft.com:443",
+            "sni": default_sni,
+            "dest": default_dest,
             "path": "/xhttps",
             "padding": "100-1000",
-            "fingerprint": "chrome",
+            "fingerprint": "firefox",
             "start_time": 0,
         }
         
