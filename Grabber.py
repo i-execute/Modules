@@ -202,6 +202,43 @@ async def _fetch_og_image(url):
     return None
 
 
+_VK_SUBS_PATCH_APPLIED = False
+
+
+def _sanitize_vk_subs_payload(obj):
+    if isinstance(obj, dict):
+        if "title" in obj and obj["title"] is None and "url" in obj:
+            obj["title"] = ".srt"
+        for v in obj.values():
+            _sanitize_vk_subs_payload(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _sanitize_vk_subs_payload(item)
+    return obj
+
+
+def _patch_vk_extractor():
+    global _VK_SUBS_PATCH_APPLIED
+    if _VK_SUBS_PATCH_APPLIED:
+        return
+    try:
+        from yt_dlp.extractor.vk import VKBaseIE
+        _orig_download_payload = VKBaseIE._download_payload
+
+        def _patched_download_payload(self, path, video_id, data, fatal=True):
+            payload = _orig_download_payload(self, path, video_id, data, fatal=fatal)
+            try:
+                _sanitize_vk_subs_payload(payload)
+            except Exception:
+                pass
+            return payload
+
+        VKBaseIE._download_payload = _patched_download_payload
+        _VK_SUBS_PATCH_APPLIED = True
+    except Exception as e:
+        logger.debug(f"[GRABBER] vk extractor patch failed: {e}")
+
+
 def _get_best_thumb_url(info):
     if not info:
         return None
@@ -1129,6 +1166,7 @@ class Grabber(loader.Module):
 
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(self._executor, _install_deps)
+        await loop.run_in_executor(self._executor, _patch_vk_extractor)
         if self._get_setting("AUTORUNNER") and self.config["BOT_TOKEN"]:
             try:
                 await self._launch(self.config["BOT_TOKEN"])
@@ -2355,6 +2393,7 @@ class Grabber(loader.Module):
     def _yt_extract_info(self, url):
         try:
             import yt_dlp
+            _patch_vk_extractor()
             opts = {
                 "quiet": True,
                 "no_warnings": True,
@@ -2538,6 +2577,7 @@ class Grabber(loader.Module):
     ):
         try:
             import yt_dlp
+            _patch_vk_extractor()
         except ImportError:
             raise Exception("yt-dlp not installed")
 
