@@ -1,4 +1,4 @@
-__version__ = (1, 0, 1)
+__version__ = (1, 0, 2)
 # meta developer: I_execute.t.me
 
 import os
@@ -7,6 +7,7 @@ import logging
 import asyncio
 import tempfile
 import shutil
+import mimetypes
 
 from telethon.tl.types import Message, DocumentAttributeAudio
 from .. import loader, utils
@@ -20,6 +21,24 @@ E_ERR = '<tg-emoji emoji-id=5258084738278658226>😠</tg-emoji>'
 
 def _log(tag: str, msg: str):
     logger.info(f"[Voices][{tag}] {msg}")
+
+
+def _get_ext(reply) -> str:
+    try:
+        doc = getattr(reply.media, "document", None)
+        if doc and doc.mime_type:
+            ext = mimetypes.guess_extension(doc.mime_type)
+            if ext:
+                return ext.lstrip(".")
+    except Exception:
+        pass
+    if reply.video or reply.video_note:
+        return "mp4"
+    if reply.audio:
+        return "mp3"
+    if reply.voice:
+        return "ogg"
+    return "bin"
 
 
 @loader.tds
@@ -188,12 +207,16 @@ class Voices(loader.Module):
         status = await utils.answer(message, self._s("processing"))
 
         work_dir = tempfile.mkdtemp(dir=self._tmp)
-        input_file = os.path.join(work_dir, "input")
+        ext = _get_ext(reply)
+        input_file = os.path.join(work_dir, f"input.{ext}")
         output_file = os.path.join(work_dir, "voice.ogg")
 
         try:
             try:
-                await reply.download_media(input_file)
+                path = await reply.download_media(input_file)
+                if not path:
+                    raise RuntimeError("download_media returned None")
+                input_file = path
             except Exception as e:
                 _log("DOWNLOAD", f"Failed: {e}")
                 await self._safe_edit(status, self._s("download_error"))
