@@ -1,4 +1,4 @@
-__version__ = (1, 1, 2)
+__version__ = (2, 0, 0)
 # meta developer: I_execute.t.me
 
 import asyncio
@@ -9,15 +9,9 @@ import re
 import shutil
 import tempfile
 import time
-import traceback
 import typing
 
-from telethon.tl.types import (
-    InputDocument,
-    InputMediaDocument,
-)
-from telethon.tl.functions.messages import EditInlineBotMessageRequest
-
+from telethon.tl.types import Message, DocumentAttributeAudio
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
@@ -46,9 +40,6 @@ except ImportError:
 SC_SEARCH_URL = "https://api-v2.soundcloud.com/search/tracks"
 SC_RESOLVE_URL = "https://api-v2.soundcloud.com/resolve"
 
-INLINE_QUERY_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/SCMusic/Inline_query.png"
-DOWNLOADING_STUB = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/SCMusic/Downloading.mp3"
-
 MAX_FILE_SIZE = 50 * 1024 * 1024
 REQUEST_OK = 200
 
@@ -74,7 +65,11 @@ def escape_html(t: str) -> str:
     return (t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def normalize_cover(raw: bytes, max_size: typing.Optional[int] = None) -> typing.Optional[bytes]:
+def sanitize_fn(n: str) -> str:
+    return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", n).strip(". ")[:180] or "track"
+
+
+def normalize_cover(raw: bytes, max_size: typing.Optional[int] = None, force_jpeg: bool = False) -> typing.Optional[bytes]:
     if not PIL_OK or not raw or len(raw) < 100:
         return None
     try:
@@ -110,29 +105,69 @@ def _embed_id3(filepath: str, title: str, artist: str, cover_data: typing.Option
         pass
 
 
+async def _upload_to_x0(data: bytes, filename: str, content_type: str = "audio/mpeg") -> str:
+    if not CFFI_OK:
+        return ""
+    try:
+        async with cffi_requests.AsyncSession(impersonate="chrome120") as s:
+            files = {"file": (filename, data, content_type)}
+            r = await s.post("https://x0.at", files=files, timeout=60)
+            if r.status_code == REQUEST_OK:
+                text = r.text.strip()
+                if text.startswith("http"):
+                    return text
+    except Exception:
+        pass
+    return ""
+
+
 @loader.tds
 class SCMusic(loader.Module):
     """SoundCloud Music - search and download audio from SoundCloud"""
 
     strings = {
         "name": "SCMusic",
-        "not_found": "Nothing found",
-        "not_found_desc": "Try a different query",
-        "hint_title": "SCMusic",
-        "hint_desc": "Type a track name or paste a SoundCloud link",
-        "downloading": "Downloading...",
-        "link_not_found": "Track not found",
-        "link_not_found_desc": "Could not get track info by link",
+        "no_results": "<b>Nothing found</b>",
+        "provide_query": "<b>Provide a search query</b>",
+        "searching": "<b>Searching</b> <code>{query}</code>",
+        "uploading": "<b>Uploading...</b>",
+        "download_fail": "<b>Download failed.</b> Try again.",
+        "error": "<b>Error:</b> {msg}",
+        "downloading_track": "<b>Downloading</b> <code>{title}</code>",
+        "btn_download": "⬇️ Download",
+        "btn_cancel": "✖️ Close",
+        "btn_new_search": "🔍 New search",
+        "btn_left": "⬅️",
+        "btn_right": "➡️",
+        "menu_title": "<b>SoundCloud Music</b>\n<blockquote>Search a track</blockquote>",
+        "via_link": "Via link",
+        "via_query": "Via query",
+        "enter_link": "Enter SoundCloud link:",
+        "enter_query": "Enter search query:",
+        "link_not_found": "<b>Track not found by link</b>",
+        "no_cffi": "<b>curl_cffi not installed</b>",
     }
 
     strings_ru = {
-        "not_found": "Ничего не найдено",
-        "not_found_desc": "Попробуй другой запрос",
-        "hint_title": "SCMusic",
-        "hint_desc": "Введи название трека или вставь ссылку на SoundCloud",
-        "downloading": "Загрузка...",
-        "link_not_found": "Трек не найден",
-        "link_not_found_desc": "Не удалось получить информацию о треке по ссылке",
+        "no_results": "<b>Ничего не найдено</b>",
+        "provide_query": "<b>Укажите поисковый запрос</b>",
+        "searching": "<b>Поиск</b> <code>{query}</code>",
+        "uploading": "<b>Загрузка...</b>",
+        "download_fail": "<b>Ошибка скачивания.</b> Попробуйте снова.",
+        "error": "<b>Ошибка:</b> {msg}",
+        "downloading_track": "<b>Загружаю</b> <code>{title}</code>",
+        "btn_download": "⬇️ Скачать",
+        "btn_cancel": "✖️ Закрыть",
+        "btn_new_search": "🔍 Новый поиск",
+        "btn_left": "⬅️",
+        "btn_right": "➡️",
+        "menu_title": "<b>SoundCloud Music</b>\n<blockquote>Поиск трека</blockquote>",
+        "via_link": "По ссылке",
+        "via_query": "По запросу",
+        "enter_link": "Введите ссылку на SoundCloud:",
+        "enter_query": "Введите поисковый запрос:",
+        "link_not_found": "<b>Трек по ссылке не найден</b>",
+        "no_cffi": "<b>curl_cffi не установлен</b>",
     }
 
     def __init__(self):
@@ -147,11 +182,9 @@ class SCMusic(loader.Module):
         self._tmp = None
         self._me_id = None
         self._upload_lock = None
-        self._real_cache = {}
-        self._stub_cache = {}
-        self._search_cache = {}
-        self._stub_audio = None
-        self._default_stub_fid = None
+        self._scs_sessions = {}
+        self._scs_locks = {}
+        self._cover_cache = {}
 
     async def client_ready(self, client, db):
         self._client = client
@@ -159,53 +192,38 @@ class SCMusic(loader.Module):
         self._upload_lock = asyncio.Lock()
         me = await client.get_me()
         self._me_id = me.id
-        self._tmp = f"/tmp/scmusic_{me.id}"
+        self._tmp = os.path.join(tempfile.gettempdir(), f"SCMusic_{me.id}")
         if os.path.exists(self._tmp):
             shutil.rmtree(self._tmp, ignore_errors=True)
         os.makedirs(self._tmp, exist_ok=True)
-        
-        await self._init_stub()
 
-    async def _init_stub(self):
-        if not CFFI_OK:
-            _log("STUB_INIT", "curl_cffi not available")
-            return
-        
+    async def on_unload(self):
+        self._scs_sessions.clear()
+        self._scs_locks.clear()
+        self._cover_cache.clear()
+        if self._tmp and os.path.exists(self._tmp):
+            shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _get_limit(self):
         try:
-            async with cffi_requests.AsyncSession(impersonate="chrome120") as ses:
-                r = await ses.get(DOWNLOADING_STUB, timeout=30)
-                if r.status_code == REQUEST_OK and r.content:
-                    self._stub_audio = r.content
-                    _log("STUB_INIT", f"Downloaded stub: {len(self._stub_audio)} bytes")
-                    stub_buf = io.BytesIO(self._stub_audio)
-                    stub_buf.name = "Downloading.mp3"
-                    
-                    try:
-                        sent = await self.inline.bot.send_audio(
-                            self._me_id,
-                            stub_buf,
-                            title="Downloading...",
-                            performer="SCMusic",
-                        )
-                        if sent and sent.media:
-                            doc = getattr(sent.media, "document", None)
-                            if doc:
-                                self._default_stub_fid = InputDocument(
-                                    id=doc.id,
-                                    access_hash=doc.access_hash,
-                                    file_reference=doc.file_reference,
-                                )
-                                _log("STUB_INIT", f"Uploaded default stub: doc_id={doc.id}")
-                                try:
-                                    await self.inline.bot.delete_message(self._me_id, sent.id)
-                                except Exception:
-                                    pass
-                    except Exception as e:
-                        _log("STUB_INIT", f"Failed to upload default stub: {e}")
-                else:
-                    _log("STUB_INIT", f"Failed: status {r.status_code}")
-        except Exception as e:
-            _log("STUB_INIT", f"Error: {e}")
+            return max(1, min(10, int(self.config["SEARCH_LIMIT"])))
+        except Exception:
+            return 5
+
+    async def _is_forum_chat(self, message):
+        try:
+            chat = await message.get_chat()
+            return getattr(chat, "forum", False)
+        except Exception:
+            return False
+
+    def _get_topic_id(self, message):
+        try:
+            if message.reply_to and hasattr(message.reply_to, "reply_to_top_id"):
+                return message.reply_to.reply_to_top_id or message.reply_to.reply_to_msg_id
+        except Exception:
+            pass
+        return None
 
     async def _get_client_id(self, ses) -> typing.Optional[str]:
         if self._client_id:
@@ -300,22 +318,21 @@ class SCMusic(loader.Module):
                 "title": item.get("title", "Unknown"),
                 "username": item.get("user", {}).get("username", "Unknown"),
                 "dur_str": dur_str,
-                "duration": item.get("duration", 0) // 1000,
+                "duration": dur_s,
                 "artwork_url": art,
                 "track_data": item,
             })
         return results
 
-    async def _dl_track(self, track_data: dict) -> dict:
+    async def _prepare_track(self, track_data: dict, ddir: str) -> typing.Tuple[typing.Optional[dict], typing.Optional[str]]:
         if not CFFI_OK:
-            return {"error": "curl_cffi not installed"}
+            return None, "curl_cffi not installed"
 
-        ddir = tempfile.mkdtemp(dir=self._tmp)
         try:
             async with cffi_requests.AsyncSession(impersonate="chrome120") as ses:
                 c_id = await self._get_client_id(ses)
                 if not c_id:
-                    return {"error": "no client_id"}
+                    return None, "no client_id"
 
                 title = track_data.get("title", "Unknown")
                 artist = track_data.get("user", {}).get("username", "Unknown")
@@ -327,7 +344,7 @@ class SCMusic(loader.Module):
 
                 tr = track_data.get("media", {}).get("transcodings", [])
                 if not tr:
-                    return {"error": "no transcodings"}
+                    return None, "no transcodings"
 
                 s_info = next(
                     (t for t in tr if t.get("format", {}).get("protocol") == "progressive"),
@@ -339,34 +356,33 @@ class SCMusic(loader.Module):
 
                 s_resp = await ses.get(s_url)
                 if s_resp.status_code != REQUEST_OK or not s_resp.json().get("url"):
-                    return {"error": "stream url failed"}
+                    return None, "stream url failed"
 
                 stream_url = s_resp.json().get("url")
                 a_buf = io.BytesIO()
-                a_buf.name = "track.mp3"
 
                 if s_info.get("format", {}).get("protocol") == "progressive":
                     m_resp = await ses.get(stream_url)
                     if m_resp.status_code != REQUEST_OK:
-                        return {"error": "progressive dl failed"}
+                        return None, "progressive dl failed"
                     a_buf.write(m_resp.content)
                 else:
                     m3_resp = await ses.get(stream_url)
                     if m3_resp.status_code != REQUEST_OK:
-                        return {"error": "m3u8 fetch failed"}
+                        return None, "m3u8 fetch failed"
                     chk = [l for l in m3_resp.text.splitlines() if l and not l.startswith("#")]
                     if not chk:
-                        return {"error": "empty m3u8"}
+                        return None, "empty m3u8"
                     for c_u in chk:
                         c_r = await ses.get(c_u)
                         if c_r.status_code != REQUEST_OK:
-                            return {"error": "chunk dl failed"}
+                            return None, "chunk dl failed"
                         a_buf.write(c_r.content)
 
                 if a_buf.tell() == 0:
-                    return {"error": "empty audio"}
+                    return None, "empty audio"
                 if a_buf.tell() > MAX_FILE_SIZE:
-                    return {"error": "too_large"}
+                    return None, "too_large"
 
                 raw_cover = None
                 if art:
@@ -380,14 +396,15 @@ class SCMusic(loader.Module):
                 cover_data = normalize_cover(raw_cover) if raw_cover else None
                 thumb_data = normalize_cover(raw_cover, max_size=320) if raw_cover else None
 
-                mp3_path = os.path.join(ddir, "track.mp3")
+                safe_name = sanitize_fn(f"{artist} - {title}")
+                mp3_path = os.path.join(ddir, f"{safe_name}.mp3")
                 with open(mp3_path, "wb") as f:
                     a_buf.seek(0)
                     f.write(a_buf.read())
 
                 if cover_data:
                     cover_path = os.path.join(ddir, "cover.jpg")
-                    covered_mp3 = os.path.join(ddir, "track_cover.mp3")
+                    covered_mp3 = os.path.join(ddir, f"{safe_name}_cover.mp3")
                     with open(cover_path, "wb") as cf:
                         cf.write(cover_data)
                     proc = await asyncio.create_subprocess_exec(
@@ -414,416 +431,434 @@ class SCMusic(loader.Module):
                 else:
                     _embed_id3(mp3_path, title, artist, None)
 
-                if not thumb_data and cover_data:
-                    thumb_data = cover_data
-
-                with open(mp3_path, "rb") as f:
-                    audio_bytes = f.read()
-
-                file_id = await self._upload_to_tg(
-                    audio_bytes,
-                    "track.mp3",
-                    title,
-                    artist,
-                    dur_s,
-                    thumb_data,
-                )
-                if file_id:
-                    return {"file_id": file_id, "title": title, "artist": artist, "duration": dur_s}
-                return {"error": "Telegram upload failed"}
+                return {
+                    "path": mp3_path,
+                    "title": title,
+                    "artist": artist,
+                    "dur_s": dur_s,
+                    "thumb_data": thumb_data,
+                }, None
 
         except Exception as e:
-            _log("DL", f"Exception: {str(e)[:120]}")
-            return {"error": str(e)[:120]}
+            return None, str(e)[:120]
+
+    async def _send_audio(self, chat_id, info: dict, reply_to=None, retries: int = 3) -> bool:
+        with open(info["path"], "rb") as f:
+            mp3_bytes = f.read()
+        thumb_bytes = info.get("thumb_data")
+        last_err = None
+        for attempt in range(retries):
+            try:
+                audio_buf = io.BytesIO(mp3_bytes)
+                audio_buf.name = os.path.basename(info["path"])
+                thumb_buf = None
+                if thumb_bytes:
+                    thumb_buf = io.BytesIO(thumb_bytes)
+                    thumb_buf.name = "cover.jpg"
+                await self._client.send_file(
+                    chat_id,
+                    file=audio_buf,
+                    caption=None,
+                    attributes=[
+                        DocumentAttributeAudio(
+                            duration=info["dur_s"],
+                            title=info["title"],
+                            performer=info["artist"],
+                        )
+                    ],
+                    thumb=thumb_buf,
+                    voice=False,
+                    reply_to=reply_to,
+                )
+                return True
+            except Exception as e:
+                last_err = e
+                _log("SEND_AUDIO", f"attempt {attempt + 1}/{retries} failed: {e}")
+                if attempt != retries - 1:
+                    await asyncio.sleep(2 * (attempt + 1))
+        _log("SEND_AUDIO", f"gave up: {last_err}")
+        return False
+
+    @loader.command(
+        ru_doc="Поиск трека на SoundCloud. Без аргументов открывает форму выбора",
+        en_doc="Search track on SoundCloud. Without args opens selection form",
+    )
+    async def scs(self, message: Message):
+        """Search SoundCloud track."""
+        if not CFFI_OK:
+            await utils.answer(message, self.strings["no_cffi"])
+            return
+
+        query = utils.get_args_raw(message).strip()
+        is_forum = await self._is_forum_chat(message)
+        topic_id = self._get_topic_id(message) if is_forum else None
+
+        if not query:
+            session_id = str(id(message))
+            self._scs_sessions[session_id] = {
+                "chat_id": message.chat_id,
+                "is_forum": is_forum,
+                "topic_id": topic_id,
+            }
+            form_kwargs = dict(
+                text=self.strings["menu_title"],
+                message=message,
+                reply_markup=[[
+                    {
+                        "text": self.strings["via_link"],
+                        "input": self.strings["enter_link"],
+                        "handler": self._scs_link_input,
+                        "args": (session_id,),
+                        "style": "primary",
+                    },
+                    {
+                        "text": self.strings["via_query"],
+                        "input": self.strings["enter_query"],
+                        "handler": self._scs_query_input,
+                        "args": (session_id,),
+                        "style": "primary",
+                    },
+                ]],
+                silent=True,
+            )
+            if is_forum and topic_id:
+                form_kwargs["reply_to"] = topic_id
+            await self.inline.form(**form_kwargs)
+            return
+
+        m = SC_URL_RE.search(query)
+        if m:
+            await self._scs_download_by_link(message, m.group(0), is_forum, topic_id)
+            return
+
+        await self._scs_run_search(message, query, is_forum, topic_id)
+
+    async def _scs_link_input(self, call, text: str, session_id: str):
+        url = text.strip()
+        sess = self._scs_sessions.get(session_id, {})
+        m = SC_URL_RE.search(url)
+        if not m:
+            await call.edit(self.strings["link_not_found"])
+            return
+        await call.edit(self.strings["uploading"])
+        
+        track = await self._resolve_url(m.group(0))
+        if not track:
+            await call.edit(self.strings["link_not_found"])
+            return
+
+        chat_id = sess.get("chat_id")
+        is_forum = sess.get("is_forum", False)
+        topic_id = sess.get("topic_id")
+        self._scs_sessions.pop(session_id, None)
+        
+        ddir = tempfile.mkdtemp(dir=self._tmp)
+        try:
+            info, err = await self._prepare_track(track["track_data"], ddir)
+            if err:
+                await call.edit(self.strings["download_fail"])
+                return
+            await self._send_audio(chat_id, info, reply_to=topic_id if is_forum and topic_id else None)
+            await call.delete()
         finally:
             shutil.rmtree(ddir, ignore_errors=True)
 
-    async def _upload_to_tg(
-        self,
-        file_bytes: bytes,
-        filename: str,
-        title: str,
-        artist: str,
-        dur_s: int,
-        thumb_data: typing.Optional[bytes],
-    ) -> typing.Optional[InputDocument]:
-        async with self._upload_lock:
-            audio_buf = io.BytesIO(file_bytes)
-            audio_buf.name = filename
-            thumb_buf = None
-            if thumb_data:
-                thumb_buf = io.BytesIO(thumb_data)
-                thumb_buf.name = "cover.jpg"
+    async def _scs_query_input(self, call, text: str, session_id: str):
+        query = text.strip()
+        sess = self._scs_sessions.get(session_id, {})
+        if not query:
+            await call.edit(self.strings["no_results"])
+            return
+        await call.edit(self.strings["searching"].format(query=escape_html(query)))
+        limit = self._get_limit()
+        tracks = await self._search_sc(query, limit=limit)
+        if not tracks:
+            await call.edit(self.strings["no_results"])
+            return
+        
+        chat_id = sess.get("chat_id")
+        is_forum = sess.get("is_forum", False)
+        topic_id = sess.get("topic_id")
+        new_sid = session_id + "_s"
+        self._scs_sessions[new_sid] = {
+            "tracks": tracks,
+            "index": 0,
+            "chat_id": chat_id,
+            "is_forum": is_forum,
+            "topic_id": topic_id,
+            "cover_cache": {},
+        }
+        self._scs_locks[new_sid] = asyncio.Lock()
+        cover_url = await self._scs_get_cover(new_sid, 0)
+        markup = self._scs_markup(new_sid, len(tracks))
+        track = tracks[0]
+        edit_kwargs = dict(
+            text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['username'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
+            reply_markup=markup,
+        )
+        if cover_url:
+            edit_kwargs["photo"] = cover_url
+        await call.edit(**edit_kwargs)
+        asyncio.ensure_future(self._scs_prefetch_covers(new_sid))
+
+    async def _scs_download_by_link(self, message, url: str, is_forum: bool, topic_id):
+        msg = await utils.answer(message, self.strings["uploading"])
+        track = await self._resolve_url(url)
+        if not track:
+            await utils.answer(msg, self.strings["link_not_found"])
+            return
+        
+        ddir = tempfile.mkdtemp(dir=self._tmp)
+        try:
+            info, err = await self._prepare_track(track["track_data"], ddir)
+            if err:
+                await utils.answer(msg, self.strings["download_fail"])
+                return
             try:
-                sent = await self.inline.bot.send_audio(
-                    self._me_id,
-                    audio_buf,
-                    title=title,
-                    performer=artist,
-                    duration=dur_s,
-                    thumbnail=thumb_buf,
-                )
-            except Exception as e:
-                _log("UPLOAD", f"send_audio failed: {e}")
-                return None
-            if sent and sent.media:
-                doc = getattr(sent.media, "document", None)
-                if doc:
-                    fid = InputDocument(
-                        id=doc.id,
-                        access_hash=doc.access_hash,
-                        file_reference=doc.file_reference,
+                await msg.delete()
+            except Exception:
+                pass
+            await self._send_audio(message.chat_id, info, reply_to=topic_id if is_forum and topic_id else None)
+        finally:
+            shutil.rmtree(ddir, ignore_errors=True)
+
+    async def _scs_run_search(self, message, query: str, is_forum: bool, topic_id):
+        msg = await utils.answer(message, self.strings["searching"].format(query=escape_html(query)))
+        limit = self._get_limit()
+        tracks = await self._search_sc(query, limit=limit)
+        if not tracks:
+            await utils.answer(msg, self.strings["no_results"])
+            return
+        
+        session_id = str(id(message))
+        self._scs_sessions[session_id] = {
+            "tracks": tracks,
+            "index": 0,
+            "chat_id": message.chat_id,
+            "is_forum": is_forum,
+            "topic_id": topic_id,
+            "cover_cache": {},
+        }
+        self._scs_locks[session_id] = asyncio.Lock()
+        cover_url = await self._scs_get_cover(session_id, 0)
+        markup = self._scs_markup(session_id, len(tracks))
+        track = tracks[0]
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        form_kwargs = dict(
+            text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['username'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
+            message=message,
+            reply_markup=markup,
+            silent=True,
+        )
+        if cover_url:
+            form_kwargs["photo"] = cover_url
+        if is_forum and topic_id:
+            form_kwargs["reply_to"] = topic_id
+        await self.inline.form(**form_kwargs)
+        asyncio.ensure_future(self._scs_prefetch_covers(session_id))
+
+    async def _scs_get_cover(self, session_id: str, idx: int) -> typing.Optional[str]:
+        sess = self._scs_sessions.get(session_id)
+        if not sess:
+            return None
+        cache = sess["cover_cache"]
+        if idx in cache:
+            return cache[idx]
+        track = sess["tracks"][idx]
+        art_url = track.get("artwork_url", "")
+        if not art_url:
+            cache[idx] = None
+            return None
+        
+        track_id = track["id"]
+        if track_id in self._cover_cache:
+            cache[idx] = self._cover_cache[track_id]
+            return cache[idx]
+        
+        if not CFFI_OK:
+            cache[idx] = None
+            return None
+        
+        try:
+            async with cffi_requests.AsyncSession(impersonate="chrome120") as s:
+                r = await s.get(art_url, timeout=15)
+                if r.status_code == REQUEST_OK and r.content:
+                    norm = normalize_cover(r.content, force_jpeg=True) or r.content
+                    x0_url = await _upload_to_x0(
+                        norm,
+                        sanitize_fn(f"{track['username']} - {track['title']}") + ".jpg",
+                        "image/jpeg",
                     )
-                    msg_id = sent.id
-                    await asyncio.sleep(0.5)
-                    for attempt in range(5):
-                        try:
-                            await self.inline.bot.delete_message(self._me_id, msg_id)
-                            break
-                        except Exception:
-                            await asyncio.sleep(1.0 * (attempt + 1))
-                    return fid
-            return None
+                    self._cover_cache[track_id] = x0_url
+                    cache[idx] = x0_url
+                    return x0_url
+        except Exception:
+            pass
+        
+        cache[idx] = None
+        return None
 
-    async def _get_stub(self, track_id: int, title: str, artist: str, artwork_url: str = "") -> typing.Optional[InputDocument]:
-        cache_key = str(track_id)
-        if cache_key in self._stub_cache:
-            return self._stub_cache[cache_key]
+    async def _scs_prefetch_covers(self, session_id: str):
+        sess = self._scs_sessions.get(session_id)
+        if not sess:
+            return
+        for i in range(1, len(sess["tracks"])):
+            if session_id not in self._scs_sessions:
+                return
+            if i not in sess["cover_cache"]:
+                await self._scs_get_cover(session_id, i)
+            await asyncio.sleep(0.3)
 
-        if not self._stub_audio:
-            if self._default_stub_fid:
-                return self._default_stub_fid
-            return None
+    def _scs_markup(self, session_id: str, total: int):
+        sess = self._scs_sessions.get(session_id, {})
+        idx = sess.get("index", 0)
+        left_btn = {"text": self.strings["btn_left"], "callback": self._scs_left, "args": (session_id,)}
+        right_btn = {"text": self.strings["btn_right"], "callback": self._scs_right, "args": (session_id,)}
+        if idx > 0:
+            left_btn["style"] = "primary"
+        if idx < total - 1:
+            right_btn["style"] = "primary"
+        return [
+            [{"text": self.strings["btn_download"], "callback": self._scs_download, "args": (session_id,), "style": "success"}],
+            [left_btn, right_btn],
+            [{"text": self.strings["btn_cancel"], "callback": self._scs_cancel, "args": (session_id,), "style": "danger"}],
+        ]
 
-        thumb_data = None
-        if artwork_url and CFFI_OK:
+    def _scs_done_markup(self, session_id: str):
+        return [
+            [{
+                "text": self.strings["btn_new_search"],
+                "input": self.strings["enter_query"],
+                "handler": self._scs_new_search_input,
+                "args": (session_id,),
+                "style": "primary",
+            }],
+            [{"text": self.strings["btn_cancel"], "callback": self._scs_cancel, "args": (session_id,), "style": "danger"}],
+        ]
+
+    async def _scs_left(self, call, session_id: str):
+        sess = self._scs_sessions.get(session_id)
+        if not sess or sess["index"] <= 0:
+            await call.answer()
+            return
+        lock = self._scs_locks.get(session_id)
+        if lock and lock.locked():
+            await call.answer()
+            return
+        async with lock:
+            sess["index"] -= 1
+            await self._scs_update(call, session_id)
+
+    async def _scs_right(self, call, session_id: str):
+        sess = self._scs_sessions.get(session_id)
+        if not sess or sess["index"] >= len(sess["tracks"]) - 1:
+            await call.answer()
+            return
+        lock = self._scs_locks.get(session_id)
+        if lock and lock.locked():
+            await call.answer()
+            return
+        async with lock:
+            sess["index"] += 1
+            await self._scs_update(call, session_id)
+
+    async def _scs_update(self, call, session_id: str):
+        sess = self._scs_sessions[session_id]
+        idx = sess["index"]
+        track = sess["tracks"][idx]
+        cover_url = await self._scs_get_cover(session_id, idx)
+        markup = self._scs_markup(session_id, len(sess["tracks"]))
+        edit_kwargs = dict(
+            text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['username'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
+            reply_markup=markup,
+        )
+        if cover_url:
+            edit_kwargs["photo"] = cover_url
+        await call.edit(**edit_kwargs)
+
+    async def _scs_download(self, call, session_id: str):
+        sess = self._scs_sessions.get(session_id)
+        if not sess:
+            await call.answer()
+            return
+        lock = self._scs_locks.get(session_id)
+        if lock and lock.locked():
+            await call.answer()
+            return
+        async with lock:
+            track = sess["tracks"][sess["index"]]
+            title = track["title"]
+            username = track["username"]
+            chat_id = sess["chat_id"]
+            is_forum = sess.get("is_forum", False)
+            topic_id = sess.get("topic_id")
             try:
-                async with cffi_requests.AsyncSession(impersonate="chrome120") as ses:
-                    r = await ses.get(artwork_url, timeout=3)
-                    if r.status_code == REQUEST_OK and r.content:
-                        thumb_data = normalize_cover(r.content, max_size=320)
+                await call.edit(
+                    self.strings["downloading_track"].format(title=escape_html(f"{username} - {title}")),
+                    reply_markup=[],
+                )
+            except Exception:
+                pass
+            ddir = tempfile.mkdtemp(dir=self._tmp)
+            try:
+                info, err = await self._prepare_track(track["track_data"], ddir)
+                if err:
+                    try:
+                        await call.edit(
+                            self.strings["download_fail"],
+                            reply_markup=self._scs_done_markup(session_id),
+                        )
+                    except Exception:
+                        pass
+                    return
+                await self._send_audio(chat_id, info, reply_to=topic_id if is_forum and topic_id else None)
+            finally:
+                shutil.rmtree(ddir, ignore_errors=True)
+            try:
+                await call.edit(
+                    f"<b>{escape_html(username)} — {escape_html(title)}</b>",
+                    reply_markup=self._scs_done_markup(session_id),
+                )
             except Exception:
                 pass
 
-        stub_buf = io.BytesIO(self._stub_audio)
-        stub_buf.name = "Downloading.mp3"
-        thumb_buf = None
-        if thumb_data:
-            thumb_buf = io.BytesIO(thumb_data)
-            thumb_buf.name = "cover.jpg"
-
-        try:
-            sent = await self.inline.bot.send_audio(
-                self._me_id,
-                stub_buf,
-                title=title,
-                performer=artist,
-                thumbnail=thumb_buf,
-            )
-            if sent and sent.media:
-                doc = getattr(sent.media, "document", None)
-                if doc:
-                    fid = InputDocument(
-                        id=doc.id,
-                        access_hash=doc.access_hash,
-                        file_reference=doc.file_reference,
-                    )
-                    self._stub_cache[cache_key] = fid
-                    try:
-                        await self.inline.bot.delete_message(self._me_id, sent.id)
-                    except Exception:
-                        pass
-                    return fid
-        except Exception as e:
-            _log("STUB", f"Upload failed for {track_id}: {e}")
-        
-        if self._default_stub_fid:
-            return self._default_stub_fid
-        return None
-
-    @loader.need_update("chosen_inline_result")
-    async def _on_chosen(self, update):
-        rid = update.id
-        msg_id = update.msg_id
-        _log("CHOSEN", f"rid={rid!r} msg_id={msg_id!r}")
-        if not rid or not rid.startswith("sc_") or not msg_id:
+    async def _scs_new_search_input(self, call, text: str, session_id: str):
+        query = text.strip()
+        if not query:
+            await call.delete()
             return
-        cache_key = rid[3:]
-        if cache_key in self._real_cache:
-            await self._do_replace(msg_id, self._real_cache[cache_key])
-            return
-        asyncio.ensure_future(self._bg_dl_replace(cache_key, msg_id))
-
-    async def _bg_dl_replace(self, cache_key: str, msg_id):
-        _log("BG", f"Start dl cache_key={cache_key}")
-        try:
-            track_data = self._search_cache.get(f"__td_{cache_key}")
-            if not track_data:
-                _log("BG", "No track_data in cache")
-                return
-            result = await self._dl_track(track_data)
-            if "error" in result:
-                _log("BG", f"Error: {result['error']}")
-                return
-            data = (
-                result["file_id"],
-                result["title"],
-                result["artist"],
-                result["duration"],
-            )
-            self._real_cache[cache_key] = data
-            await self._do_replace(msg_id, data)
-        except Exception as e:
-            _log("BG", f"Exception: {e}\n{traceback.format_exc()}")
-
-    async def _do_replace(self, msg_id, data: tuple):
-        file_id, title, artist, duration = data
-        _log("REPLACE", f"msg_id={msg_id!r} file_id={file_id!r}")
-        for attempt in range(3):
-            try:
-                await self.inline.bot.client(
-                    EditInlineBotMessageRequest(
-                        id=msg_id,
-                        media=InputMediaDocument(id=file_id),
-                    )
-                )
-                _log("REPLACE", f"OK attempt {attempt + 1}")
-                return
-            except Exception as e:
-                _log("REPLACE", f"Attempt {attempt + 1} failed: {e}")
-                await asyncio.sleep(1)
-
-    @loader.inline_handler(ru_doc="SoundCloud поиск", en_doc="SoundCloud search")
-    async def sc_inline_handler(self, query):
-        """SoundCloud search"""
-        raw = query.query.strip()
-        prefix = "sc"
-        text = raw[len(prefix):].strip() if raw.lower().startswith(prefix) else raw.strip()
-
-        if not text:
-            await self._hint(query)
-            return
-
-        _log("INLINE", f"query={text!r} from={query.from_user.id}")
-
-        m = SC_URL_RE.search(text)
-        if m:
-            await self._handle_link_inline(query, m.group(0))
-        else:
-            await self._handle_search_inline(query, text)
-
-    async def _handle_link_inline(self, query, url: str):
-        _log("LINK", f"url={url}")
-
-        cache_key = re.sub(r"https?://(?:www\.|m\.|on\.)?soundcloud\.com/", "", url).strip("/").replace("/", "_")
-
-        if cache_key in self._real_cache:
-            data = self._real_cache[cache_key]
-            try:
-                await query.answer(
-                    [
-                        await query.builder.document(
-                            data[0],
-                            title=data[1],
-                            description=data[2],
-                            mime_type="audio/mpeg",
-                            id=f"sc_{cache_key}",
-                        )
-                    ],
-                    cache_time=0,
-                    private=True,
-                )
-            except Exception as e:
-                _log("LINK", f"answer failed (cached): {e}")
-            return
-        track = await self._resolve_url(url)
-        if not track:
-            await query.answer(
-                [
-                    await query.builder.article(
-                        title=self.strings["link_not_found"],
-                        description=self.strings["link_not_found_desc"],
-                        text=f"<b>SCMusic:</b> {self.strings['link_not_found_desc']}",
-                        parse_mode="HTML",
-                        link_preview=False,
-                        id=f"notfound_{int(time.time())}",
-                    )
-                ],
-                cache_time=0,
-                private=True,
-            )
-            return
-
-        self._search_cache[f"__td_{cache_key}"] = track["track_data"]
-
-        stub_fid = await self._get_stub(
-            track["id"],
-            track["title"],
-            track["username"],
-            track["artwork_url"],
-        )
-
-        if stub_fid:
-            try:
-                await query.answer(
-                    [
-                        await query.builder.document(
-                            stub_fid,
-                            title=track["title"],
-                            description=track["username"],
-                            mime_type="audio/mpeg",
-                            id=f"sc_{cache_key}",
-                            buttons=self.inline.generate_markup(
-                                {"text": self.strings["downloading"], "data": f"scm_{cache_key[:32]}"}
-                            ),
-                        )
-                    ],
-                    cache_time=0,
-                    private=True,
-                )
-                _log("LINK", f"Answered with stub cache_key={cache_key}")
-                return
-            except Exception as e:
-                _log("LINK", f"answer with stub failed: {e}")
-
-        await query.answer(
-            [
-                await query.builder.article(
-                    title=track["title"],
-                    description=track["username"],
-                    text=f"<b>SCMusic:</b> {escape_html(track['title'])}",
-                    parse_mode="HTML",
-                    link_preview=False,
-                    id=f"sc_{cache_key}",
-                )
-            ],
-            cache_time=0,
-            private=True,
-        )
-
-    async def _handle_search_inline(self, query, text: str):
-        limit = max(1, min(10, int(self.config["SEARCH_LIMIT"])))
-        cache_key = text.lower()[:80]
-
-        if cache_key in self._search_cache:
-            tracks = self._search_cache[cache_key]
-        else:
-            tracks = await self._search_sc(text, limit=limit)
-            self._search_cache[cache_key] = tracks
-
+        sess = self._scs_sessions.get(session_id, {})
+        await call.edit(self.strings["searching"].format(query=escape_html(query)))
+        limit = self._get_limit()
+        tracks = await self._search_sc(query, limit=limit)
         if not tracks:
-            await query.answer(
-                [
-                    await query.builder.article(
-                        title=self.strings["not_found"],
-                        description=self.strings["not_found_desc"],
-                        text=f"<b>SCMusic:</b> {self.strings['not_found_desc']}",
-                        parse_mode="HTML",
-                        link_preview=False,
-                        id=f"notfound_{int(time.time())}",
-                    )
-                ],
-                cache_time=0,
-                private=True,
-            )
+            await call.edit(self.strings["no_results"], reply_markup=self._scs_done_markup(session_id))
             return
+        self._scs_sessions[session_id] = {
+            "tracks": tracks,
+            "index": 0,
+            "chat_id": sess.get("chat_id"),
+            "is_forum": sess.get("is_forum", False),
+            "topic_id": sess.get("topic_id"),
+            "cover_cache": {},
+        }
+        self._scs_locks[session_id] = asyncio.Lock()
+        cover_url = await self._scs_get_cover(session_id, 0)
+        markup = self._scs_markup(session_id, len(tracks))
+        track = tracks[0]
+        edit_kwargs = dict(
+            text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['username'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
+            reply_markup=markup,
+        )
+        if cover_url:
+            edit_kwargs["photo"] = cover_url
+        await call.edit(**edit_kwargs)
+        asyncio.ensure_future(self._scs_prefetch_covers(session_id))
 
-        for t in tracks:
-            td_key = f"__td_{str(t['id'])}"
-            if td_key not in self._search_cache:
-                self._search_cache[td_key] = t["track_data"]
-        stub_tasks = [
-            self._get_stub(t["id"], t["title"], t["username"], t["artwork_url"])
-            for t in tracks
-        ]
-        stub_results = await asyncio.gather(*stub_tasks, return_exceptions=True)
-
-        inline_results = []
-        for i, t in enumerate(tracks):
-            track_id = t["id"]
-            cache_key_t = str(track_id)
-            title = t["title"]
-            username = t["username"]
-            stub_fid = stub_results[i] if not isinstance(stub_results[i], Exception) else None
-
-            if cache_key_t in self._real_cache:
-                inline_results.append(
-                    await query.builder.document(
-                        self._real_cache[cache_key_t][0],
-                        title=title,
-                        description=username,
-                        mime_type="audio/mpeg",
-                        id=f"sc_{cache_key_t}",
-                    )
-                )
-            elif stub_fid:
-                inline_results.append(
-                    await query.builder.document(
-                        stub_fid,
-                        title=title,
-                        description=username,
-                        mime_type="audio/mpeg",
-                        id=f"sc_{cache_key_t}",
-                        buttons=self.inline.generate_markup(
-                            {"text": self.strings["downloading"], "data": f"scm_{cache_key_t[:32]}"}
-                        ),
-                    )
-                )
-            else:
-                if self._default_stub_fid:
-                    inline_results.append(
-                        await query.builder.document(
-                            self._default_stub_fid,
-                            title=title,
-                            description=username,
-                            mime_type="audio/mpeg",
-                            id=f"sc_{cache_key_t}",
-                            buttons=self.inline.generate_markup(
-                                {"text": self.strings["downloading"], "data": f"scm_{cache_key_t[:32]}"}
-                            ),
-                        )
-                    )
-                else:
-                    inline_results.append(
-                        await query.builder.article(
-                            title=title,
-                            description=username,
-                            text=f"<b>SCMusic:</b> {escape_html(title)}",
-                            parse_mode="HTML",
-                            link_preview=False,
-                            id=f"sc_{cache_key_t}",
-                        )
-                    )
-
-        try:
-            await query.answer(inline_results, cache_time=0, private=True)
-            _log("INLINE", f"Answered {len(inline_results)} results OK")
-        except Exception as e:
-            _log("INLINE", f"answer failed: {e}")
-
-    async def _hint(self, query):
-        try:
-            await query.answer(
-                [
-                    await query.builder.article(
-                        title=self.strings["hint_title"],
-                        description=self.strings["hint_desc"],
-                        text=f"<b>SCMusic:</b> {self.strings['hint_desc']}",
-                        parse_mode="HTML",
-                        link_preview=False,
-                        thumb=self.inline._web_document(INLINE_QUERY_BANNER, width=640, height=640),
-                        id=f"hint_{int(time.time())}",
-                    )
-                ],
-                cache_time=0,
-                private=True,
-            )
-        except Exception:
-            pass
-
-    async def on_unload(self):
-        self._real_cache.clear()
-        self._stub_cache.clear()
-        self._search_cache.clear()
-        if self._tmp and os.path.exists(self._tmp):
-            shutil.rmtree(self._tmp, ignore_errors=True)
+    async def _scs_cancel(self, call, session_id: str):
+        self._scs_sessions.pop(session_id, None)
+        self._scs_locks.pop(session_id, None)
+        await call.delete()
