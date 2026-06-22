@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 import typing
@@ -15,6 +16,47 @@ from telethon.tl.types import Message, DocumentAttributeAudio
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
+
+DEPS = ["curl_cffi", "Pillow", "mutagen"]
+
+
+def _install_deps():
+    import importlib
+    import subprocess
+    
+    pip = os.path.join(os.path.dirname(sys.executable), "pip")
+    if not os.path.exists(pip):
+        pip = "pip"
+    
+    imp_map = {
+        "curl_cffi": "curl_cffi",
+        "Pillow": "PIL",
+        "mutagen": "mutagen",
+    }
+    
+    lines = []
+    for pkg in DEPS:
+        try:
+            subprocess.run(
+                [pip, "install", "-U", pkg, "--break-system-packages", "-q"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            try:
+                imp_name = imp_map.get(pkg, pkg)
+                mod = importlib.import_module(imp_name)
+                ver = getattr(mod, "__version__", "?")
+                lines.append(f"{pkg}: OK ({ver})")
+            except ImportError:
+                lines.append(f"{pkg}: FAIL (import error)")
+        except Exception as e:
+            lines.append(f"{pkg}: FAIL ({e})")
+    
+    return lines
+
+
+_dep_log = _install_deps()
 
 try:
     from curl_cffi import requests as cffi_requests
@@ -127,6 +169,7 @@ class SCMusic(loader.Module):
 
     strings = {
         "name": "SCMusic",
+        "deps_installed": "<b>Dependencies installed!</b>\n\n<code>{}</code>",
         "no_results": "<b>Nothing found</b>",
         "provide_query": "<b>Provide a search query</b>",
         "searching": "<b>Searching</b> <code>{query}</code>",
@@ -149,6 +192,7 @@ class SCMusic(loader.Module):
     }
 
     strings_ru = {
+        "deps_installed": "<b>Зависимости установлены!</b>\n\n<code>{}</code>",
         "no_results": "<b>Ничего не найдено</b>",
         "provide_query": "<b>Укажите поисковый запрос</b>",
         "searching": "<b>Поиск</b> <code>{query}</code>",
@@ -478,6 +522,15 @@ class SCMusic(loader.Module):
                     await asyncio.sleep(2 * (attempt + 1))
         _log("SEND_AUDIO", f"gave up: {last_err}")
         return False
+
+    @loader.command(ru_doc="Показать статус зависимостей")
+    async def scdeps(self, message):
+        """Show dependencies status"""
+        status = "\n".join(_dep_log)
+        await utils.answer(
+            message,
+            self.strings["deps_installed"].format(status),
+        )
 
     @loader.command(
         ru_doc="Поиск трека на SoundCloud. Без аргументов открывает форму выбора",
