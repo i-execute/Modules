@@ -34,6 +34,7 @@ TONScanner
 Twin
 Uploader
 VKCalls
+Voices
 XRay
 YNDXMusic
 YTMusic

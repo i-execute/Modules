@@ -201,7 +201,6 @@ class SCMusic(loader.Module):
 
     strings = {
         "name": "SCMusic",
-        "deps_installed": "<b>Dependencies installed!</b>\n\n<code>{}</code>",
         "no_results": "<b>Nothing found</b>",
         "provide_query": "<b>Provide a search query</b>",
         "searching": "<b>Searching</b> <code>{query}</code>",
@@ -224,7 +223,6 @@ class SCMusic(loader.Module):
     }
 
     strings_ru = {
-        "deps_installed": "<b>Зависимости установлены!</b>\n\n<code>{}</code>",
         "no_results": "<b>Ничего не найдено</b>",
         "provide_query": "<b>Укажите поисковый запрос</b>",
         "searching": "<b>Поиск</b> <code>{query}</code>",
@@ -549,15 +547,6 @@ class SCMusic(loader.Module):
                     await asyncio.sleep(2 * (attempt + 1))
         _log("SEND_AUDIO", f"gave up: {last_err}")
         return False
-
-    @loader.command(ru_doc="Показать статус зависимостей")
-    async def scdeps(self, message):
-        """Show dependencies status"""
-        status = "\n".join(_dep_log)
-        await utils.answer(
-            message,
-            self.strings["deps_installed"].format(status),
-        )
 
     @loader.command(
         ru_doc="Поиск трека на SoundCloud. Без аргументов открывает форму выбора",
