@@ -1,4 +1,4 @@
-__version__ = (2, 0, 0)
+__version__ = (2, 0, 1)
 # meta developer: I_execute.t.me
 
 import asyncio
@@ -14,10 +14,11 @@ import typing
 
 from telethon.tl.types import Message, DocumentAttributeAudio
 from .. import loader, utils
+from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
-DEPS = ["curl_cffi", "Pillow", "mutagen"]
+DEPS = ["curl_cffi", "Pillow", "mutagen", "aiohttp"]
 
 
 def _install_deps():
@@ -32,6 +33,7 @@ def _install_deps():
         "curl_cffi": "curl_cffi",
         "Pillow": "PIL",
         "mutagen": "mutagen",
+        "aiohttp": "aiohttp",
     }
     
     lines = []
@@ -64,6 +66,13 @@ try:
 except ImportError:
     cffi_requests = None
     CFFI_OK = False
+
+try:
+    import aiohttp
+    AIOHTTP_OK = True
+except ImportError:
+    aiohttp = None
+    AIOHTTP_OK = False
 
 try:
     from PIL import Image
@@ -148,19 +157,42 @@ def _embed_id3(filepath: str, title: str, artist: str, cover_data: typing.Option
 
 
 async def _upload_to_x0(data: bytes, filename: str, content_type: str = "audio/mpeg") -> str:
-    if not CFFI_OK:
+    if not AIOHTTP_OK:
         return ""
     try:
-        async with cffi_requests.AsyncSession(impersonate="chrome120") as s:
-            files = {"file": (filename, data, content_type)}
-            r = await s.post("https://x0.at", files=files, timeout=60)
-            if r.status_code == REQUEST_OK:
-                text = r.text.strip()
+        form = aiohttp.FormData()
+        form.add_field("file", data, filename=filename, content_type=content_type)
+        async with aiohttp.ClientSession() as s:
+            async with s.post(
+                "https://x0.at",
+                data=form,
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as r:
+                text = (await r.text()).strip()
                 if text.startswith("http"):
                     return text
     except Exception:
         pass
     return ""
+
+
+async def _download_image_aiohttp(url: str) -> typing.Optional[bytes]:
+    if not AIOHTTP_OK or not url:
+        return None
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=15),
+                allow_redirects=True,
+            ) as r:
+                if r.status != REQUEST_OK:
+                    return None
+                data = await r.read()
+                return data if len(data) > 500 else None
+    except Exception as e:
+        _log("DL_IMG", f"Error {url[:80]}: {e}")
+        return None
 
 
 @loader.tds
@@ -430,12 +462,7 @@ class SCMusic(loader.Module):
 
                 raw_cover = None
                 if art:
-                    try:
-                        a_r = await ses.get(art)
-                        if a_r.status_code == REQUEST_OK:
-                            raw_cover = a_r.content
-                    except Exception:
-                        pass
+                    raw_cover = await _download_image_aiohttp(art)
 
                 cover_data = normalize_cover(raw_cover) if raw_cover else None
                 thumb_data = normalize_cover(raw_cover, max_size=320) if raw_cover else None
@@ -731,28 +758,20 @@ class SCMusic(loader.Module):
             cache[idx] = self._cover_cache[track_id]
             return cache[idx]
         
-        if not CFFI_OK:
+        raw = await _download_image_aiohttp(art_url)
+        if not raw:
             cache[idx] = None
             return None
         
-        try:
-            async with cffi_requests.AsyncSession(impersonate="chrome120") as s:
-                r = await s.get(art_url, timeout=15)
-                if r.status_code == REQUEST_OK and r.content:
-                    norm = normalize_cover(r.content, force_jpeg=True) or r.content
-                    x0_url = await _upload_to_x0(
-                        norm,
-                        sanitize_fn(f"{track['username']} - {track['title']}") + ".jpg",
-                        "image/jpeg",
-                    )
-                    self._cover_cache[track_id] = x0_url
-                    cache[idx] = x0_url
-                    return x0_url
-        except Exception:
-            pass
-        
-        cache[idx] = None
-        return None
+        norm = normalize_cover(raw, force_jpeg=True) or raw
+        x0_url = await _upload_to_x0(
+            norm,
+            sanitize_fn(f"{track['username']} - {track['title']}") + ".jpg",
+            "image/jpeg",
+        )
+        self._cover_cache[track_id] = x0_url
+        cache[idx] = x0_url
+        return x0_url
 
     async def _scs_prefetch_covers(self, session_id: str):
         sess = self._scs_sessions.get(session_id)
