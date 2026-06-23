@@ -190,11 +190,11 @@ class Voices(loader.Module):
             pass
 
     @loader.command(
-        ru_doc="Конвертировать видео/кружок в голосовое (реплай)",
-        en_doc="Convert video/video note to voice (reply)",
+        ru_doc="Конвертировать видео/кружок/аудио в голосовое (реплай)",
+        en_doc="Convert video/circle/audio to voice (reply)",
     )
     async def vtv(self, message: Message):
-        """Convert video/video note to voice message"""
+        """Convert video/circle/audio to voice message"""
         reply = await message.get_reply_message()
 
         if not reply or not (reply.video or reply.video_note or reply.voice or reply.audio):
