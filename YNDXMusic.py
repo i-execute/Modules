@@ -1,6 +1,6 @@
 __version__ = (2, 0, 0)
 # meta developer: I_execute.t.me forked from @codrago_m
-# meta banner: https://github.com/i-execute/Modules/raw/main/Storage/YNDXMusic/MetaBanner_new.jpeg
+# meta banner: https://github.com/i-execute/Modules/raw/main/Storage/YNDXMusic/MetaBannerNew.jpeg
 
 import os
 import io
