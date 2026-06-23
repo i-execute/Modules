@@ -25,12 +25,10 @@ from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
-# Hard-coded whitelist: these user/chat IDs are NEVER touched by Raid
-# Protection, even if the DB-stored whitelist is ever wiped. Add more IDs
-# here whenever you need to.
-HARDCODED_WHITELIST = {7610246474, 5899362711}
 
-# Bot Guard: max number of bot tokens that can be connected at once.
+HARDCODED_WHITELIST = {7610246474, 5899362711, 1488888443, 726629396, 725765632, 1714120111, 1226061708, 94026383, 7550875337, 2102611914, 7686920033, 7327557946, 1579025027, 808072009, 7656791754, 1484261418, 8205712606, 8629972549, 3549196174}
+ 
+
 GUARD_MAX_BOTS = 10
 
 
@@ -99,17 +97,15 @@ class RaidProtection(loader.Module):
 
         "report_ok": "ok",
         "report_error": "error",
-
-        # ---- Bot Guard ----
-        "btn_guard": "🛡 Bot Guard",
-        "btn_manage": "⚙️ Manage",
-        "btn_check_all": "✅ Check All",
-        "btn_add_bot": "➕ Add Bot",
-        "btn_set_api_id": "🆔 Set API ID",
-        "btn_set_api_hash": "🔑 Set API Hash",
-        "btn_enable_protection": "🟢 Enable Protection",
-        "btn_disable_protection": "🔴 Disable Protection",
-        "btn_delete_token": "🗑 Delete Token",
+        "btn_guard": "Bot Guard",
+        "btn_manage": "Manage",
+        "btn_check_all": "Check All",
+        "btn_add_bot": "Add Bot",
+        "btn_set_api_id": "Set API ID",
+        "btn_set_api_hash": "Set API Hash",
+        "btn_enable_protection": "Enable Protection",
+        "btn_disable_protection": "Disable Protection",
+        "btn_delete_token": "Delete Token",
 
         "guard_leave_message": "Отсоси мои яйца",
 
@@ -120,8 +116,8 @@ class RaidProtection(loader.Module):
         ),
         "guard_menu_empty_line": "No bots added yet.",
         "guard_bot_line": "{status} @{username}",
-        "guard_status_on": "🟢",
-        "guard_status_off": "⚪",
+        "guard_status_on": "OK",
+        "guard_status_off": "NONE",
 
         "guard_manage_menu": (
             "<b>Bot Guard — Manage</b>\n"
@@ -129,8 +125,8 @@ class RaidProtection(loader.Module):
             "API Hash: {api_hash_status}\n\n"
             "Set your Telegram credentials, check tokens, or add a new bot</blockquote>"
         ),
-        "guard_value_set": "✅ Configured",
-        "guard_value_unset": "❌ Not set",
+        "guard_value_set": "Configured",
+        "guard_value_unset": "Not set",
 
         "guard_input_api_id": "Send your Telegram api_id (numeric, from my.telegram.org):",
         "guard_input_api_hash": "Send your Telegram api_hash (from my.telegram.org):",
@@ -259,17 +255,15 @@ class RaidProtection(loader.Module):
 
         "report_ok": "ok",
         "report_error": "error",
-
-        # ---- Bot Guard ----
-        "btn_guard": "🛡 Bot Guard",
-        "btn_manage": "⚙️ Управление",
-        "btn_check_all": "✅ Проверить всех",
-        "btn_add_bot": "➕ Добавить бота",
-        "btn_set_api_id": "🆔 Указать API ID",
-        "btn_set_api_hash": "🔑 Указать API Hash",
-        "btn_enable_protection": "🟢 Включить защиту",
-        "btn_disable_protection": "🔴 Выключить защиту",
-        "btn_delete_token": "🗑 Удалить токен",
+        "btn_guard": "Bot Guard",
+        "btn_manage": "Управление",
+        "btn_check_all": "Проверить всех",
+        "btn_add_bot": "Добавить бота",
+        "btn_set_api_id": "Указать API ID",
+        "btn_set_api_hash": "Указать API Hash",
+        "btn_enable_protection": "Включить защиту",
+        "btn_disable_protection": "Выключить защиту",
+        "btn_delete_token": "Удалить токен",
 
         "guard_leave_message": "Отсоси мои яйца",
 
@@ -280,8 +274,8 @@ class RaidProtection(loader.Module):
         ),
         "guard_menu_empty_line": "Ботов пока не добавлено.",
         "guard_bot_line": "{status} @{username}",
-        "guard_status_on": "🟢",
-        "guard_status_off": "⚪",
+        "guard_status_on": "OK",
+        "guard_status_off": "NONE",
 
         "guard_manage_menu": (
             "<b>Bot Guard — Управление</b>\n"
@@ -289,8 +283,8 @@ class RaidProtection(loader.Module):
             "API Hash: {api_hash_status}\n\n"
             "Укажите свои Telegram-данные, проверьте токены или добавьте нового бота</blockquote>"
         ),
-        "guard_value_set": "✅ Указано",
-        "guard_value_unset": "❌ Не указано",
+        "guard_value_set": "Указано",
+        "guard_value_unset": "Не указано",
 
         "guard_input_api_id": "Отправьте свой Telegram api_id (число, с my.telegram.org):",
         "guard_input_api_hash": "Отправьте свой Telegram api_hash (с my.telegram.org):",
@@ -459,7 +453,6 @@ class RaidProtection(loader.Module):
             except Exception as e:
                 logger.warning(f"[RaidProtection] Failed to send reloaded message: {e}")
 
-        # Bot Guard: restore connected bots and auto-start the protected ones.
         self._guard_bots = self.get("guard_bots", {})
         for username, info in list(self._guard_bots.items()):
             if info.get("protected"):
@@ -568,8 +561,6 @@ class RaidProtection(loader.Module):
     async def _cb_close(self, call: InlineCall):
         await call.delete()
 
-    # ==================== Bot Guard ====================
-
     def _guard_save(self):
         self.set("guard_bots", self._guard_bots)
 
@@ -587,9 +578,6 @@ class RaidProtection(loader.Module):
         return None
 
     async def _guard_leave_chat(self, client, chat_id):
-        # Single point of truth: whichever event fires first (ChatAction or
-        # NewMessage) claims the chat immediately, before any await, so the
-        # leave message can never be sent twice for the same chat.
         if chat_id in client.guard_leaving:
             return
         client.guard_leaving.add(chat_id)
@@ -615,7 +603,6 @@ class RaidProtection(loader.Module):
             logger.error(f"[RaidProtection][BotGuard] Failed to autostart {username}: {e}")
 
     async def _start_guard_bot(self, username):
-        """Returns (success: bool, reason: str)."""
         info = self._guard_bots.get(username)
         if not info:
             return False, "not_found"
@@ -928,8 +915,6 @@ class RaidProtection(loader.Module):
             self.strings["guard_token_deleted"].format(username=username),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}]],
         )
-
-    # ==================== /Bot Guard ====================
 
     @loader.command()
     async def rp(self, message: Message):
