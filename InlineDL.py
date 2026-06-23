@@ -1,6 +1,6 @@
 __version__ = (2, 0, 2)
 # meta developer: I_execute.t.me
-# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/MetaBanner.jpeg
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/MetaBannerNew.jpeg
 
 import re
 import time
