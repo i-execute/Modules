@@ -107,7 +107,7 @@ class RaidProtection(loader.Module):
         "btn_disable_protection": "Disable Protection",
         "btn_delete_token": "Delete Token",
 
-        "guard_leave_message": "Отсоси мои яйца",
+        "guard_leave_message": "Suck my balls",
 
         "guard_menu": (
             "<b>Bot Guard</b>\n"
