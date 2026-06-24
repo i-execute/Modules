@@ -410,7 +410,7 @@ class Market(loader.Module):
                     self._asset_channel,
                     "Market Logs",
                     description="Market sales and activity logs.",
-                    icon_emoji_id=5188466187448650036,
+                    icon_emoji_id=5267278506617772644,
                 )
                 self._setup_failed = False
             except Exception as e:
