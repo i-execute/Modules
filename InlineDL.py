@@ -1,4 +1,4 @@
-__version__ = (2, 4, 2)
+__version__ = (2, 4, 3)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/MetaBannerNew.jpeg
 
@@ -395,8 +395,9 @@ class InlineDL(loader.Module):
                 description=self.strings["ready_desc"],
                 url=kk_url,
                 thumb=self._make_web_document(thumb, mime_type="image/png"),
-                content=self._make_web_document(
-                    kk_url,
+                content=InputWebDocument(
+                    url=kk_url,
+                    size=0,
                     mime_type="video/mp4",
                     attributes=[
                         DocumentAttributeVideo(duration=0, w=1080, h=1920)
