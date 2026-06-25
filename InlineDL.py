@@ -1,10 +1,11 @@
-__version__ = (2, 4, 0)
+__version__ = (2, 4, 2)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/MetaBannerNew.jpeg
 
 import re
 import time
 import logging
+import asyncio
 import aiohttp
 
 from telethon.tl.types import (
@@ -15,6 +16,7 @@ from telethon.tl.types import (
     InputWebDocument,
     DocumentAttributeVideo,
 )
+from telethon.tl import functions
 from telethon.utils import html as tl_html
 
 from .. import loader, utils
@@ -360,14 +362,21 @@ class InlineDL(loader.Module):
                 )
                 return
 
+            try:
+                await self._client(
+                    functions.messages.GetWebPageRequest(url=preview_url, hash=0)
+                )
+            except Exception:
+                pass
+
             await query.answer(
                 results=[self._make_article(
                     uid=f"pt_{cache_key}_{int(time.time())}",
                     title=self.strings["ready_pt"],
                     desc=self.strings["ready_desc"],
-                    text=f'<blockquote><a href="{preview_url}">Download image</a></blockquote>',
+                    text=f'<blockquote><a href="{preview_url}"><b>Download image</b></a></blockquote>',
                     preview_url=preview_url,
-                    thumb_url=preview_url,
+                    thumb_url=THUMB_PT,
                 )],
                 cache_time=0,
                 private=True,
