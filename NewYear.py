@@ -260,11 +260,20 @@ class NewYear(loader.Module):
 
     def __init__(self):
         self._premium_status = None
+        self._db = None
         self.config = loader.ModuleConfig(
             "TIMEZONE_OFFSET", 3, "смещение часового пояса от UTC",
             "MEDIA_URL", "", "ссылка на файл",
-            "SAVED_MSG_ID", 0, "ID сохраненного сообщения в избранном"
         )
+
+    async def client_ready(self, client, db):
+        self._db = db
+
+    def _get_saved_msg_id(self):
+        return self._db.get("NewYear", "saved_msg_id", 0)
+
+    def _set_saved_msg_id(self, value):
+        self._db.set("NewYear", "saved_msg_id", value)
 
     async def _check_premium(self):
         if self._premium_status is None:
@@ -301,7 +310,7 @@ class NewYear(loader.Module):
 
     async def get_saved_media(self):
         try:
-            msg_id = self.config.get("SAVED_MSG_ID", 0)
+            msg_id = self._get_saved_msg_id()
             if msg_id:
                 saved_msg = await self.client.get_messages("me", ids=msg_id)
                 if saved_msg and saved_msg.media:
@@ -363,7 +372,7 @@ class NewYear(loader.Module):
                             self._get_string("media_deleted_error", is_premium).format(prefix=prefix),
                         )
                         self.config["MEDIA_URL"] = ""
-                        self.config["SAVED_MSG_ID"] = 0
+                        self._set_saved_msg_id(0)
                 else:
                     try:
                         media = InputMediaWebPage(url=media_url, optional=True)
@@ -432,7 +441,7 @@ class NewYear(loader.Module):
                     )
                     return
                 try:
-                    old_msg_id = self.config.get("SAVED_MSG_ID", 0)
+                    old_msg_id = self._get_saved_msg_id()
                     if old_msg_id:
                         try:
                             old_msg = await self.client.get_messages("me", ids=old_msg_id)
@@ -446,7 +455,7 @@ class NewYear(loader.Module):
                         caption=self._get_string("saved_caption", is_premium),
                         silent=True
                     )
-                    self.config["SAVED_MSG_ID"] = saved_msg.id
+                    self._set_saved_msg_id(saved_msg.id)
                     self.config["MEDIA_URL"] = f"saved:{saved_msg.id}"
                     await utils.answer(
                         message,
@@ -465,7 +474,7 @@ class NewYear(loader.Module):
                 )
                 return
             media_url = args[4:].strip()
-            old_msg_id = self.config.get("SAVED_MSG_ID", 0)
+            old_msg_id = self._get_saved_msg_id()
             if old_msg_id:
                 try:
                     old_msg = await self.client.get_messages("me", ids=old_msg_id)
@@ -473,7 +482,7 @@ class NewYear(loader.Module):
                         await old_msg.delete()
                 except:
                     pass
-            self.config["SAVED_MSG_ID"] = 0
+            self._set_saved_msg_id(0)
             try:
                 media_preview = InputMediaWebPage(url=media_url, optional=True)
                 await utils.answer(
@@ -495,7 +504,7 @@ class NewYear(loader.Module):
                 )
 
         elif cmd == "remove":
-            msg_id = self.config.get("SAVED_MSG_ID", 0)
+            msg_id = self._get_saved_msg_id()
             if msg_id:
                 try:
                     saved_msg = await self.client.get_messages("me", ids=msg_id)
@@ -504,7 +513,7 @@ class NewYear(loader.Module):
                 except:
                     pass
             self.config["MEDIA_URL"] = ""
-            self.config["SAVED_MSG_ID"] = 0
+            self._set_saved_msg_id(0)
             await utils.answer(
                 message,
                 self._get_string("media_removed", is_premium),
