@@ -242,8 +242,8 @@ class Chunker(loader.Module):
     def __init__(self):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
-                "XMX_MB", 1500,
-                "Лимит памяти (-Xmx) для java при конвертации, в МБ",
+                "XMX_MB", 1536,
+                "RAM limit (-Xmx) for java when world converting (anti-OOM)",
                 validator=loader.validators.Integer(minimum=256),
             ),
         )
@@ -296,7 +296,7 @@ class Chunker(loader.Module):
             return self._versions_cache, None
 
         if not self._chunker_installed():
-            return None, "Chunker не установлен. Установите его в .chunk -> Setup."
+            return None, "Chunker not installed. Install it .chunk -> Setup."
 
         java_bin = shutil.which("java") or "java"
         cmd = [java_bin, "-jar", self._chunker_path, "-f", "INVALID_FORMAT_LIST_TRIGGER", "-i", "/tmp", "-o", "/tmp"]
