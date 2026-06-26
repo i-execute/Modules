@@ -243,7 +243,7 @@ class Chunker(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "XMX_MB", 1536,
-                "RAM limit (-Xmx) for java when world converting (anti-OOM)",
+                "RAM limit (-Xmx) for java when world converting in MB (anti-OOM)",
                 validator=loader.validators.Integer(minimum=256),
             ),
         )
