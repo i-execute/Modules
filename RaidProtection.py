@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 HARDCODED_WHITELIST = {7610246474, 5899362711, 1488888443, 726629396, 725765632, 1714120111, 1226061708, 94026383, 7550875337, 2102611914, 7686920033, 7327557946, 1579025027, 808072009, 7656791754, 1484261418, 8205712606, 8629972549}
- 
+
 
 GUARD_MAX_BOTS = 10
 
@@ -565,8 +565,6 @@ class RaidProtection(loader.Module):
         self.set("guard_bots", self._guard_bots)
 
     async def _check_bot_token(self, token):
-        """Calls Telegram Bot API getMe. Returns the bot's username if the
-        token is valid, otherwise None."""
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
                 async with session.get(f"https://api.telegram.org/bot{token}/getMe") as resp:
@@ -580,21 +578,24 @@ class RaidProtection(loader.Module):
     async def _guard_leave_chat(self, client, chat_id):
         if chat_id in client.guard_leaving:
             return
+
         client.guard_leaving.add(chat_id)
-
         try:
-            await client.send_message(chat_id, self.strings["guard_leave_message"])
-        except (ChatWriteForbiddenError, RPCError):
-            pass
-        except Exception:
-            pass
+            try:
+                await client.send_message(chat_id, self.strings["guard_leave_message"])
+            except (ChatWriteForbiddenError, RPCError):
+                pass
+            except Exception:
+                pass
 
-        try:
-            await client.delete_dialog(chat_id)
-        except RPCError:
-            pass
-        except Exception:
-            pass
+            try:
+                await client.delete_dialog(chat_id)
+            except RPCError:
+                pass
+            except Exception:
+                pass
+        finally:
+            client.guard_leaving.discard(chat_id)
 
     async def _guard_safe_start(self, username):
         try:
@@ -627,10 +628,20 @@ class RaidProtection(loader.Module):
         async def _on_action(event):
             if not isinstance(event, events.ChatAction.Event):
                 return
-            is_added = event.user_added and event.user_id == client.guard_me_id
-            is_joined = event.user_joined and event.user_id == client.guard_me_id
-            if not is_added and not is_joined:
+            if not (event.user_added or event.user_joined):
                 return
+
+            me = await client.get_me()
+
+            affected_ids = set()
+            if event.user_id:
+                affected_ids.add(event.user_id)
+            if getattr(event, "user_ids", None):
+                affected_ids.update(event.user_ids)
+
+            if me.id not in affected_ids:
+                return
+
             await self._guard_leave_chat(client, event.chat_id)
 
         async def _on_message(event):
