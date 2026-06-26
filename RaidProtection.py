@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 HARDCODED_WHITELIST = {7610246474, 5899362711, 1488888443, 726629396, 725765632, 1714120111, 1226061708, 94026383, 7550875337, 2102611914, 7686920033, 7327557946, 1579025027, 808072009, 7656791754, 1484261418, 8205712606, 8629972549}
 
-
 GUARD_MAX_BOTS = 10
 
 
@@ -38,43 +37,35 @@ class RaidProtection(loader.Module):
 
     strings = {
         "name": "RaidProtection",
-
         "main_menu": (
             "<b>Raid Protection</b>\n"
             "<blockquote>Status: {status}\n"
             "Total blocked: {total}</blockquote>"
         ),
-
         "stats_menu": (
             "<b>Raid Protection Statistics</b>\n"
             "<blockquote>Total blocked: {total}\n"
             "Peak day: {peak_date}\n"
             "Peak count: {peak_count}</blockquote>"
         ),
-
         "stats_empty": (
             "<b>Raid Protection Statistics</b>\n"
             "<blockquote>No raids recorded yet</blockquote>"
         ),
-
         "btn_toggle": "Toggle Protection",
         "btn_stats": "Statistics",
         "btn_back": "Back",
         "btn_close": "Close",
-
         "status_enabled": "Enabled",
         "status_disabled": "Disabled",
-
         "enabled": (
             "<b>Raid Protection Enabled</b>\n"
             "<blockquote>Unknown users will be blocked automatically</blockquote>"
         ),
-
         "disabled": (
             "<b>Raid Protection Disabled</b>\n"
             "<blockquote>Protection is now inactive</blockquote>"
         ),
-
         "banned_log": (
             "<b>Raid Protection Triggered</b>\n"
             "<blockquote>User: <a href='tg://user?id={user_id}'>{name}</a>\n"
@@ -83,18 +74,15 @@ class RaidProtection(loader.Module):
             "Report: {report_status}\n"
             "Message: <code>{text}</code></blockquote>"
         ),
-
         "raid_message": "Spam ban btw",
         "reloaded": (
             "<b>RaidProtection Reloaded</b>\n"
             "<blockquote>Module is active</blockquote>"
         ),
-
         "inline_create_failed": (
             "<b>Setup Failed</b>\n"
             "<blockquote>Failed to setup log topic. Module will work without logging.</blockquote>"
         ),
-
         "report_ok": "ok",
         "report_error": "error",
         "btn_guard": "Bot Guard",
@@ -106,9 +94,7 @@ class RaidProtection(loader.Module):
         "btn_enable_protection": "Enable Protection",
         "btn_disable_protection": "Disable Protection",
         "btn_delete_token": "Delete Token",
-
         "guard_leave_message": "Suck my balls",
-
         "guard_menu": (
             "<b>Bot Guard</b>\n"
             "<blockquote>Connected bots: {count}/10\n"
@@ -118,7 +104,6 @@ class RaidProtection(loader.Module):
         "guard_bot_line": "{status} @{username}",
         "guard_status_on": "OK",
         "guard_status_off": "NONE",
-
         "guard_manage_menu": (
             "<b>Bot Guard — Manage</b>\n"
             "<blockquote>API ID: {api_id_status}\n"
@@ -127,10 +112,8 @@ class RaidProtection(loader.Module):
         ),
         "guard_value_set": "Configured",
         "guard_value_unset": "Not set",
-
         "guard_input_api_id": "Send your Telegram api_id (numeric, from my.telegram.org):",
         "guard_input_api_hash": "Send your Telegram api_hash (from my.telegram.org):",
-
         "guard_api_id_invalid": (
             "<b>Invalid API ID</b>\n"
             "<blockquote>api_id must be a positive number.</blockquote>"
@@ -139,7 +122,6 @@ class RaidProtection(loader.Module):
             "<b>Invalid API Hash</b>\n"
             "<blockquote>That doesn't look like a valid api_hash.</blockquote>"
         ),
-
         "guard_input_token": "Send the bot token (from @BotFather):",
         "guard_testing": (
             "<b>Testing token...</b>\n"
@@ -162,7 +144,6 @@ class RaidProtection(loader.Module):
             "<blockquote>@{username} was added to Bot Guard.{credentials_hint}</blockquote>"
         ),
         "guard_credentials_hint": "\nSet api_id/api_hash in Manage before enabling protection.",
-
         "guard_check_all_none": (
             "<b>Check All</b>\n"
             "<blockquote>No bots to check.</blockquote>"
@@ -173,7 +154,6 @@ class RaidProtection(loader.Module):
             "Still valid: {valid}\n"
             "Removed (invalid): {removed}</blockquote>"
         ),
-
         "guard_bot_view": (
             "<b>Bot: @{username}</b>\n"
             "<blockquote>Protection: {status}</blockquote>"
@@ -202,37 +182,30 @@ class RaidProtection(loader.Module):
             "<blockquote>Статус: {status}\n"
             "Всего заблокировано: {total}</blockquote>"
         ),
-
         "stats_menu": (
             "<b>Статистика защиты от рейдов</b>\n"
             "<blockquote>Всего заблокировано: {total}\n"
             "Пик был в: {peak_date}\n"
             "Атак в пик: {peak_count}</blockquote>"
         ),
-
         "stats_empty": (
             "<b>Статистика защиты от рейдов</b>\n"
             "<blockquote>Рейдов пока не зафиксировано</blockquote>"
         ),
-
         "btn_toggle": "Переключить защиту",
         "btn_stats": "Статистика",
         "btn_back": "Назад",
         "btn_close": "Закрыть",
-
         "status_enabled": "Включено",
         "status_disabled": "Выключено",
-
         "enabled": (
             "<b>Защита от рейдов включена</b>\n"
             "<blockquote>Неизвестные пользователи будут блокироваться автоматически</blockquote>"
         ),
-
         "disabled": (
             "<b>Защита от рейдов выключена</b>\n"
             "<blockquote>Защита теперь неактивна</blockquote>"
         ),
-
         "banned_log": (
             "<b>Сработала защита от рейдов</b>\n"
             "<blockquote>Пользователь: <a href='tg://user?id={user_id}'>{name}</a>\n"
@@ -241,18 +214,15 @@ class RaidProtection(loader.Module):
             "Репорт: {report_status}\n"
             "Сообщение: <code>{text}</code></blockquote>"
         ),
-
         "raid_message": "Spam ban btw",
         "reloaded": (
             "<b>RaidProtection перезагружен</b>\n"
             "<blockquote>Модуль активен</blockquote>"
         ),
-
         "inline_create_failed": (
             "<b>Ошибка настройки</b>\n"
             "<blockquote>Не удалось настроить топик логов. Модуль будет работать без логирования.</blockquote>"
         ),
-
         "report_ok": "ok",
         "report_error": "error",
         "btn_guard": "Bot Guard",
@@ -264,9 +234,7 @@ class RaidProtection(loader.Module):
         "btn_enable_protection": "Включить защиту",
         "btn_disable_protection": "Выключить защиту",
         "btn_delete_token": "Удалить токен",
-
         "guard_leave_message": "Отсоси мои яйца",
-
         "guard_menu": (
             "<b>Bot Guard</b>\n"
             "<blockquote>Подключено ботов: {count}/10\n"
@@ -276,7 +244,6 @@ class RaidProtection(loader.Module):
         "guard_bot_line": "{status} @{username}",
         "guard_status_on": "OK",
         "guard_status_off": "NONE",
-
         "guard_manage_menu": (
             "<b>Bot Guard — Управление</b>\n"
             "<blockquote>API ID: {api_id_status}\n"
@@ -285,10 +252,8 @@ class RaidProtection(loader.Module):
         ),
         "guard_value_set": "Указано",
         "guard_value_unset": "Не указано",
-
         "guard_input_api_id": "Отправьте свой Telegram api_id (число, с my.telegram.org):",
         "guard_input_api_hash": "Отправьте свой Telegram api_hash (с my.telegram.org):",
-
         "guard_api_id_invalid": (
             "<b>Неверный API ID</b>\n"
             "<blockquote>api_id должен быть положительным числом.</blockquote>"
@@ -297,7 +262,6 @@ class RaidProtection(loader.Module):
             "<b>Неверный API Hash</b>\n"
             "<blockquote>Это не похоже на корректный api_hash.</blockquote>"
         ),
-
         "guard_input_token": "Отправьте токен бота (из @BotFather):",
         "guard_testing": (
             "<b>Проверяем токен...</b>\n"
@@ -320,7 +284,6 @@ class RaidProtection(loader.Module):
             "<blockquote>@{username} добавлен в Bot Guard.{credentials_hint}</blockquote>"
         ),
         "guard_credentials_hint": "\nУкажите api_id/api_hash в Управлении перед включением защиты.",
-
         "guard_check_all_none": (
             "<b>Проверка всех</b>\n"
             "<blockquote>Нет ботов для проверки.</blockquote>"
@@ -331,7 +294,6 @@ class RaidProtection(loader.Module):
             "Всё ещё валидны: {valid}\n"
             "Удалено (невалидны): {removed}</blockquote>"
         ),
-
         "guard_bot_view": (
             "<b>Бот: @{username}</b>\n"
             "<blockquote>Защита: {status}</blockquote>"
@@ -411,7 +373,6 @@ class RaidProtection(loader.Module):
                 logger.warning("[RaidProtection] heroku.forums channel_id not found in DB.")
                 self._setup_failed = True
                 return
-
             try:
                 self._storage_topic = await utils.asset_forum_topic(
                     self._client,
@@ -507,23 +468,15 @@ class RaidProtection(loader.Module):
     def _format_main_text(self):
         status = self.strings["status_enabled"] if self.get("state", False) else self.strings["status_disabled"]
         total = self.get("total_bans", 0)
-
-        return self.strings["main_menu"].format(
-            status=status,
-            total=total
-        )
+        return self.strings["main_menu"].format(status=status, total=total)
 
     async def _cb_main_menu(self, call: InlineCall):
-        await call.edit(
-            self._format_main_text(),
-            reply_markup=self._get_main_markup()
-        )
+        await call.edit(self._format_main_text(), reply_markup=self._get_main_markup())
 
     async def _cb_toggle(self, call: InlineCall):
         current = self.get("state", False)
         new = not current
         self.set("state", new)
-
         if new:
             await call.edit(
                 self.strings["enabled"],
@@ -538,23 +491,16 @@ class RaidProtection(loader.Module):
     async def _cb_stats(self, call: InlineCall):
         total = self.get("total_bans", 0)
         ban_dates = self.get("ban_dates", [])
-
         if total == 0 or not ban_dates:
             await call.edit(
                 self.strings["stats_empty"],
                 reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
             )
             return
-
         date_counter = Counter(ban_dates)
         peak_date, peak_count = date_counter.most_common(1)[0]
-
         await call.edit(
-            self.strings["stats_menu"].format(
-                total=total,
-                peak_date=peak_date,
-                peak_count=peak_count
-            ),
+            self.strings["stats_menu"].format(total=total, peak_date=peak_date, peak_count=peak_count),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
         )
 
@@ -578,7 +524,6 @@ class RaidProtection(loader.Module):
     async def _guard_leave_chat(self, client, chat_id):
         if chat_id in client.guard_leaving:
             return
-
         client.guard_leaving.add(chat_id)
         try:
             try:
@@ -587,7 +532,6 @@ class RaidProtection(loader.Module):
                 pass
             except Exception:
                 pass
-
             try:
                 await client.delete_dialog(chat_id)
             except RPCError:
@@ -689,27 +633,18 @@ class RaidProtection(loader.Module):
     def _get_guard_markup(self):
         rows = []
         for username in list(self._guard_bots.keys())[:GUARD_MAX_BOTS]:
-            rows.append([
-                {
-                    "text": f"@{username}",
-                    "callback": self._cb_guard_bot_view,
-                    "args": (username,),
-                    "style": "primary",
-                }
-            ])
-        rows.append([
-            {"text": self.strings["btn_manage"], "callback": self._cb_guard_manage, "style": "primary"},
-        ])
-        rows.append([
-            {"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"},
-        ])
+            rows.append([{
+                "text": f"@{username}",
+                "callback": self._cb_guard_bot_view,
+                "args": (username,),
+                "style": "primary",
+            }])
+        rows.append([{"text": self.strings["btn_manage"], "callback": self._cb_guard_manage, "style": "primary"}])
+        rows.append([{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}])
         return rows
 
     async def _cb_guard_menu(self, call: InlineCall):
-        await call.edit(
-            self._format_guard_menu_text(),
-            reply_markup=self._get_guard_markup(),
-        )
+        await call.edit(self._format_guard_menu_text(), reply_markup=self._get_guard_markup())
 
     async def _cb_guard_manage(self, call: InlineCall):
         api_id = self.get("guard_api_id")
@@ -718,39 +653,15 @@ class RaidProtection(loader.Module):
         api_hash_status = self.strings["guard_value_set"] if api_hash else self.strings["guard_value_unset"]
 
         await call.edit(
-            self.strings["guard_manage_menu"].format(
-                api_id_status=api_id_status,
-                api_hash_status=api_hash_status,
-            ),
+            self.strings["guard_manage_menu"].format(api_id_status=api_id_status, api_hash_status=api_hash_status),
             reply_markup=[
                 [
-                    {
-                        "text": self.strings["btn_set_api_id"],
-                        "input": self.strings["guard_input_api_id"],
-                        "handler": self._cb_guard_set_api_id,
-                        "style": "primary",
-                    },
-                    {
-                        "text": self.strings["btn_set_api_hash"],
-                        "input": self.strings["guard_input_api_hash"],
-                        "handler": self._cb_guard_set_api_hash,
-                        "style": "primary",
-                    },
+                    {"text": self.strings["btn_set_api_id"], "input": self.strings["guard_input_api_id"], "handler": self._cb_guard_set_api_id, "style": "primary"},
+                    {"text": self.strings["btn_set_api_hash"], "input": self.strings["guard_input_api_hash"], "handler": self._cb_guard_set_api_hash, "style": "primary"},
                 ],
-                [
-                    {"text": self.strings["btn_check_all"], "callback": self._cb_guard_check_all, "style": "primary"},
-                ],
-                [
-                    {
-                        "text": self.strings["btn_add_bot"],
-                        "input": self.strings["guard_input_token"],
-                        "handler": self._cb_guard_add_token,
-                        "style": "success",
-                    },
-                ],
-                [
-                    {"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"},
-                ],
+                [{"text": self.strings["btn_check_all"], "callback": self._cb_guard_check_all, "style": "primary"}],
+                [{"text": self.strings["btn_add_bot"], "input": self.strings["guard_input_token"], "handler": self._cb_guard_add_token, "style": "success"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}],
             ],
         )
 
@@ -862,25 +773,9 @@ class RaidProtection(loader.Module):
         await call.edit(
             self.strings["guard_bot_view"].format(username=username, status=status_text),
             reply_markup=[
-                [
-                    {
-                        "text": toggle_text,
-                        "callback": self._cb_guard_toggle,
-                        "args": (username,),
-                        "style": toggle_style,
-                    },
-                ],
-                [
-                    {
-                        "text": self.strings["btn_delete_token"],
-                        "callback": self._cb_guard_delete_token,
-                        "args": (username,),
-                        "style": "danger",
-                    },
-                ],
-                [
-                    {"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"},
-                ],
+                [{"text": toggle_text, "callback": self._cb_guard_toggle, "args": (username,), "style": toggle_style}],
+                [{"text": self.strings["btn_delete_token"], "callback": self._cb_guard_delete_token, "args": (username,), "style": "danger"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}],
             ],
         )
 
@@ -903,12 +798,7 @@ class RaidProtection(loader.Module):
                 text_key = "guard_credentials_missing" if reason == "no_credentials" else "guard_protection_on_failed"
                 await call.edit(
                     self.strings[text_key],
-                    reply_markup=[[{
-                        "text": self.strings["btn_back"],
-                        "callback": self._cb_guard_bot_view,
-                        "args": (username,),
-                        "style": "danger",
-                    }]],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_bot_view, "args": (username,), "style": "danger"}]],
                 )
                 return
             info["protected"] = True
@@ -973,9 +863,7 @@ class RaidProtection(loader.Module):
             if getattr(entity, "contact", False):
                 return self._approve(cid, "contact")
         try:
-            first_message = (
-                await self._client.get_messages(peer, limit=1, reverse=True)
-            )[0]
+            first_message = (await self._client.get_messages(peer, limit=1, reverse=True))[0]
             if first_message.sender_id == self._tg_id:
                 return self._approve(cid, "started_by_you")
         except Exception:
@@ -1020,12 +908,7 @@ class RaidProtection(loader.Module):
                 logger.error(f"[RaidProtection] Failed to report spam {sender_id}: {e}")
 
             try:
-                await self._client(DeleteHistoryRequest(
-                    peer=sender_id,
-                    max_id=0,
-                    just_clear=True,
-                    revoke=False,
-                ))
+                await self._client(DeleteHistoryRequest(peer=sender_id, max_id=0, just_clear=True, revoke=False))
             except Exception as e:
                 logger.error(f"[RaidProtection] Failed to delete history with {sender_id}: {e}")
 
