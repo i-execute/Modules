@@ -105,13 +105,11 @@ class RaidProtection(loader.Module):
         "guard_status_on": "OK",
         "guard_status_off": "NONE",
         "guard_manage_menu": (
-            "<b>Bot Guard — Manage</b>\n"
-            "<blockquote>API ID: {api_id_status}\n"
-            "API Hash: {api_hash_status}\n\n"
+            "<b>Bot Guard - Manage</b>\n"
+            "<blockquote>API ID: {api_id_display}\n"
+            "API Hash: {api_hash_display}\n\n"
             "Set your Telegram credentials, check tokens, or add a new bot</blockquote>"
         ),
-        "guard_value_set": "Configured",
-        "guard_value_unset": "Not set",
         "guard_input_api_id": "Send your Telegram api_id (numeric, from my.telegram.org):",
         "guard_input_api_hash": "Send your Telegram api_hash (from my.telegram.org):",
         "guard_api_id_invalid": (
@@ -149,7 +147,7 @@ class RaidProtection(loader.Module):
             "<blockquote>No bots to check.</blockquote>"
         ),
         "guard_check_all_result": (
-            "<b>Check All — Result</b>\n"
+            "<b>Check All - Result</b>\n"
             "<blockquote>Checked: {checked}\n"
             "Still valid: {valid}\n"
             "Removed (invalid): {removed}</blockquote>"
@@ -245,13 +243,11 @@ class RaidProtection(loader.Module):
         "guard_status_on": "OK",
         "guard_status_off": "NONE",
         "guard_manage_menu": (
-            "<b>Bot Guard — Управление</b>\n"
-            "<blockquote>API ID: {api_id_status}\n"
-            "API Hash: {api_hash_status}\n\n"
+            "<b>Bot Guard - Управление</b>\n"
+            "<blockquote>API ID: {api_id_display}\n"
+            "API Hash: {api_hash_display}\n\n"
             "Укажите свои Telegram-данные, проверьте токены или добавьте нового бота</blockquote>"
         ),
-        "guard_value_set": "Указано",
-        "guard_value_unset": "Не указано",
         "guard_input_api_id": "Отправьте свой Telegram api_id (число, с my.telegram.org):",
         "guard_input_api_hash": "Отправьте свой Telegram api_hash (с my.telegram.org):",
         "guard_api_id_invalid": (
@@ -289,7 +285,7 @@ class RaidProtection(loader.Module):
             "<blockquote>Нет ботов для проверки.</blockquote>"
         ),
         "guard_check_all_result": (
-            "<b>Проверка всех — Результат</b>\n"
+            "<b>Проверка всех - Результат</b>\n"
             "<blockquote>Проверено: {checked}\n"
             "Всё ещё валидны: {valid}\n"
             "Удалено (невалидны): {removed}</blockquote>"
@@ -649,11 +645,19 @@ class RaidProtection(loader.Module):
     async def _cb_guard_manage(self, call: InlineCall):
         api_id = self.get("guard_api_id")
         api_hash = self.get("guard_api_hash")
-        api_id_status = self.strings["guard_value_set"] if api_id else self.strings["guard_value_unset"]
-        api_hash_status = self.strings["guard_value_set"] if api_hash else self.strings["guard_value_unset"]
+        
+        if api_id:
+            api_id_display = f"<code>{api_id}</code>"
+        else:
+            api_id_display = "Not set"
+        
+        if api_hash:
+            api_hash_display = f"<code>{api_hash[:6]}***</code>"
+        else:
+            api_hash_display = "Not set"
 
         await call.edit(
-            self.strings["guard_manage_menu"].format(api_id_status=api_id_status, api_hash_status=api_hash_status),
+            self.strings["guard_manage_menu"].format(api_id_display=api_id_display, api_hash_display=api_hash_display),
             reply_markup=[
                 [
                     {"text": self.strings["btn_set_api_id"], "input": self.strings["guard_input_api_id"], "handler": self._cb_guard_set_api_id, "style": "primary"},
