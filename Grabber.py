@@ -31,11 +31,6 @@ from telethon.errors import (
 from .. import loader, utils
 
 try:
-    import TgCrypto
-except ImportError:
-    pass
-
-try:
     from PIL import Image
 except ImportError:
     Image = None
@@ -332,7 +327,7 @@ async def _embed_cover_ffmpeg(audio_path, cover_path, output_path):
         return False
 
 
-DEPS = ["yt-dlp", "Pillow", "aiohttp", "mutagen", "TgCrypto-pyrofork"]
+DEPS = ["yt-dlp", "Pillow", "aiohttp", "mutagen"]
 
 
 def _install_deps():
@@ -343,7 +338,7 @@ def _install_deps():
     in_venv = sys.prefix != sys.base_prefix
     imp_map = {
         "yt-dlp": "yt_dlp", "Pillow": "PIL",
-        "aiohttp": "aiohttp", "mutagen": "mutagen", "TgCrypto-pyrofork": "TgCrypto",
+        "aiohttp": "aiohttp", "mutagen": "mutagen",
     }
     ver_attr = {
         "yt_dlp": "version.__version__",
@@ -457,6 +452,7 @@ class Grabber(loader.Module):
             "<blockquote><b>{title}</b></blockquote>\n"
             "<pre><code class=\"language-grabber\">{size_mb:.1f} MB | {width}x{height} | {elapsed}</code></pre>"
         ),
+        "calc_label": "calculating",
         "audio_caption": (
             "<blockquote><b>{title}</b></blockquote>\n"
             "<pre><code class=\"language-grabber\">{size_mb:.1f} MB</code></pre>"
@@ -639,6 +635,7 @@ class Grabber(loader.Module):
             "<blockquote><b>{title}</b></blockquote>\n"
             "<pre><code class=\"language-grabber\">{size_mb:.1f} MB | {width}x{height} | {elapsed}</code></pre>"
         ),
+        "calc_label": "вычисление",
         "audio_caption": (
             "<blockquote><b>{title}</b></blockquote>\n"
             "<pre><code class=\"language-grabber\">{size_mb:.1f} MB</code></pre>"
@@ -861,7 +858,7 @@ class Grabber(loader.Module):
         title = _escape_html(d.get("title", "Unknown")[:80])
         elapsed = self._get_elapsed(task_id)
 
-        inner = ["----------------"]
+        inner = ["---------------------------"]
 
         if d.get("dl_done"):
             dl_display = d.get("final_size") or d.get("dl_total") or d.get("dl_size", 0)
@@ -900,7 +897,7 @@ class Grabber(loader.Module):
         else:
             inner.append(self.strings["upload_waiting"])
 
-        inner.append("----------------")
+        inner.append("---------------------------")
 
         if stage in ("ffmpeg", "probe"):
             speed_str = "N/A"
@@ -1174,7 +1171,7 @@ class Grabber(loader.Module):
                 logger.error(f"[GRABBER] Autorunner failed: {e}")
 
     async def _check_deps(self):
-        deps = {"yt-dlp": "yt_dlp", "TgCrypto-pyrofork": "TgCrypto",
+        deps = {"yt-dlp": "yt_dlp",
                 "Pillow": "PIL", "aiohttp": "aiohttp", "mutagen": "mutagen"}
         lines = []
         for pkg, imp in deps.items():
@@ -1969,67 +1966,70 @@ class Grabber(loader.Module):
                 ]
                 t = self.strings["found_media_group"].format(title=title, duration=duration_str)
 
-            await msg.edit(t, buttons=buttons, parse_mode="html")
+            x0_url = await self._resolve_og_preview(link)
 
-            asyncio.ensure_future(self._apply_og_preview(msg, link))
+            if x0_url:
+                await self._edit_with_preview(msg, t, buttons, x0_url)
+            else:
+                await msg.edit(t, buttons=buttons, parse_mode="html")
         except Exception as e:
             try:
                 await msg.edit(self.strings["grab_failed"].format(error=str(e)[:1024]), parse_mode="html")
             except Exception:
                 pass
 
-    async def _apply_og_preview(self, msg, url):
+    async def _resolve_og_preview(self, url):
         try:
             if url in self._og_cache:
-                x0_url = self._og_cache[url]
-            else:
-                og_url = await _fetch_og_image(url)
-                if not og_url:
-                    return None
-                img_data = await _download_url(og_url, timeout=15)
-                if not img_data:
-                    return None
-                normalized = normalize_cover(img_data, force_jpeg=True)
-                if not normalized:
-                    return None
-                filename = f"preview_{int(time.time())}.jpg"
-                x0_url = await _upload_to_x0(normalized, filename, "image/jpeg")
-                if not x0_url:
-                    return None
-                self._og_cache[url] = x0_url
+                return self._og_cache[url]
+            og_url = await _fetch_og_image(url)
+            if not og_url:
+                return None
+            img_data = await _download_url(og_url, timeout=15)
+            if not img_data:
+                return None
+            normalized = normalize_cover(img_data, force_jpeg=True)
+            if not normalized:
+                return None
+            filename = f"preview_{int(time.time())}.jpg"
+            x0_url = await _upload_to_x0(normalized, filename, "image/jpeg")
+            if not x0_url:
+                return None
+            self._og_cache[url] = x0_url
+            return x0_url
+        except Exception as e:
+            logger.debug(f"[GRABBER] og preview resolve failed: {e}")
+            return None
 
+    async def _edit_with_preview(self, msg, text, buttons, x0_url):
+        try:
+            await self._bot(functions.messages.GetWebPageRequest(url=x0_url, hash=0))
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+
+        try:
+            from telethon.tl.functions.messages import EditMessageRequest
+            from telethon.tl.types import InputMediaWebPage
+            peer = await self._bot.get_input_entity(msg.chat_id)
+            parsed_text, entities = await self._bot._parse_message_text(text, "html")
+            markup = self._bot.build_reply_markup(buttons)
+            await self._bot(EditMessageRequest(
+                peer=peer,
+                id=msg.id,
+                message=parsed_text,
+                media=InputMediaWebPage(url=x0_url, optional=True, force_large_media=True),
+                invert_media=True,
+                reply_markup=markup,
+                entities=entities,
+                no_webpage=False,
+            ))
+        except Exception as e:
+            logger.debug(f"[GRABBER] og preview apply failed: {e}")
             try:
-                await self._bot(functions.messages.GetWebPageRequest(url=x0_url, hash=0))
+                await msg.edit(text, buttons=buttons, parse_mode="html")
             except Exception:
                 pass
-            await asyncio.sleep(1)
-
-            try:
-                from telethon.tl.functions.messages import EditMessageRequest
-                from telethon.tl.types import InputMediaWebPage
-                current_msg = await self._bot.get_messages(msg.chat_id, ids=msg.id)
-                if not current_msg:
-                    return None
-                current_text = current_msg.message or self.strings["analyzing"]
-                current_entities = current_msg.entities or []
-                current_buttons = current_msg.reply_markup
-                peer = await self._bot.get_input_entity(msg.chat_id)
-                await self._bot(EditMessageRequest(
-                    peer=peer,
-                    id=msg.id,
-                    message=current_text,
-                    media=InputMediaWebPage(url=x0_url, optional=True, force_large_media=True),
-                    invert_media=True,
-                    reply_markup=current_buttons,
-                    entities=current_entities,
-                    no_webpage=False,
-                ))
-                return x0_url
-            except Exception as e:
-                logger.debug(f"[GRABBER] og preview apply failed: {e}")
-        except Exception as e:
-            logger.debug(f"[GRABBER] og preview pipeline failed: {e}")
-        return None
 
     async def _h_btn(self, ev):
         if not self._running or not self._bot:
@@ -2493,6 +2493,18 @@ class Grabber(loader.Module):
             dl["upload_elapsed"] = elapsed
         return _cb
 
+    async def _finalize_caption_elapsed(self, sent_msg, chat_id, final_caption):
+        if not sent_msg:
+            return
+        try:
+            await self._bot.edit_message(
+                chat_id, sent_msg.id, final_caption, parse_mode="html",
+            )
+        except MessageNotModifiedError:
+            pass
+        except Exception as e:
+            logger.error(f"[GRABBER] caption finalize failed: {e}")
+
     async def _send_or_forward(
         self, task_id, chat_id, filepath, caption, attrs,
         filesize, reply_to_topic, is_audio, send_thumb=None,
@@ -2504,21 +2516,21 @@ class Grabber(loader.Module):
         cb = self._make_upload_callback(task_id, upload_start)
 
         if filesize <= BOT_LIMIT:
-            await self._bot.send_file(
+            sent_msg = await self._bot.send_file(
                 chat_id, filepath,
                 caption=caption, parse_mode="html",
                 force_document=False, supports_streaming=(not is_audio),
                 attributes=attrs, thumb=send_thumb, reply_to=reply_to_topic,
                 progress_callback=cb,
             )
-            return
+            return sent_msg
 
         if filesize > USER_LIMIT:
             await self._bot.send_message(
                 chat_id, self.strings["too_large_over_limit"].format(size_mb=filesize),
                 parse_mode="html",
             )
-            return
+            return None
 
         me = await self._client.get_me()
         if not getattr(me, "premium", False):
@@ -2526,7 +2538,7 @@ class Grabber(loader.Module):
                 chat_id, self.strings["too_large_no_premium"].format(size_mb=filesize),
                 parse_mode="html",
             )
-            return
+            return None
 
         asset_channel = self._db.get("heroku.forums", "channel_id", None)
         if not asset_channel or not self._grabber_topic_id:
@@ -2534,7 +2546,7 @@ class Grabber(loader.Module):
                 chat_id, self.strings["too_large_no_premium"].format(size_mb=filesize),
                 parse_mode="html",
             )
-            return
+            return None
 
         await self._log_to_topic(self.strings["log_large"].format(size_mb=filesize))
         log_chat_id = int(f"-100{asset_channel}")
@@ -2555,12 +2567,13 @@ class Grabber(loader.Module):
             access_hash=doc.access_hash,
             file_reference=doc.file_reference,
         )
-        await self._bot.send_file(
+        sent_msg = await self._bot.send_file(
             chat_id, input_doc,
             caption=caption, parse_mode="html",
             force_document=False, supports_streaming=(not is_audio),
             attributes=attrs,
         )
+        return sent_msg
 
     async def _process_download(
         self,
@@ -2821,7 +2834,7 @@ class Grabber(loader.Module):
 
                 caption = self.strings["file_caption"].format(
                     title=_escape_html(title[:120]),
-                    size_mb=filesize, width=real_width, height=real_height, elapsed=_fmt_elapsed(time.time()-task_start),
+                    size_mb=filesize, width=real_width, height=real_height, elapsed=self.strings["calc_label"],
                 )
                 fname = os.path.basename(final_path)
                 attrs = [
@@ -2835,7 +2848,7 @@ class Grabber(loader.Module):
                 up_loop = asyncio.create_task(self._upload_progress_loop(task_id, chat_id, msg_id, upload_start))
                 next_task = asyncio.ensure_future(self._prefetch_next())
                 try:
-                    await self._send_or_forward(
+                    sent_msg = await self._send_or_forward(
                         task_id, chat_id, final_path, caption, attrs,
                         filesize, reply_to_topic, False,
                     )
@@ -2845,6 +2858,13 @@ class Grabber(loader.Module):
                         await up_loop
                     except Exception:
                         pass
+
+                final_caption = self.strings["file_caption"].format(
+                    title=_escape_html(title[:120]),
+                    size_mb=filesize, width=real_width, height=real_height,
+                    elapsed=_fmt_elapsed(time.time() - task_start),
+                )
+                await self._finalize_caption_elapsed(sent_msg, chat_id, final_caption)
 
                 await self._log_to_topic(self.strings["log_done"].format(
                     title=_escape_html(title[:60]), size_mb=filesize))
@@ -2951,7 +2971,7 @@ class Grabber(loader.Module):
             ))
             caption = self.strings["file_caption"].format(
                 title=_escape_html(final_title[:120]),
-                size_mb=filesize, width=real_width, height=real_height, elapsed=_fmt_elapsed(time.time()-task_start),
+                size_mb=filesize, width=real_width, height=real_height, elapsed=self.strings["calc_label"],
             )
         else:
             attrs.append(DocumentAttributeAudio(
@@ -2967,7 +2987,7 @@ class Grabber(loader.Module):
         up_loop = asyncio.create_task(self._upload_progress_loop(task_id, chat_id, msg_id, upload_start))
         asyncio.ensure_future(self._prefetch_next())
         try:
-            await self._send_or_forward(
+            sent_msg = await self._send_or_forward(
                 task_id, chat_id, filepath, caption, attrs,
                 filesize, reply_to_topic, is_audio, send_thumb=send_thumb,
             )
@@ -2977,6 +2997,14 @@ class Grabber(loader.Module):
                 await up_loop
             except Exception:
                 pass
+
+        if not is_audio:
+            final_caption = self.strings["file_caption"].format(
+                title=_escape_html(final_title[:120]),
+                size_mb=filesize, width=real_width, height=real_height,
+                elapsed=_fmt_elapsed(time.time() - task_start),
+            )
+            await self._finalize_caption_elapsed(sent_msg, chat_id, final_caption)
 
         await self._log_to_topic(self.strings["log_done"].format(
             title=_escape_html(title[:60]), size_mb=filesize, elapsed=_fmt_elapsed(time.time()-task_start)))
