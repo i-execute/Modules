@@ -27,7 +27,7 @@ class DeleteAvka(loader.Module):
     }
 
     @loader.command(
-        ru_doc="Удалить все аватарки из вашего профиля",
+        ru_doc="Удалить все аватарки из твоего профиля",
         en_doc="Delete all avatars from your profile",
     )
     async def avkarm(self, message):
