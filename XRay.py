@@ -16,6 +16,8 @@ import ipaddress
 import tempfile
 import re
 import random
+import secrets
+import string
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
@@ -27,6 +29,7 @@ logger = logging.getLogger(__name__)
 LOG_MAX_SIZE = 30 * 1024 * 1024
 LOG_KEEP_SIZE = 10 * 1024 * 1024
 BASE_PORT = 8443
+AUTOSTART_INTERVAL = 10
 
 def _escape(text):
     if not text:
@@ -36,6 +39,10 @@ def _escape(text):
 def _strip_md(text: str) -> str:
     import re
     return re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'', text).strip()
+
+def _gen_secret(length: int) -> str:
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 def _in_docker():
     if os.path.isfile("/.dockerenv"):
@@ -109,6 +116,7 @@ class XRay(loader.Module):
             "Status: {status}\n"
             "Transport: {transport}\n"
             "Port: {port}\n"
+            "Autostart: {autostart}\n"
             "Device limit: {limit}\n"
             "Active devices: {active}\n"
             "Uptime: {uptime}"
@@ -172,15 +180,24 @@ class XRay(loader.Module):
             "<b>VLESS Link: {name}</b>\n"
             "<blockquote>"
             "Clients:\n"
-            "iOS/Android: v2RayTun, v2rayNG"
+            "iOS/Android: Happ, v2RayTun"
             "</blockquote>"
         ),
         "link_sent": (
             "<b>VLESS Link: {name}</b>\n"
             "<blockquote>"
             "Clients:\n"
-            "iOS/Android: v2RayTun, v2rayNG\n\n"
-            "Link file sent to chat"
+            "iOS/Android: Happ, v2RayTun"
+            "</blockquote>"
+        ),
+        "socks5_sent": (
+            "<b>SOCKS5: {name}</b>\n"
+            "<blockquote>"
+            "Host: {ip}\n"
+            "Port: {port}\n"
+            "Login: {user}\n"
+            "Password: {pass}\n\n"
+            "URL: <code>socks5://{user}:{pass}@{ip}:{port}</code>"
             "</blockquote>"
         ),
         
@@ -243,6 +260,10 @@ class XRay(loader.Module):
         "btn_set_fp": "Fingerprint",
         "btn_set_limit": "Device Limit",
         "btn_toggle_transport": "Switch Transport",
+        "btn_socks5": "SOCKS5",
+        "btn_transport": "Transport",
+        "btn_autostart_on": "Autostart: On",
+        "btn_autostart_off": "Autostart: Off",
         "btn_chrome": "Chrome",
         "btn_firefox": "Firefox",
         "btn_safari": "Safari",
@@ -342,6 +363,37 @@ class XRay(loader.Module):
         ),
         "btn_gh_auth": "GitHub Auth",
         "btn_gh_revoke": "Revoke Token",
+
+        "transport_menu": (
+            "<b>Transport: {name}</b>\n"
+            "<blockquote>Current: {current}\nSelect transport:</blockquote>"
+        ),
+
+        "transport_set": (
+            "<b>Transport Updated</b>\n"
+            "<blockquote>{transport}</blockquote>"
+        ),
+
+        "socks5_info": (
+            "<b>SOCKS5: {name}</b>\n"
+            "<blockquote>"
+            "Host: {ip}\n"
+            "Port: {port}\n"
+            "Login: {user}\n"
+            "Password: {pass}\n\n"
+            "URL: <code>socks5://{user}:{pass}@{ip}:{port}</code>"
+            "</blockquote>"
+        ),
+
+        "autostart_on": (
+            "<b>Autostart Enabled</b>\n"
+            "<blockquote>{name} will restart automatically if the process crashes</blockquote>"
+        ),
+
+        "autostart_off": (
+            "<b>Autostart Disabled</b>\n"
+            "<blockquote>{name} will need to be started manually</blockquote>"
+        ),
     }
 
     strings_ru = {
@@ -390,6 +442,7 @@ class XRay(loader.Module):
             "Статус: {status}\n"
             "Транспорт: {transport}\n"
             "Порт: {port}\n"
+            "Автозапуск: {autostart}\n"
             "Лимит устройств: {limit}\n"
             "Активных устройств: {active}\n"
             "Аптайм: {uptime}"
@@ -453,8 +506,14 @@ class XRay(loader.Module):
             "<b>VLESS ссылка: {name}</b>\n"
             "<blockquote>"
             "Клиенты:\n"
-            "iOS/Android: v2RayTun, v2rayNG\n\n"
-            "Нажмите для копирования"
+            "iOS/Android: Happ, v2RayTun"
+            "</blockquote>"
+        ),
+        "link_sent": (
+            "<b>VLESS ссылка: {name}</b>\n"
+            "<blockquote>"
+            "Клиенты:\n"
+            "iOS/Android: Happ, v2RayTun"
             "</blockquote>"
         ),
         
@@ -619,6 +678,54 @@ class XRay(loader.Module):
         
         "loading": "<b>Загрузка...</b>",
         "collecting_versions": "<b>Сбор версий...</b>",
+
+        "btn_socks5": "SOCKS5",
+        "btn_transport": "Транспорт",
+        "btn_autostart_on": "Автозапуск: Вкл",
+        "btn_autostart_off": "Автозапуск: Выкл",
+
+        "transport_menu": (
+            "<b>Транспорт: {name}</b>\n"
+            "<blockquote>Текущий: {current}\nВыберите транспорт:</blockquote>"
+        ),
+
+        "transport_set": (
+            "<b>Транспорт обновлён</b>\n"
+            "<blockquote>{transport}</blockquote>"
+        ),
+
+        "socks5_info": (
+            "<b>SOCKS5: {name}</b>\n"
+            "<blockquote>"
+            "Host: {ip}\n"
+            "Port: {port}\n"
+            "Логин: {user}\n"
+            "Пароль: {pass}\n\n"
+            "URL: <code>socks5://{user}:{pass}@{ip}:{port}</code>"
+            "</blockquote>"
+        ),
+
+        "socks5_sent": (
+            "<b>SOCKS5: {name}</b>\n"
+            "<blockquote>"
+            "Host: {ip}\n"
+            "Port: {port}\n"
+            "Логин: {user}\n"
+            "Пароль: {pass}\n\n"
+            "URL: <code>socks5://{user}:{pass}@{ip}:{port}</code>\n\n"
+            "Файл proxies.txt отправлен в чат"
+            "</blockquote>"
+        ),
+
+        "autostart_on": (
+            "<b>Автозапуск включён</b>\n"
+            "<blockquote>{name} будет подниматься автоматически, если процесс упадёт</blockquote>"
+        ),
+
+        "autostart_off": (
+            "<b>Автозапуск выключен</b>\n"
+            "<blockquote>{name} нужно будет запускать вручную</blockquote>"
+        ),
     }
 
     def __init__(self):
@@ -1079,6 +1186,38 @@ class XRay(loader.Module):
 
     def _build_config(self, user: Dict) -> Dict:
         transport = user["transport"]
+
+        if transport == "socks5":
+            return {
+                "log": {
+                    "loglevel": "warning",
+                    "access": os.path.join(self._root, "users", user["name"], "access.log"),
+                    "error": os.path.join(self._root, "users", user["name"], "error.log"),
+                },
+                "inbounds": [{
+                    "listen": "0.0.0.0",
+                    "port": user["port"],
+                    "protocol": "socks",
+                    "settings": {
+                        "auth": "password",
+                        "accounts": [{
+                            "user": user.get("socks_user", ""),
+                            "pass": user.get("socks_pass", ""),
+                        }],
+                        "udp": True,
+                    },
+                    "sniffing": {
+                        "enabled": False,
+                        "destOverride": ["http", "tls", "quic", "fakedns"],
+                        "metadataOnly": False,
+                        "routeOnly": False,
+                    },
+                }],
+                "outbounds": [
+                    {"protocol": "freedom", "tag": "direct"},
+                ],
+            }
+
         if transport == "tcp":
             sni = user.get("sni", "www.sony.com")
             dest = user.get("dest", "www.sony.com:443")
@@ -1348,7 +1487,7 @@ class XRay(loader.Module):
     def _start_monitor(self):
         async def monitor_loop():
             while True:
-                await asyncio.sleep(60)
+                await asyncio.sleep(AUTOSTART_INTERVAL)
                 
                 for name, proc in list(self._processes.items()):
                     user = self._users.get(name)
@@ -1376,6 +1515,17 @@ class XRay(loader.Module):
                             )
                         except:
                             pass
+                
+                if not self._xray_installed():
+                    continue
+                
+                for name, user in list(self._users.items()):
+                    if not user.get("autostart"):
+                        continue
+                    if name in self._processes:
+                        continue
+                    
+                    await self._start_user(name)
         
         if self._monitor_task:
             self._monitor_task.cancel()
@@ -1599,12 +1749,15 @@ class XRay(loader.Module):
             active = self._get_active_connections(user["port"])
         
         uptime = self._get_user_uptime(name)
+        autostart = user.get("autostart", False)
+        autostart_text = self.strings["btn_autostart_on"].split(":")[1].strip() if autostart else self.strings["btn_autostart_off"].split(":")[1].strip()
         
         text = self.strings["user_menu"].format(
             name=_escape(name),
             status=status,
             transport=transport,
             port=user["port"],
+            autostart=autostart_text,
             limit=limit_text,
             active=active if is_running else "n/a",
             uptime=uptime,
@@ -1621,6 +1774,15 @@ class XRay(loader.Module):
             markup.append([
                 {"text": self.strings["btn_start"], "callback": self._cb_start_user, "args": (name,), "style": "primary"},
             ])
+        
+        markup.append([
+            {
+                "text": self.strings["btn_autostart_on"] if autostart else self.strings["btn_autostart_off"],
+                "callback": self._cb_toggle_autostart,
+                "args": (name,),
+                "style": "success" if autostart else "danger",
+            },
+        ])
         
         markup.append([
             {"text": self.strings["btn_get_link"], "callback": self._cb_get_user_link, "args": (name,), "style": "primary"},
@@ -1643,6 +1805,17 @@ class XRay(loader.Module):
         ])
         
         await call.edit(text, reply_markup=markup)
+
+    async def _cb_toggle_autostart(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if not user:
+            await call.answer("User not found", show_alert=True)
+            return
+        
+        user["autostart"] = not user.get("autostart", False)
+        self._save_users()
+        
+        await self._cb_user_menu(call, name)
 
     async def _cb_start_user(self, call: InlineCall, name: str):
         await call.edit(self.strings["loading"])
@@ -1724,6 +1897,60 @@ class XRay(loader.Module):
         if not self._external_ip:
             await call.edit(
                 self.strings["setup_fail"].format(error="Could not detect external IP"),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
+            )
+            return
+
+        if user["transport"] == "socks5":
+            ip = self._external_ip
+            port = user["port"]
+            socks_user = user.get("socks_user", "")
+            socks_pass = user.get("socks_pass", "")
+            proxy_url = f"socks5://{socks_user}:{socks_pass}@{ip}:{port}"
+
+            proxies_text = (
+                "proxies = {\n"
+                f'    "http": "{proxy_url}",\n'
+                f'    "https": "{proxy_url}",\n'
+                "}\n"
+            )
+
+            import tempfile, os
+            tmp = tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".txt",
+                prefix=f"proxies_{name}_",
+                delete=False,
+            )
+            tmp.write(proxies_text)
+            tmp.close()
+
+            try:
+                await self._client.send_file(
+                    call.form["chat"],
+                    tmp.name,
+                    attributes=[],
+                    force_document=True,
+                    file_name=f"proxies_{name}.txt",
+                )
+            except Exception as e:
+                logger.exception("[XR] send_file failed: %s", e)
+                await call.edit(
+                    self.strings["setup_fail"].format(error=f"Failed to send file: {e}"),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
+                )
+                return
+            finally:
+                os.unlink(tmp.name)
+
+            await call.edit(
+                self.strings["socks5_sent"].format(
+                    name=_escape(name),
+                    ip=ip,
+                    port=port,
+                    user=_escape(socks_user),
+                    **{"pass": _escape(socks_pass)},
+                ),
                 reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
             )
             return
@@ -1831,12 +2058,13 @@ class XRay(loader.Module):
             await call.answer("User not found", show_alert=True)
             return
         
+        is_socks5 = user["transport"] == "socks5"
         transport = user["transport"].upper()
-        sni = user.get("sni", "www.microsoft.com")
-        dest = user.get("dest", "www.microsoft.com:443")
+        sni = user.get("sni", "www.microsoft.com") if not is_socks5 else "n/a"
+        dest = user.get("dest", "www.microsoft.com:443") if not is_socks5 else "n/a"
         path = user.get("path", "/xhttps") if user["transport"] == "xhttp" else "n/a"
         padding = user.get("padding", "100-1000") if user["transport"] == "xhttp" else "n/a"
-        fp = user.get("fingerprint", "firefox")
+        fp = user.get("fingerprint", "firefox") if not is_socks5 else "n/a"
         limit = user.get("device_limit", 0)
         limit_text = "Unlimited" if limit == 0 else str(limit)
         
@@ -1852,30 +2080,70 @@ class XRay(loader.Module):
         )
         
         markup = [
-            [{"text": self.strings["btn_toggle_transport"], "callback": self._cb_toggle_transport, "args": (name,), "style": "primary"}],
-            [{"text": self.strings["btn_set_sni"], "input": self.strings["input_sni"], "handler": self._cb_set_sni, "args": (name,), "style": "primary"}],
-            [{"text": self.strings["btn_set_dest"], "input": self.strings["input_dest"], "handler": self._cb_set_dest, "args": (name,), "style": "primary"}],
+            [{"text": self.strings["btn_transport"], "callback": self._cb_transport_menu, "args": (name,), "style": "primary"}],
         ]
         
-        if user["transport"] == "xhttp":
-            markup.append([{"text": self.strings["btn_set_path"], "input": self.strings["input_path"], "handler": self._cb_set_path, "args": (name,), "style": "primary"}])
-            markup.append([{"text": self.strings["btn_set_padding"], "callback": self._cb_padding_menu, "args": (name,), "style": "primary"}])
+        if not is_socks5:
+            markup.append([{"text": self.strings["btn_set_sni"], "input": self.strings["input_sni"], "handler": self._cb_set_sni, "args": (name,), "style": "primary"}])
+            markup.append([{"text": self.strings["btn_set_dest"], "input": self.strings["input_dest"], "handler": self._cb_set_dest, "args": (name,), "style": "primary"}])
+            
+            if user["transport"] == "xhttp":
+                markup.append([{"text": self.strings["btn_set_path"], "input": self.strings["input_path"], "handler": self._cb_set_path, "args": (name,), "style": "primary"}])
+                markup.append([{"text": self.strings["btn_set_padding"], "callback": self._cb_padding_menu, "args": (name,), "style": "primary"}])
+            
+            markup.append([{"text": self.strings["btn_set_fp"], "callback": self._cb_fp_menu, "args": (name,), "style": "primary"}])
         
-        markup.append([{"text": self.strings["btn_set_fp"], "callback": self._cb_fp_menu, "args": (name,), "style": "primary"}])
         markup.append([{"text": self.strings["btn_set_limit"], "input": self.strings["input_limit"], "handler": self._cb_set_limit, "args": (name,), "style": "primary"}])
         markup.append([{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}])
         
         await call.edit(text, reply_markup=markup)
 
-    async def _cb_toggle_transport(self, call: InlineCall, name: str):
+    async def _cb_transport_menu(self, call: InlineCall, name: str):
         user = self._users.get(name)
         if not user:
+            await call.answer("User not found", show_alert=True)
             return
         
-        user["transport"] = "tcp" if user["transport"] == "xhttp" else "xhttp"
+        markup = [
+            [{"text": self.strings["btn_tcp"], "callback": self._cb_set_transport, "args": (name, "tcp"), "style": "primary"}],
+            [{"text": self.strings["btn_xhttp"], "callback": self._cb_set_transport, "args": (name, "xhttp"), "style": "primary"}],
+            [{"text": self.strings["btn_socks5"], "callback": self._cb_set_transport, "args": (name, "socks5"), "style": "primary"}],
+            [{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}],
+        ]
+        
+        await call.edit(
+            self.strings["transport_menu"].format(name=_escape(name), current=user["transport"].upper()),
+            reply_markup=markup,
+        )
+
+    async def _cb_set_transport(self, call: InlineCall, name: str, transport: str):
+        user = self._users.get(name)
+        if not user:
+            await call.answer("User not found", show_alert=True)
+            return
+        
+        if user["transport"] == transport:
+            await self._cb_user_settings(call, name)
+            return
+        
+        await call.edit(self.strings["loading"])
+        
+        user["transport"] = transport
+        
+        if transport == "socks5" and not user.get("socks_user"):
+            user["socks_user"] = _gen_secret(8)
+            user["socks_pass"] = _gen_secret(14)
+        
         self._save_users()
         
-        await self._cb_user_settings(call, name)
+        if name in self._processes and user.get("autostart"):
+            await self._stop_user(name)
+            await self._start_user(name)
+        
+        await call.edit(
+            self.strings["transport_set"].format(transport=transport.upper()),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
+        )
 
     async def _cb_set_sni(self, call: InlineCall, sni: str, name: str):
         user = self._users.get(name)
@@ -2072,6 +2340,7 @@ class XRay(loader.Module):
         markup = [
             [{"text": self.strings["btn_xhttp"], "callback": self._cb_add_user_limit_input, "args": (name, "xhttp"), "style": "primary"}],
             [{"text": self.strings["btn_tcp"], "callback": self._cb_add_user_limit_input, "args": (name, "tcp"), "style": "primary"}],
+            [{"text": self.strings["btn_socks5"], "callback": self._cb_add_user_limit_input, "args": (name, "socks5"), "style": "primary"}],
             [{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}],
         ]
         
@@ -2111,13 +2380,15 @@ class XRay(loader.Module):
             )
             return
         
-        private_key, public_key = await self._generate_x25519()
-        if not private_key or not public_key:
-            await call.edit(
-                self.strings["setup_fail"].format(error="Key generation failed"),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
-            )
-            return
+        private_key, public_key = "", ""
+        if transport != "socks5":
+            private_key, public_key = await self._generate_x25519()
+            if not private_key or not public_key:
+                await call.edit(
+                    self.strings["setup_fail"].format(error="Key generation failed"),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
+                )
+                return
         
         port = await self._get_next_port()
         
@@ -2142,6 +2413,9 @@ class XRay(loader.Module):
             "path": "/xhttps",
             "padding": "100-1000",
             "fingerprint": "firefox",
+            "socks_user": _gen_secret(8),
+            "socks_pass": _gen_secret(14),
+            "autostart": False,
             "start_time": 0,
         }
         
