@@ -53,13 +53,13 @@ class DepInvoice(loader.Module):
         ),
 
         "inline_hint_title": "DepInvoice",
-        "inline_hint_desc": "Enter Stars amount (e.g., 100)",
-        "inline_hint_msg": "Enter the amount of Stars to create an invoice",
+        "inline_hint_desc": "Enter Stars amount",
+        "inline_hint_msg": "Enter Stars amount",
         "inline_title": "Payment {stars} Stars",
         "inline_desc": "Tap to create invoice",
 
         "invoice_title_default": "Purchase {stars} Stars",
-        "invoice_desc_default": "Payment for {stars} Telegram Stars",
+        "invoice_description_default": "Payment for {stars} Stars",
 
         "log_payment_received": (
             "<pre><code class=\"language-depinvoice\">"
@@ -109,13 +109,13 @@ class DepInvoice(loader.Module):
         ),
 
         "inline_hint_title": "DepInvoice",
-        "inline_hint_desc": "Введите количество Stars (например, 100)",
-        "inline_hint_msg": "Введите количество Stars для создания счёта",
+        "inline_hint_desc": "Введите число Stars",
+        "inline_hint_msg": "Введите число Stars",
         "inline_title": "Оплата {stars} Stars",
-        "inline_desc": "Нажмите для создания счёта",
+        "inline_desc": "Нажмите для счёта",
 
         "invoice_title_default": "Покупка {stars} Stars",
-        "invoice_desc_default": "Оплата {stars} Telegram Stars",
+        "invoice_description_default": "Оплата {stars} Stars",
 
         "log_payment_received": (
             "<pre><code class=\"language-depinvoice\">"
