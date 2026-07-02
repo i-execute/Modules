@@ -1,5 +1,6 @@
 __version__ = (1, 2, 0)
 # meta developer: I_execute.t.me
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Chunker/MetaBanner.jpeg
 
 import os
 import re
@@ -832,7 +833,7 @@ class Chunker(loader.Module):
             )
 
             try:
-                await self._client.send_file(
+                sent_msg = await self._client.send_file(
                     call.form["chat"],
                     result_path,
                     caption=self.strings["done"].format(
@@ -840,13 +841,26 @@ class Chunker(loader.Module):
                         version=_escape(ver_label),
                         dl_time=_format_time(dl_elapsed),
                         cv_time=_format_time(cv_elapsed),
-                        ul_time=_format_time(time.time() - ul_start),
+                        ul_time="Calculating...",
                     ),
                     parse_mode="html",
                 )
                 ul_elapsed = time.time() - ul_start
                 stop_ul.set()
                 await ul_timer
+
+                await self._client.edit_message(
+                    call.form["chat"],
+                    sent_msg.id,
+                    self.strings["done"].format(
+                        src=_escape(filename),
+                        version=_escape(ver_label),
+                        dl_time=_format_time(dl_elapsed),
+                        cv_time=_format_time(cv_elapsed),
+                        ul_time=_format_time(ul_elapsed),
+                    ),
+                    parse_mode="html",
+                )
 
                 await call.edit(
                     self.strings["done"].format(

@@ -89,6 +89,52 @@ _ensure_all_deps()
 import aiohttp
 from yandex_music import ClientAsync
 from yandex_music.exceptions import TimedOutError as YMTimedOutError
+from yandex_music.utils.request_async import Request as _YMRequest
+from yandex_music.exceptions import TimedOutError as _YMTimedOutError, NetworkError as _YMNetworkError
+
+if not getattr(_YMRequest, "_yndx_curl_patched", False):
+    from curl_cffi.requests import AsyncSession as _CurlSession
+    import asyncio as _asyncio
+
+    _YNDX_IMPERSONATE = "chrome116"
+    _YNDX_TIMEOUT = 0.7
+    _YNDX_ATTEMPTS = 30
+
+    async def _yndx_curl_request_wrapper(self, *args, **kwargs):
+        method = args[0] if args else kwargs.pop("method", "GET")
+        url = args[1] if len(args) > 1 else kwargs.pop("url")
+        kwargs.pop("timeout", None)
+        headers = kwargs.pop("headers", self.headers)
+        params = kwargs.pop("params", None)
+        data = kwargs.pop("data", None)
+        json = kwargs.pop("json", None)
+        proxy = kwargs.pop("proxy", self.proxy_url)
+
+        last_exc = None
+        async with _CurlSession(impersonate=_YNDX_IMPERSONATE) as session:
+            for _ in range(_YNDX_ATTEMPTS):
+                try:
+                    r = await session.request(
+                        method, url,
+                        headers=headers,
+                        params=params,
+                        data=data,
+                        json=json,
+                        proxy=proxy,
+                        timeout=_YNDX_TIMEOUT,
+                    )
+                    content = r.content
+                    if 200 <= r.status_code <= 299:
+                        return content
+                    self._handle_error_response(r.status_code, content)
+                    return None
+                except Exception as e:
+                    last_exc = e
+                    continue
+        raise _YMTimedOutError from last_exc
+
+    _YMRequest._request_wrapper = _yndx_curl_request_wrapper
+    _YMRequest._yndx_curl_patched = True
 from PIL import Image
 
 try:
