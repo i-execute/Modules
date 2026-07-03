@@ -36,6 +36,7 @@ Twin
 Uploader
 VKCalls
 Voices
+WebDeployer
 XRay
 YNDXMusic
 YTMusic
