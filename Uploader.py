@@ -63,6 +63,7 @@ def _detect_type(name):
         "flac": "audio/flac",
         "aac": "audio/aac",
         "py": "text/x-python",
+        "sh": "text/x-shellscript",
         "txt": "text/plain",
         "json": "application/json",
         "xml": "text/xml",
@@ -99,7 +100,7 @@ ALLOWED_EXTENSIONS = {
     "png", "jpg", "jpeg", "heif", "heic", "gif", "webp", "bmp", "svg",
     "mp4", "mov", "avi", "mkv", "webm",
     "mp3", "wav", "ogg", "flac", "aac",
-    "py", "txt", "json", "xml", "html", "css", "js", "md", "csv",
+    "py", "sh", "txt", "json", "xml", "html", "css", "js", "md", "csv",
     "log", "cfg", "ini", "yaml", "yml", "toml",
     "zip", "rar", "7z", "tar", "gz",
     "apk", "pdf", "doc", "docx", "xls", "xlsx", "pptx",
@@ -123,7 +124,7 @@ class Uploader(loader.Module):
             "Images: png, jpeg, jpg, heif, heic, gif, webp, bmp, svg\n"
             "Video: mp4, mov, avi, mkv, webm\n"
             "Audio: mp3, wav, ogg, flac, aac\n"
-            "Text: py, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
+            "Text: py, sh, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
             "Archives: zip, rar, 7z, tar, gz\n"
             "Docs: pdf, doc, docx, xls, xlsx, pptx\n"
             "Other: apk, tgs"
@@ -177,7 +178,7 @@ class Uploader(loader.Module):
             "Изображения: png, jpeg, jpg, heif, heic, gif, webp, bmp, svg\n"
             "Видео: mp4, mov, avi, mkv, webm\n"
             "Аудио: mp3, wav, ogg, flac, aac\n"
-            "Текст: py, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
+            "Текст: py, sh, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
             "Архивы: zip, rar, 7z, tar, gz\n"
             "Документы: pdf, doc, docx, xls, xlsx, pptx\n"
             "Другое: apk, tgs"
@@ -232,7 +233,7 @@ class Uploader(loader.Module):
         try:
             if isinstance(msg, list):
                 msg = msg[0]
-            await msg.edit(text, link_preview=False)
+            await msg.edit(text)
         except Exception:
             pass
 
@@ -275,6 +276,7 @@ class Uploader(loader.Module):
                 "audio/flac": "file.flac",
                 "audio/aac": "file.aac",
                 "text/x-python": "file.py",
+                "text/x-shellscript": "file.sh",
                 "text/plain": "file.txt",
                 "application/json": "file.json",
                 "text/xml": "file.xml",
@@ -350,7 +352,13 @@ class Uploader(loader.Module):
             return
 
         file_type = _detect_type(filename)
-        m = await utils.answer(message, self._s("downloading", time="0.00s"))
+        m = await self.inline.form(
+            text=self._s("downloading", time="0.00s"),
+            message=message,
+            silent=True,
+        )
+        if not m:
+            m = await utils.answer(message, self._s("downloading", time="0.00s"))
 
         stop_event = asyncio.Event()
         dl_start = time.time()
