@@ -1,4 +1,4 @@
-__version__ = (3, 2, 4)
+__version__ = (3, 2, 5)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Logger/MetaBanner.jpeg
 
@@ -25,10 +25,6 @@ class Logger(loader.Module):
         "greeting_first": (
             "<blockquote><b>Yo!</b>\n"
             "Watchers are active. Now every command will be logged here, if some asshole uses your userbot I'll tag you</blockquote>"
-        ),
-        "greeting_recovery": (
-            "<blockquote><b>Hey!</b>\n"
-            "Everything went to shit. Old group disappeared somewhere, who the fuck knows what happened</blockquote>"
         ),
         "reloaded": "<blockquote><b>Module successfully reloaded, everything works</b></blockquote>",
         "username_row": "@{uname}",
@@ -69,10 +65,6 @@ class Logger(loader.Module):
         "greeting_first": (
             "<blockquote><b>Ку!</b>\n"
             "Вотчеры активны. Теперь каждая команда будет залетать сюда, если какой-то хуй будет использовать твой юзербот то я тэгну тебя</blockquote>"
-        ),
-        "greeting_recovery": (
-            "<blockquote><b>Прием!</b>\n"
-            "Всё наебнулось к хуям. Старая группа куда-то съебалась, хер знает че такое</blockquote>"
         ),
         "reloaded": "<blockquote><b>Модуль был успешно перезагружен, все воркает</b></blockquote>",
         "username_row": "@{uname}",
@@ -115,7 +107,6 @@ class Logger(loader.Module):
         self._asset_channel = None
         self._flood_lock = asyncio.Lock()
         self._owner_usernames = set()
-        self._greeting_sent = False
 
     def _escape(self, text):
         if not text:
@@ -148,9 +139,6 @@ class Logger(loader.Module):
         last = getattr(entity, "last_name", "") or ""
         return self._escape(f"{first} {last}".strip() or "User")
 
-    def _get_user_link(self, user_id: int, name: str) -> str:
-        return f'<a href="tg://user?id={user_id}">{self._escape(name)}</a>'
-
     def _get_full_name(self, entity) -> str:
         if not entity:
             return "Unknown"
@@ -180,7 +168,6 @@ class Logger(loader.Module):
         chat_id = chat.id
         msg_id = message.id
         topic_id = self._get_topic_id(message)
-
         if username:
             if topic_id:
                 return f"https://t.me/{username}/{topic_id}/{msg_id}"
@@ -217,36 +204,6 @@ class Logger(loader.Module):
                 raise
         return None
 
-    async def _send_greeting_with_preview(self, chat_id, text):
-        try:
-            msg = await self._send_with_flood_wait(
-                self.inline.bot.send_message,
-                chat_id,
-                text,
-                parse_mode="html",
-                message_thread_id=self._logger_topic.id,
-            )
-            if msg:
-                try:
-                    peer = await self.inline.bot.get_input_entity(chat_id)
-                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
-                    reply_markup = current_msg.reply_markup if current_msg else None
-                    msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
-                    await self.inline.bot(EditMessageRequest(
-                        peer=peer,
-                        id=msg.id,
-                        message=msg_text,
-                        media=InputMediaWebPage(url=GREETING_MEDIA_URL, optional=True, force_large_media=True),
-                        invert_media=True,
-                        reply_markup=reply_markup,
-                        entities=entities,
-                        no_webpage=False,
-                    ))
-                except Exception as e:
-                    logger.error(f"[Logger] Failed to add preview: {e}")
-        except Exception as e:
-            logger.error(f"[Logger] Failed to send greeting: {e}")
-
     async def client_ready(self):
         self._owner = await self._client.get_me()
         self._owner_usernames = set(self._get_all_usernames(self._owner))
@@ -270,25 +227,9 @@ class Logger(loader.Module):
             logger.error(f"[Logger] Failed to create/get forum topic: {e}")
             return
 
-        chat_id = int(f"-100{self._asset_channel}")
-
-        if self._greeting_sent:
-            try:
-                await self._send_with_flood_wait(
-                    self.inline.bot.send_message,
-                    chat_id,
-                    self.strings["reloaded"],
-                    parse_mode="html",
-                    message_thread_id=self._logger_topic.id,
-                )
-            except Exception as e:
-                logger.error(f"[Logger] Failed to send reloaded message: {e}")
-            return
-
-        self._greeting_sent = True
-
         greeting_key = f"logger_greeted_{self._asset_channel}_{self._logger_topic.id}"
         already_greeted = self.get(greeting_key, False)
+        chat_id = int(f"-100{self._asset_channel}")
 
         if already_greeted:
             try:
@@ -303,7 +244,41 @@ class Logger(loader.Module):
                 logger.error(f"[Logger] Failed to send reloaded message: {e}")
         else:
             self.set(greeting_key, True)
-            await self._send_greeting_with_preview(chat_id, self.strings["greeting_first"])
+            try:
+                msg_text, entities = await self.inline.bot._parse_message_text(
+                    self.strings["greeting_first"], "html"
+                )
+                msg = await self._send_with_flood_wait(
+                    self.inline.bot.send_message,
+                    chat_id,
+                    msg_text,
+                    parse_mode=None,
+                    entities=entities,
+                    message_thread_id=self._logger_topic.id,
+                )
+                if msg:
+                    try:
+                        peer = await self.inline.bot.get_input_entity(chat_id)
+                        current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                        reply_markup = current_msg.reply_markup if current_msg else None
+                        await self.inline.bot(EditMessageRequest(
+                            peer=peer,
+                            id=msg.id,
+                            message=msg_text,
+                            media=InputMediaWebPage(
+                                url=GREETING_MEDIA_URL,
+                                optional=True,
+                                force_large_media=True,
+                            ),
+                            invert_media=True,
+                            reply_markup=reply_markup,
+                            entities=entities,
+                            no_webpage=False,
+                        ))
+                    except Exception as e:
+                        logger.error(f"[Logger] Failed to add preview: {e}")
+            except Exception as e:
+                logger.error(f"[Logger] Failed to send greeting: {e}")
 
     async def _send_log(self, text: str):
         if not self._logger_topic or not self._asset_channel:

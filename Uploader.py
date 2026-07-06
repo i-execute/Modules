@@ -1,4 +1,4 @@
-__version__ = (1, 1, 0)
+__version__ = (1, 1, 1)
 # meta developer: I_execute.t.me
 
 import os
@@ -11,7 +11,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-MAX_FILE_SIZE = 512 * 1024 * 1024  
+MAX_FILE_SIZE = 512 * 1024 * 1024
 
 
 def _escape(text):
@@ -231,8 +231,6 @@ class Uploader(loader.Module):
 
     async def _safe_edit(self, msg, text):
         try:
-            if isinstance(msg, list):
-                msg = msg[0]
             await msg.edit(text)
         except Exception:
             pass
@@ -309,7 +307,6 @@ class Uploader(loader.Module):
             return doc.size
         if hasattr(media, "size") and isinstance(getattr(media, "size"), int):
             return media.size
-
         photo = getattr(media, "photo", None)
         if photo:
             sizes = getattr(photo, "sizes", []) or []
@@ -352,25 +349,17 @@ class Uploader(loader.Module):
             return
 
         file_type = _detect_type(filename)
-        m = await self.inline.form(
-            text=self._s("downloading", time="0.00s"),
-            message=message,
-            silent=True,
-        )
-        if not m:
-            m = await utils.answer(message, self._s("downloading", time="0.00s"))
+        status_msg = await utils.answer(message, self._s("downloading", time="0.00s"))
 
         stop_event = asyncio.Event()
         dl_start = time.time()
         timer_task = asyncio.ensure_future(
-            self._timer_loop(m, "downloading", dl_start, stop_event)
+            self._timer_loop(status_msg, "downloading", dl_start, stop_event)
         )
 
         tmp_path = None
         try:
-            tmp_fd = tempfile.NamedTemporaryFile(
-                suffix=f".{ext}", delete=False
-            )
+            tmp_fd = tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False)
             tmp_path = tmp_fd.name
             tmp_fd.close()
 
@@ -384,7 +373,7 @@ class Uploader(loader.Module):
             stop_event = asyncio.Event()
             ul_start = time.time()
             timer_task = asyncio.ensure_future(
-                self._timer_loop(m, "uploading", ul_start, stop_event)
+                self._timer_loop(status_msg, "uploading", ul_start, stop_event)
             )
 
             try:
@@ -403,21 +392,21 @@ class Uploader(loader.Module):
                 if proc.returncode != 0 or not out:
                     error = (err or b"").decode().strip() or f"exit code {proc.returncode}"
                     await self._safe_edit(
-                        m, self._s("upload_fail", error=_escape(error[:300]))
+                        status_msg, self._s("upload_fail", error=_escape(error[:300]))
                     )
                     return
 
                 url = out.decode().strip()
                 if not url.startswith("http"):
                     await self._safe_edit(
-                        m, self._s("upload_fail", error=_escape(url[:300]))
+                        status_msg, self._s("upload_fail", error=_escape(url[:300]))
                     )
                     return
 
                 total_elapsed = dl_elapsed + ul_elapsed
 
                 await self._safe_edit(
-                    m,
+                    status_msg,
                     self._s(
                         "done",
                         url=_escape(url),
@@ -434,13 +423,13 @@ class Uploader(loader.Module):
                 stop_event.set()
                 await timer_task
                 await self._safe_edit(
-                    m, self._s("upload_fail", error="timeout")
+                    status_msg, self._s("upload_fail", error="timeout")
                 )
             except FileNotFoundError:
                 stop_event.set()
                 await timer_task
                 await self._safe_edit(
-                    m, self._s("upload_fail", error="curl not found")
+                    status_msg, self._s("upload_fail", error="curl not found")
                 )
 
         except Exception as e:
@@ -450,7 +439,7 @@ class Uploader(loader.Module):
             except Exception:
                 pass
             await self._safe_edit(
-                m, self._s("download_fail", error=_escape(str(e)[:300]))
+                status_msg, self._s("download_fail", error=_escape(str(e)[:300]))
             )
         finally:
             if tmp_path:
