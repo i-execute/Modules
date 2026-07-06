@@ -1,4 +1,4 @@
-__version__ = (2, 2, 0)
+__version__ = (2, 2, 1)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/MetaBanner.jpeg
 
@@ -59,10 +59,6 @@ class Deleter(loader.Module):
         ),
         "btn_enable_purger": "Enable Auto-Delete",
         "btn_stop_all": "Stop All Active",
-        "purger_confirm": (
-            "<b>Are you sure?</b>\n"
-            "<blockquote>This will delete all new messages in this chat automatically.</blockquote>"
-        ),
         "purger_activated": (
             "<b>Purger Mode Activated</b>\n"
             "<blockquote>All new messages in this chat will be deleted.</blockquote>"
@@ -139,10 +135,6 @@ class Deleter(loader.Module):
         ),
         "btn_enable_purger": "Включить авто-удаление",
         "btn_stop_all": "Остановить все активные",
-        "purger_confirm": (
-            "<b>Вы уверены?</b>\n"
-            "<blockquote>Все новые сообщения в этом чате будут автоматически удаляться.</blockquote>"
-        ),
         "purger_activated": (
             "<b>Режим Purger активирован</b>\n"
             "<blockquote>Все новые сообщения в этом чате будут удалены.</blockquote>"
@@ -281,15 +273,9 @@ class Deleter(loader.Module):
         await call.edit(
             self.strings["main_menu"],
             reply_markup=[
-                [
-                    {"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"},
-                ],
-                [
-                    {"text": self.strings["btn_purger"], "callback": self._cb_purger_menu, "style": "primary"},
-                ],
-                [
-                    {"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"},
-                ],
+                [{"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"}],
+                [{"text": self.strings["btn_purger"], "callback": self._cb_purger_menu, "style": "primary"}],
+                [{"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"}],
             ],
         )
 
@@ -306,47 +292,28 @@ class Deleter(loader.Module):
         await call.edit(
             self.strings["purger_menu"],
             reply_markup=[
-                [
-                    {"text": self.strings["btn_enable_purger"], "callback": self._cb_purger_confirm, "style": "success"},
-                ],
-                [
-                    {"text": self.strings["btn_stop_all"], "callback": self._cb_stop_all_purgers, "style": "danger"},
-                ],
-                [
-                    {"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"},
-                ],
-            ],
-        )
-
-    async def _cb_purger_confirm(self, call: InlineCall):
-        await call.edit(
-            self.strings["purger_confirm"],
-            reply_markup=[
-                [
-                    {"text": self.strings["btn_confirm"], "callback": self._cb_enable_purger, "style": "success"},
-                    {"text": self.strings["btn_cancel"], "callback": self._cb_purger_menu, "style": "danger"},
-                ],
+                [{"text": self.strings["btn_enable_purger"], "callback": self._cb_enable_purger, "style": "success"}],
+                [{"text": self.strings["btn_stop_all"], "callback": self._cb_stop_all_purgers, "style": "danger"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
             ],
         )
 
     async def _cb_enable_purger(self, call: InlineCall):
         chat_id = call.form["chat"]
-        
+
         if chat_id in self._purger_chats:
             await call.answer("Purger already active in this chat", show_alert=True)
             return
 
         self._purger_chats.add(chat_id)
-        
+
         task = asyncio.create_task(self._purger_worker(chat_id))
         self._purger_tasks[chat_id] = task
 
         await call.edit(
             self.strings["purger_activated"],
             reply_markup=[
-                [
-                    {"text": self.strings["btn_stop"], "callback": self._cb_stop_purger, "args": (chat_id,), "style": "danger"},
-                ],
+                [{"text": self.strings["btn_stop"], "callback": self._cb_stop_purger, "args": (chat_id,), "style": "danger"}],
             ],
         )
 
@@ -354,7 +321,7 @@ class Deleter(loader.Module):
         if chat_id in self._purger_tasks:
             self._purger_tasks[chat_id].cancel()
             del self._purger_tasks[chat_id]
-        
+
         if chat_id in self._purger_chats:
             self._purger_chats.remove(chat_id)
 
@@ -368,7 +335,7 @@ class Deleter(loader.Module):
     async def _cb_stop_all_purgers(self, call: InlineCall):
         for task in self._purger_tasks.values():
             task.cancel()
-        
+
         self._purger_tasks.clear()
         self._purger_chats.clear()
 
@@ -382,14 +349,14 @@ class Deleter(loader.Module):
     async def _purger_worker(self, chat_id: int):
         try:
             last_id = None
-            
+
             async for msg in self._client.iter_messages(chat_id, limit=1):
                 last_id = msg.id
                 break
 
             while chat_id in self._purger_chats:
                 await asyncio.sleep(2)
-                
+
                 try:
                     new_msgs = []
                     async for msg in self._client.iter_messages(chat_id, min_id=last_id or 0):
@@ -425,7 +392,7 @@ class Deleter(loader.Module):
 
     async def _cb_del_today_execute(self, call: InlineCall):
         chat_id = call.form["chat"]
-        
+
         offset = self.config["TIMEZONE_OFFSET"]
         tz = timezone(timedelta(hours=offset))
         now = datetime.now(tz)
@@ -441,7 +408,7 @@ class Deleter(loader.Module):
                 msg_local = msg.date.astimezone(tz)
                 if msg_local < midnight:
                     break
-                
+
                 ids.append(msg.id)
                 count += 1
 
@@ -449,7 +416,7 @@ class Deleter(loader.Module):
                     await call.edit(self.strings["del_today_progress"].format(count=count))
 
             if ids:
-                deleted, failed = await self._bulk_delete(self._client, chat_id, ids)
+                await self._bulk_delete(self._client, chat_id, ids)
 
             await call.edit(
                 self.strings["del_today_done"].format(count=count),
@@ -481,15 +448,9 @@ class Deleter(loader.Module):
                 text=self.strings["main_menu"],
                 message=message,
                 reply_markup=[
-                    [
-                        {"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"},
-                    ],
-                    [
-                        {"text": self.strings["btn_purger"], "callback": self._cb_purger_menu, "style": "primary"},
-                    ],
-                    [
-                        {"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"},
-                    ],
+                    [{"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"}],
+                    [{"text": self.strings["btn_purger"], "callback": self._cb_purger_menu, "style": "primary"}],
+                    [{"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"}],
                 ],
                 silent=True,
             )
@@ -520,20 +481,14 @@ class Deleter(loader.Module):
                     return
             except Exception:
                 pass
-            
+
             await self.inline.form(
                 text=self.strings["main_menu"],
                 message=message,
                 reply_markup=[
-                    [
-                        {"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"},
-                    ],
-                    [
-                        {"text": self.strings["btn_purger"], "callback": self._cb_purger_menu, "style": "primary"},
-                    ],
-                    [
-                        {"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"},
-                    ],
+                    [{"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"}],
+                    [{"text": self.strings["btn_purger"], "callback": self._cb_purger_menu, "style": "primary"}],
+                    [{"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"}],
                 ],
                 silent=True,
             )
@@ -584,8 +539,8 @@ class Deleter(loader.Module):
                 )
                 return
 
-            deleted, failed = await self._bulk_delete(client, chat_id, ids)
-            
+            await self._bulk_delete(client, chat_id, ids)
+
             await self._send_log(
                 self.strings["done_me"].format(chat=chat_name, count=total_count)
             )
@@ -611,17 +566,14 @@ class Deleter(loader.Module):
             count = len(ids_to_delete)
 
             try:
-                sayonara_msg = await client.send_file(
-                    chat_id,
-                    SAYONARA_URL,
-                )
+                sayonara_msg = await client.send_file(chat_id, SAYONARA_URL)
                 sayonara_msg_id = sayonara_msg.id
             except Exception as e:
                 logger.error(f"[Deleter] Failed to send Sayonara: {e}")
                 sayonara_msg_id = None
 
             if ids_to_delete:
-                deleted, failed = await self._bulk_delete(client, chat_id, ids_to_delete)
+                await self._bulk_delete(client, chat_id, ids_to_delete)
 
             await self._leave_chat(client, chat_id)
 
