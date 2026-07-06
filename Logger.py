@@ -1,4 +1,4 @@
-__version__ = (3, 2, 3)
+__version__ = (3, 2, 4)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Logger/MetaBanner.jpeg
 
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Logger/Greetings.jpeg"
 
+
 @loader.tds
 class Logger(loader.Module):
     """Command logger for userbot"""
@@ -30,32 +31,37 @@ class Logger(loader.Module):
             "Everything went to shit. Old group disappeared somewhere, who the fuck knows what happened</blockquote>"
         ),
         "reloaded": "<blockquote><b>Module successfully reloaded, everything works</b></blockquote>",
-        "username_row": "\n<pre>@{uname}</pre>\n",
-        "owner_attention": "<blockquote><b>{owner_link}, attention please</b></blockquote>\n",
+        "username_row": "@{uname}",
+        "owner_attention": "<blockquote><b><a href='tg://user?id={owner_id}'>{owner_name}</a>, attention please</b></blockquote>\n",
         "log_dm_user": (
             "<blockquote><b>DIRECT MESSAGE</b>\n"
             "<b>Command:</b> <code>{cmd}</code>\n"
-            "<b>From:</b> {from_name}</blockquote>{from_uname}"
-            "<blockquote><b>Chat:</b> {to_name}</blockquote>{to_uname}"
+            "<b>From:</b> {from_name}\n"
+            "{from_uname}"
+            "<b>Chat:</b> {to_name}\n"
+            "{to_uname}</blockquote>"
         ),
         "log_dm_bot": (
             "<blockquote><b>DIRECT MESSAGE (BOT)</b>\n"
             "<b>Command:</b> <code>{cmd}</code>\n"
-            "<b>From:</b> {from_name}</blockquote>{from_uname}"
-            "<blockquote><b>Bot:</b> {to_name}</blockquote>{to_uname}"
+            "<b>From:</b> {from_name}\n"
+            "{from_uname}"
+            "<b>Bot:</b> {to_name}\n"
+            "{to_uname}</blockquote>"
         ),
         "log_group": (
             "<blockquote><b>GROUP</b>\n"
             "<b>Command:</b> <code>{cmd}</code>\n"
-            "<b>From:</b> {from_name}</blockquote>{from_uname}"
-            "<blockquote><b>Group:</b></blockquote><blockquote> {chat_name} [</blockquote><blockquote><code>{chat_id}</code></blockquote><blockquote>]{chat_uname}</blockquote>"
-            "<blockquote><a href='{msg_link}'>Open message</a></blockquote>"
+            "<b>From:</b> {from_name}\n"
+            "{from_uname}"
+            "<b>Group:</b> {chat_name} [<code>{chat_id}</code>]{chat_uname}\n"
+            "<a href='{msg_link}'>Open message</a></blockquote>"
         ),
         "log_channel": (
             "<blockquote><b>CHANNEL</b>\n"
             "<b>Command:</b> <code>{cmd}</code>\n"
-            "<b>Channel:</b></blockquote><blockquote> {chat_name} [</blockquote><blockquote><code>{chat_id}</code></blockquote><blockquote>]{chat_uname}</blockquote>"
-            "<blockquote><a href='{msg_link}'>Open message</a></blockquote>"
+            "<b>Channel:</b> {chat_name} [<code>{chat_id}</code>]{chat_uname}\n"
+            "<a href='{msg_link}'>Open message</a></blockquote>"
         ),
     }
 
@@ -69,32 +75,37 @@ class Logger(loader.Module):
             "Всё наебнулось к хуям. Старая группа куда-то съебалась, хер знает че такое</blockquote>"
         ),
         "reloaded": "<blockquote><b>Модуль был успешно перезагружен, все воркает</b></blockquote>",
-        "username_row": "\n<pre>@{uname}</pre>\n",
-        "owner_attention": "<blockquote><b>{owner_link}, минуточку внимания</b></blockquote>\n",
+        "username_row": "@{uname}",
+        "owner_attention": "<blockquote><b><a href='tg://user?id={owner_id}'>{owner_name}</a>, минуточку внимания</b></blockquote>\n",
         "log_dm_user": (
             "<blockquote><b>DIRECT MESSAGE</b>\n"
             "<b>Команда:</b> <code>{cmd}</code>\n"
-            "<b>От:</b> {from_name}</blockquote>{from_uname}"
-            "<blockquote><b>Чат:</b> {to_name}</blockquote>{to_uname}"
+            "<b>От:</b> {from_name}\n"
+            "{from_uname}"
+            "<b>Чат:</b> {to_name}\n"
+            "{to_uname}</blockquote>"
         ),
         "log_dm_bot": (
             "<blockquote><b>DIRECT MESSAGE (BOT)</b>\n"
             "<b>Команда:</b> <code>{cmd}</code>\n"
-            "<b>От:</b> {from_name}</blockquote>{from_uname}"
-            "<blockquote><b>Бот:</b> {to_name}</blockquote>{to_uname}"
+            "<b>От:</b> {from_name}\n"
+            "{from_uname}"
+            "<b>Бот:</b> {to_name}\n"
+            "{to_uname}</blockquote>"
         ),
         "log_group": (
             "<blockquote><b>GROUP</b>\n"
             "<b>Команда:</b> <code>{cmd}</code>\n"
-            "<b>От:</b> {from_name}</blockquote>{from_uname}"
-            "<blockquote><b>Группа:</b></blockquote><blockquote> {chat_name} [</blockquote><blockquote><code>{chat_id}</code></blockquote><blockquote>]{chat_uname}</blockquote>"
-            "<blockquote><a href='{msg_link}'>Открыть сообщение</a></blockquote>"
+            "<b>От:</b> {from_name}\n"
+            "{from_uname}"
+            "<b>Группа:</b> {chat_name} [<code>{chat_id}</code>]{chat_uname}\n"
+            "<a href='{msg_link}'>Открыть сообщение</a></blockquote>"
         ),
         "log_channel": (
             "<blockquote><b>CHANNEL</b>\n"
             "<b>Команда:</b> <code>{cmd}</code>\n"
-            "<b>Канал:</b></blockquote><blockquote> {chat_name} [</blockquote><blockquote><code>{chat_id}</code></blockquote><blockquote>]{chat_uname}</blockquote>"
-            "<blockquote><a href='{msg_link}'>Открыть сообщение</a></blockquote>"
+            "<b>Канал:</b> {chat_name} [<code>{chat_id}</code>]{chat_uname}\n"
+            "<a href='{msg_link}'>Открыть сообщение</a></blockquote>"
         ),
     }
 
@@ -104,6 +115,7 @@ class Logger(loader.Module):
         self._asset_channel = None
         self._flood_lock = asyncio.Lock()
         self._owner_usernames = set()
+        self._greeting_sent = False
 
     def _escape(self, text):
         if not text:
@@ -146,9 +158,13 @@ class Logger(loader.Module):
         last = getattr(entity, "last_name", "") or ""
         return f"{first} {last}".strip() or "Unknown"
 
-    def _format_username_row(self, entity):
+    def _format_username_row(self, entity, is_owner=False):
         username = self._get_username(entity)
-        return self.strings["username_row"].format(uname=username) if username else "\n"
+        if not username:
+            return ""
+        if is_owner:
+            return f"<code>@{username}</code>\n"
+        return self.strings["username_row"].format(uname=username) + "\n"
 
     def _get_topic_id(self, message):
         reply_to = getattr(message, "reply_to", None)
@@ -201,10 +217,40 @@ class Logger(loader.Module):
                 raise
         return None
 
+    async def _send_greeting_with_preview(self, chat_id, text):
+        try:
+            msg = await self._send_with_flood_wait(
+                self.inline.bot.send_message,
+                chat_id,
+                text,
+                parse_mode="html",
+                message_thread_id=self._logger_topic.id,
+            )
+            if msg:
+                try:
+                    peer = await self.inline.bot.get_input_entity(chat_id)
+                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                    reply_markup = current_msg.reply_markup if current_msg else None
+                    msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
+                    await self.inline.bot(EditMessageRequest(
+                        peer=peer,
+                        id=msg.id,
+                        message=msg_text,
+                        media=InputMediaWebPage(url=GREETING_MEDIA_URL, optional=True, force_large_media=True),
+                        invert_media=True,
+                        reply_markup=reply_markup,
+                        entities=entities,
+                        no_webpage=False,
+                    ))
+                except Exception as e:
+                    logger.error(f"[Logger] Failed to add preview: {e}")
+        except Exception as e:
+            logger.error(f"[Logger] Failed to send greeting: {e}")
+
     async def client_ready(self):
         self._owner = await self._client.get_me()
         self._owner_usernames = set(self._get_all_usernames(self._owner))
-        
+
         self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
 
         if not self._asset_channel:
@@ -224,74 +270,44 @@ class Logger(loader.Module):
             logger.error(f"[Logger] Failed to create/get forum topic: {e}")
             return
 
-        try:
-            chat_id = int(f"-100{self._asset_channel}")
-            
-            msg = await self._send_with_flood_wait(
-                self.inline.bot.send_message,
-                chat_id,
-                self.strings["greeting_first"],
-                parse_mode="html",
-                message_thread_id=self._logger_topic.id,
-            )
-            
-            if msg:
-                try:
-                    peer = await self.inline.bot.get_input_entity(chat_id)
-                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
-                    reply_markup = current_msg.reply_markup if current_msg else None
-                    msg_text, entities = await self.inline.bot._parse_message_text(self.strings["greeting_first"], "html")
-                    
-                    await self.inline.bot(EditMessageRequest(
-                        peer=peer,
-                        id=msg.id,
-                        message=msg_text,
-                        media=InputMediaWebPage(url=GREETING_MEDIA_URL, optional=True, force_large_media=True),
-                        invert_media=True,
-                        reply_markup=reply_markup,
-                        entities=entities,
-                        no_webpage=False,
-                    ))
-                except Exception as e:
-                    logger.error(f"[Logger] Failed to add preview: {e}")
-        except Exception:
+        chat_id = int(f"-100{self._asset_channel}")
+
+        if self._greeting_sent:
             try:
-                chat_id = int(f"-100{self._asset_channel}")
-                
-                msg = await self._send_with_flood_wait(
+                await self._send_with_flood_wait(
                     self.inline.bot.send_message,
                     chat_id,
                     self.strings["reloaded"],
                     parse_mode="html",
                     message_thread_id=self._logger_topic.id,
                 )
-                
-                if msg:
-                    try:
-                        peer = await self.inline.bot.get_input_entity(chat_id)
-                        current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
-                        reply_markup = current_msg.reply_markup if current_msg else None
-                        msg_text, entities = await self.inline.bot._parse_message_text(self.strings["reloaded"], "html")
-                        
-                        await self.inline.bot(EditMessageRequest(
-                            peer=peer,
-                            id=msg.id,
-                            message=msg_text,
-                            media=InputMediaWebPage(url=GREETING_MEDIA_URL, optional=True, force_large_media=True),
-                            invert_media=True,
-                            reply_markup=reply_markup,
-                            entities=entities,
-                            no_webpage=False,
-                        ))
-                    except Exception as e:
-                        logger.error(f"[Logger] Failed to add preview: {e}")
             except Exception as e:
-                logger.error(f"[Logger] Failed to send greeting: {e}")
+                logger.error(f"[Logger] Failed to send reloaded message: {e}")
+            return
+
+        self._greeting_sent = True
+
+        greeting_key = f"logger_greeted_{self._asset_channel}_{self._logger_topic.id}"
+        already_greeted = self.get(greeting_key, False)
+
+        if already_greeted:
+            try:
+                await self._send_with_flood_wait(
+                    self.inline.bot.send_message,
+                    chat_id,
+                    self.strings["reloaded"],
+                    parse_mode="html",
+                    message_thread_id=self._logger_topic.id,
+                )
+            except Exception as e:
+                logger.error(f"[Logger] Failed to send reloaded message: {e}")
+        else:
+            self.set(greeting_key, True)
+            await self._send_greeting_with_preview(chat_id, self.strings["greeting_first"])
 
     async def _send_log(self, text: str):
         if not self._logger_topic or not self._asset_channel:
             return
-
         try:
             await self._send_with_flood_wait(
                 self.inline.bot.send_message,
@@ -320,22 +336,24 @@ class Logger(loader.Module):
 
             chat = await self._client.get_entity(message.peer_id)
 
+            is_channel = self._is_channel_post(message, sender)
+            is_owner = (not is_channel) and (sender.id == self._owner.id)
+
             sender_name = self._get_display_name(sender)
-            sender_uname = self._format_username_row(sender)
+            sender_uname = self._format_username_row(sender, is_owner=is_owner)
 
             chat_name = self._get_display_name(chat)
-            chat_uname = self._format_username_row(chat)
+            chat_username = self._get_username(chat)
+            chat_uname = f" @{chat_username}" if chat_username else ""
 
             cmd_text = self._escape(message.raw_text)
 
-            is_channel = self._is_channel_post(message, sender)
-
             owner_prefix = ""
-            if sender.id != self._owner.id and not is_channel:
+            if not is_owner and not is_channel:
                 owner_name = self._get_full_name(self._owner)
-                owner_link = self._get_user_link(self._owner.id, owner_name)
                 owner_prefix = self.strings["owner_attention"].format(
-                    owner_link=owner_link
+                    owner_id=self._owner.id,
+                    owner_name=self._escape(owner_name),
                 )
 
             if is_dm:
@@ -350,7 +368,7 @@ class Logger(loader.Module):
                     from_name=sender_name,
                     from_uname=sender_uname,
                     to_name=chat_name,
-                    to_uname=chat_uname,
+                    to_uname=self._format_username_row(chat),
                 )
             elif is_channel:
                 msg_link = self._build_message_link(chat, message)
