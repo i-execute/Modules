@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/AutoAvka/MetaBanner.jpeg
 
@@ -31,12 +31,29 @@ class AutoAvka(loader.Module):
 
     strings = {
         "name": "AutoAvka",
-        "help": "<b>AutoAvka Help:</b>\n<blockquote>.avka - Open control menu\n.avkashow - Download and show current avatars</blockquote>",
-        "config_missing": "<b>Error:</b> Please set ONLINE_AVKA_URL and OFFLINE_AVKA_URL in config",
-        "session_not_selected": "Error: No session selected",
-        "avatars_sent": "Current avatars:",
-        "no_avatars": "No avatars to show",
-        "menu_title": "AutoAvka Control",
+        "help": (
+            "<b>AutoAvka Help</b>\n"
+            "<blockquote><code>.avka</code> - Open control menu\n"
+            "<code>.avkashow</code> - Download and show current avatars</blockquote>"
+        ),
+        "config_missing": (
+            "<b>Error</b>\n"
+            "<blockquote>Please set ONLINE_AVKA_URL and OFFLINE_AVKA_URL in config</blockquote>"
+        ),
+        "session_not_selected": (
+            "<b>Error</b>\n"
+            "<blockquote>No session selected</blockquote>"
+        ),
+        "avatars_sent": "<b>Current avatars</b>",
+        "no_avatars": (
+            "<b>No avatars</b>\n"
+            "<blockquote>No avatars to show</blockquote>"
+        ),
+        "menu_title": (
+            "<b>AutoAvka Control</b>\n"
+            "<blockquote>{status}\n"
+            "{loop_status}</blockquote>"
+        ),
         "status_enabled": "Status: Enabled",
         "status_disabled": "Status: Disabled",
         "status_started": "Loop: Running",
@@ -45,31 +62,82 @@ class AutoAvka(loader.Module):
         "btn_toggle_off": "Enable",
         "btn_select": "Select Session",
         "btn_cancel": "Cancel",
-        "session_list_title": "chose session for target:",
+        "session_list_title": (
+            "<b>Select session for target</b>"
+        ),
         "btn_back": "Back",
         "btn_next": "Next",
         "btn_select_session": "Select",
-        "session_info_title": "<b>Session Info</b>\n<blockquote>{}</blockquote>",
-        "testflight_wait": "Testflight, please wait",
-        "testflight_success": "Testflight completed successfully",
-        "testflight_partial": "Testflight partial success\n{}",
-        "testflight_fail": "Testflight failed\n{}",
-        "monitor_started": "Monitor started",
-        "monitor_stopped": "Monitor stopped",
-        "avatar_switched": "Avatar switched to {}",
-        "error_download": "Error downloading image",
-        "error_upload": "Error uploading avatar",
-        "error_delete": "Error deleting avatar",
+        "session_info_title": (
+            "<b>Session Info</b>\n"
+            "<blockquote>{}</blockquote>"
+        ),
+        "testflight_wait": (
+            "<b>Testflight</b>\n"
+            "<blockquote>Please wait...</blockquote>"
+        ),
+        "testflight_success": (
+            "<b>Testflight</b>\n"
+            "<blockquote>Completed successfully</blockquote>"
+        ),
+        "testflight_partial": (
+            "<b>Testflight</b>\n"
+            "<blockquote>Partial success\n{}</blockquote>"
+        ),
+        "testflight_fail": (
+            "<b>Testflight</b>\n"
+            "<blockquote>Failed\n{}</blockquote>"
+        ),
+        "monitor_started": (
+            "<b>Monitor</b>\n"
+            "<blockquote>Started</blockquote>"
+        ),
+        "monitor_stopped": (
+            "<b>Monitor</b>\n"
+            "<blockquote>Stopped</blockquote>"
+        ),
+        "avatar_switched": (
+            "<b>Avatar</b>\n"
+            "<blockquote>Switched to {}</blockquote>"
+        ),
+        "error_download": (
+            "<b>Error</b>\n"
+            "<blockquote>Error downloading image</blockquote>"
+        ),
+        "error_upload": (
+            "<b>Error</b>\n"
+            "<blockquote>Error uploading avatar</blockquote>"
+        ),
+        "error_delete": (
+            "<b>Error</b>\n"
+            "<blockquote>Error deleting avatar</blockquote>"
+        ),
     }
 
     strings_ru = {
-        "name": "AutoAvka",
-        "help": "<b>AutoAvka использование:</b>\n<blockquote>.avka - Открыть меню управления\n.avkashow - Скачать и показать текущие аватарки</blockquote>",
-        "config_missing": "<b>Ошибка:</b> Укажите ONLINE_AVKA_URL и OFFLINE_AVKA_URL в конфиге",
-        "session_not_selected": "Ошибка: Сессия не выбрана",
-        "avatars_sent": "Текущие аватарки:",
-        "no_avatars": "Нет аватарок для показа",
-        "menu_title": "Управление AutoAvka",
+        "help": (
+            "<b>AutoAvka</b>\n"
+            "<blockquote><code>.avka</code> - Открыть меню управления\n"
+            "<code>.avkashow</code> - Скачать и показать текущие аватарки</blockquote>"
+        ),
+        "config_missing": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Укажите ONLINE_AVKA_URL и OFFLINE_AVKA_URL в конфиге</blockquote>"
+        ),
+        "session_not_selected": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Сессия не выбрана</blockquote>"
+        ),
+        "avatars_sent": "<b>Текущие аватарки</b>",
+        "no_avatars": (
+            "<b>Нет аватарок</b>\n"
+            "<blockquote>Нет аватарок для показа</blockquote>"
+        ),
+        "menu_title": (
+            "<b>Управление AutoAvka</b>\n"
+            "<blockquote>{status}\n"
+            "{loop_status}</blockquote>"
+        ),
         "status_enabled": "Статус: Включено",
         "status_disabled": "Статус: Выключено",
         "status_started": "Цикл: Запущен",
@@ -78,21 +146,56 @@ class AutoAvka(loader.Module):
         "btn_toggle_off": "Включить",
         "btn_select": "Выбрать сессию",
         "btn_cancel": "Отмена",
-        "session_list_title": "chose session for target:",
+        "session_list_title": (
+            "<b>Выберите сессию для цели</b>"
+        ),
         "btn_back": "Назад",
         "btn_next": "Далее",
         "btn_select_session": "Выбрать",
-        "session_info_title": "<b>Инфа о сессии</b>\n<blockquote>{}</blockquote>",
-        "testflight_wait": "Testflight, please wait",
-        "testflight_success": "Testflight завершен успешно",
-        "testflight_partial": "Testflight частично успешен\n{}",
-        "testflight_fail": "Testflight не удался\n{}",
-        "monitor_started": "Мониторинг запущен",
-        "monitor_stopped": "Мониторинг остановлен",
-        "avatar_switched": "Аватарка изменена на {}",
-        "error_download": "Ошибка загрузки изображения",
-        "error_upload": "Ошибка загрузки аватарки",
-        "error_delete": "Ошибка удаления аватарки",
+        "session_info_title": (
+            "<b>Инфа о сессии</b>\n"
+            "<blockquote>{}</blockquote>"
+        ),
+        "testflight_wait": (
+            "<b>Testflight</b>\n"
+            "<blockquote>Пожалуйста, подождите...</blockquote>"
+        ),
+        "testflight_success": (
+            "<b>Testflight</b>\n"
+            "<blockquote>Завершен успешно</blockquote>"
+        ),
+        "testflight_partial": (
+            "<b>Testflight</b>\n"
+            "<blockquote>Частично успешен\n{}</blockquote>"
+        ),
+        "testflight_fail": (
+            "<b>Testflight</b>\n"
+            "<blockquote>Не удался\n{}</blockquote>"
+        ),
+        "monitor_started": (
+            "<b>Мониторинг</b>\n"
+            "<blockquote>Запущен</blockquote>"
+        ),
+        "monitor_stopped": (
+            "<b>Мониторинг</b>\n"
+            "<blockquote>Остановлен</blockquote>"
+        ),
+        "avatar_switched": (
+            "<b>Аватарка</b>\n"
+            "<blockquote>Изменена на {}</blockquote>"
+        ),
+        "error_download": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Ошибка загрузки изображения</blockquote>"
+        ),
+        "error_upload": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Ошибка загрузки аватарки</blockquote>"
+        ),
+        "error_delete": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Ошибка удаления аватарки</blockquote>"
+        ),
     }
 
     def __init__(self):
@@ -352,7 +455,7 @@ class AutoAvka(loader.Module):
     async def _show_main_menu(self, call):
         status = self.strings("status_enabled") if self._get_enabled() else self.strings("status_disabled")
         loop_status = self.strings("status_started") if self._get_started() else self.strings("status_not_started")
-        text = f"{self.strings('menu_title')}\n\n{status}\n{loop_status}"
+        text = self.strings("menu_title").format(status=status, loop_status=loop_status)
         markup = []
         if self._get_started():
             toggle_text = self.strings("btn_toggle_on") if self._get_enabled() else self.strings("btn_toggle_off")
@@ -439,8 +542,8 @@ class AutoAvka(loader.Module):
         await self._testflight(call)
 
     @loader.command(
-        ru_doc="Открыть меню управления", 
-        en_doc="Open control menu", 
+        ru_doc="Открыть меню управления",
+        en_doc="Open control menu",
     )
     async def avka(self, message):
         """Open control menu"""
@@ -450,7 +553,7 @@ class AutoAvka(loader.Module):
 
         status = self.strings("status_enabled") if self._get_enabled() else self.strings("status_disabled")
         loop_status = self.strings("status_started") if self._get_started() else self.strings("status_not_started")
-        text = f"{self.strings('menu_title')}\n\n{status}\n{loop_status}"
+        text = self.strings("menu_title").format(status=status, loop_status=loop_status)
         markup = []
         if self._get_started():
             toggle_text = self.strings("btn_toggle_on") if self._get_enabled() else self.strings("btn_toggle_off")
@@ -461,8 +564,8 @@ class AutoAvka(loader.Module):
         await self.inline.form(text=text, message=message, reply_markup=markup, silent=True)
 
     @loader.command(
-        ru_doc="Скачать и показать аватарки", 
-        en_doc="Download and show current avatars", 
+        ru_doc="Скачать и показать аватарки",
+        en_doc="Download and show current avatars",
     )
     async def avkashow(self, message):
         """Download and show current avatars"""
