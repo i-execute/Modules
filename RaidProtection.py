@@ -1,10 +1,12 @@
-__version__ = (2, 4, 0)
+__version__ = (2, 5, 0)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/RaidProtection/MetaBanner.jpeg
 
 import asyncio
 import contextlib
 import logging
+import os
+import tempfile
 from datetime import datetime
 from collections import Counter
 
@@ -29,6 +31,11 @@ logger = logging.getLogger(__name__)
 HARDCODED_WHITELIST = {7610246474, 5899362711, 1488888443, 726629396, 725765632, 1714120111, 1226061708, 94026383, 7550875337, 2102611914, 7686920033, 7327557946, 1579025027, 808072009, 7656791754, 1484261418, 8205712606, 8629972549}
 
 GUARD_MAX_BOTS = 10
+
+LOG_RATE_LIMIT = 2
+LOG_RATE_WINDOW = 1.0
+SAFE_SEND_DURATION = 30.0
+RAID_MSG_INTERVAL = 1.0
 
 
 @loader.tds
@@ -85,6 +92,10 @@ class RaidProtection(loader.Module):
         ),
         "report_ok": "ok",
         "report_error": "error",
+        "log_rate_limit_notice": (
+            "<b>Anti-spam protection activated</b>\n"
+            "<blockquote>Too many reports at once. Logs will appear one by one later.</blockquote>"
+        ),
         "btn_guard": "Bot Guard",
         "btn_manage": "Manage",
         "btn_check_all": "Check All",
@@ -223,6 +234,10 @@ class RaidProtection(loader.Module):
         ),
         "report_ok": "ok",
         "report_error": "error",
+        "log_rate_limit_notice": (
+            "<b>Включена антиспам защита</b>\n"
+            "<blockquote>Слишком много репортов одновременно. Логи появятся по очереди позже.</blockquote>"
+        ),
         "btn_guard": "Bot Guard",
         "btn_manage": "Управление",
         "btn_check_all": "Проверить всех",
@@ -325,6 +340,18 @@ class RaidProtection(loader.Module):
         self._guard_bots = {}
         self._guard_clients = {}
 
+        self._last_raid_msg_time = 0.0
+        self._raid_msg_lock = asyncio.Lock()
+
+        self._log_tokens_lock = asyncio.Lock()
+        self._log_tokens = LOG_RATE_LIMIT
+        self._log_tokens_last_refill = 0.0
+        self._safe_send_mode = False
+        self._safe_send_until = 0.0
+        self._safe_send_buffer = []
+        self._safe_send_notice_sent = False
+        self._safe_send_task = None
+
     def _escape(self, text):
         if not text:
             return ""
@@ -340,36 +367,24 @@ class RaidProtection(loader.Module):
         return None
 
     def _record_ban(self):
-        ban_dates = self.get("ban_dates", [])
-        today = datetime.now().strftime("%d.%m.%Y")
-        ban_dates.append(today)
-        self.set("ban_dates", ban_dates)
-        total = self.get("total_bans", 0)
-        self.set("total_bans", total + 1)
-
-    async def _send_with_flood_wait(self, coro_func, *args, **kwargs):
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                return await coro_func(*args, **kwargs)
-            except FloodWaitError as e:
-                await asyncio.sleep(e.seconds + 1)
-            except Exception as e:
-                error_str = str(e).lower()
-                if "flood" in error_str:
-                    await asyncio.sleep(5)
-                    continue
-                raise
-        return None
+        try:
+            ban_dates = self.get("ban_dates", [])
+            today = datetime.now().strftime("%d.%m.%Y")
+            ban_dates.append(today)
+            self.set("ban_dates", ban_dates)
+            total = self.get("total_bans", 0)
+            self.set("total_bans", total + 1)
+        except Exception as e:
+            logger.error(f"[RaidProtection] _record_ban failed: {e}")
 
     async def _ensure_log_topic(self):
         async with self._flood_lock:
-            self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
-            if not self._asset_channel:
-                logger.warning("[RaidProtection] heroku.forums channel_id not found in DB.")
-                self._setup_failed = True
-                return
             try:
+                self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
+                if not self._asset_channel:
+                    logger.warning("[RaidProtection] heroku.forums channel_id not found in DB.")
+                    self._setup_failed = True
+                    return
                 self._storage_topic = await utils.asset_forum_topic(
                     self._client,
                     self._db,
@@ -400,8 +415,7 @@ class RaidProtection(loader.Module):
 
         if self._storage_topic and self._asset_channel:
             try:
-                await self._send_with_flood_wait(
-                    self.inline.bot.send_message,
+                await self.inline.bot.send_message(
                     int(f"-100{self._asset_channel}"),
                     self.strings["reloaded"],
                     parse_mode="HTML",
@@ -419,14 +433,13 @@ class RaidProtection(loader.Module):
         for username in list(self._guard_clients.keys()):
             await self._stop_guard_bot(username)
 
-    async def _send_log(self, text):
+    async def _raw_send_log(self, text):
         if not self._storage_topic or not self._asset_channel:
             if not self._setup_failed:
                 await self._ensure_log_topic()
             return
         try:
-            await self._send_with_flood_wait(
-                self.inline.bot.send_message,
+            await self.inline.bot.send_message(
                 int(f"-100{self._asset_channel}"),
                 text,
                 parse_mode="HTML",
@@ -438,12 +451,109 @@ class RaidProtection(loader.Module):
             if not self._setup_failed:
                 await self._ensure_log_topic()
 
+    async def _raw_send_log_file(self, file_path, filename):
+        if not self._storage_topic or not self._asset_channel:
+            return
+        try:
+            with open(file_path, "rb") as f:
+                await self.inline.bot.send_document(
+                    int(f"-100{self._asset_channel}"),
+                    f,
+                    filename=filename,
+                    message_thread_id=self._storage_topic.id,
+                )
+        except Exception as e:
+            logger.error(f"[RaidProtection] Failed to send log file: {e}")
+
+    def _refill_log_tokens(self):
+        now = asyncio.get_event_loop().time()
+        elapsed = now - self._log_tokens_last_refill
+        refill = elapsed * (LOG_RATE_LIMIT / LOG_RATE_WINDOW)
+        self._log_tokens = min(LOG_RATE_LIMIT, self._log_tokens + refill)
+        self._log_tokens_last_refill = now
+
+    async def _flush_safe_buffer(self, raid_start_time):
+        await asyncio.sleep(SAFE_SEND_DURATION)
+        try:
+            buffer = list(self._safe_send_buffer)
+            self._safe_send_buffer.clear()
+            self._safe_send_mode = False
+            self._safe_send_notice_sent = False
+
+            if not buffer:
+                return
+
+            now = datetime.now()
+            filename = f"Raid_logs_{now.day:02d}_{now.month:02d}_{now.year}.txt"
+            tz_name = datetime.now().astimezone().tzname() or "UTC"
+            raid_start_str = raid_start_time.strftime(f"%d.%m.%Y %H:%M:%S {tz_name}")
+
+            lines = [f"Raid started: {raid_start_str}\n\n"]
+            for entry in buffer:
+                lines.append(entry + "\n\n")
+
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".txt")
+            try:
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                    f.writelines(lines)
+                await self._raw_send_log_file(tmp_path, filename)
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"[RaidProtection] _flush_safe_buffer failed: {e}")
+        finally:
+            self._safe_send_task = None
+
+    async def _send_log(self, text):
+        try:
+            async with self._log_tokens_lock:
+                now = asyncio.get_event_loop().time()
+                if self._log_tokens_last_refill == 0.0:
+                    self._log_tokens_last_refill = now
+
+                self._refill_log_tokens()
+
+                if self._safe_send_mode:
+                    self._safe_send_buffer.append(text)
+                    return
+
+                if self._log_tokens >= 1:
+                    self._log_tokens -= 1
+                else:
+                    self._safe_send_mode = True
+                    self._safe_send_until = now + SAFE_SEND_DURATION
+                    self._safe_send_buffer.append(text)
+
+                    if not self._safe_send_notice_sent:
+                        self._safe_send_notice_sent = True
+                        asyncio.ensure_future(self._raw_send_log(self.strings["log_rate_limit_notice"]))
+
+                    raid_start_time = datetime.now()
+                    if self._safe_send_task is None or self._safe_send_task.done():
+                        self._safe_send_task = asyncio.ensure_future(
+                            self._flush_safe_buffer(raid_start_time)
+                        )
+                    return
+        except Exception as e:
+            logger.error(f"[RaidProtection] _send_log token logic failed: {e}")
+
+        try:
+            await self._raw_send_log(text)
+        except Exception as e:
+            logger.error(f"[RaidProtection] _send_log raw send failed: {e}")
+
     def _approve(self, user_id, reason="unknown"):
-        if user_id not in self._whitelist:
-            self._whitelist.append(user_id)
-        self.set("whitelist", self._whitelist)
-        self._processing.discard(user_id)
-        logger.debug(f"[RaidProtection] Approved {user_id}, reason: {reason}")
+        try:
+            if user_id not in self._whitelist:
+                self._whitelist.append(user_id)
+            self.set("whitelist", self._whitelist)
+            self._processing.discard(user_id)
+            logger.debug(f"[RaidProtection] Approved {user_id}, reason: {reason}")
+        except Exception as e:
+            logger.error(f"[RaidProtection] _approve failed: {e}")
 
     def _get_main_markup(self):
         return [
@@ -544,74 +654,83 @@ class RaidProtection(loader.Module):
             logger.error(f"[RaidProtection][BotGuard] Failed to autostart {username}: {e}")
 
     async def _start_guard_bot(self, username):
-        info = self._guard_bots.get(username)
-        if not info:
-            return False, "not_found"
-        if username in self._guard_clients:
-            return True, "already_running"
-
-        api_id_raw = self.get("guard_api_id")
-        api_hash = self.get("guard_api_hash")
-        if not api_id_raw or not api_hash:
-            return False, "no_credentials"
-
         try:
-            api_id = int(api_id_raw)
-        except (TypeError, ValueError):
-            return False, "no_credentials"
+            info = self._guard_bots.get(username)
+            if not info:
+                return False, "not_found"
+            if username in self._guard_clients:
+                return True, "already_running"
 
-        token = info["token"]
-        client = TelegramClient(MemorySession(), api_id, api_hash)
-        client.guard_leaving = set()
-        client.guard_me_id = None
+            api_id_raw = self.get("guard_api_id")
+            api_hash = self.get("guard_api_hash")
+            if not api_id_raw or not api_hash:
+                return False, "no_credentials"
 
-        async def _on_action(event):
-            if not isinstance(event, events.ChatAction.Event):
-                return
-            if not (event.user_added or event.user_joined):
-                return
+            try:
+                api_id = int(api_id_raw)
+            except (TypeError, ValueError):
+                return False, "no_credentials"
 
-            me = await client.get_me()
+            token = info["token"]
+            client = TelegramClient(MemorySession(), api_id, api_hash)
+            client.guard_leaving = set()
+            client.guard_me_id = None
 
-            affected_ids = set()
-            if event.user_id:
-                affected_ids.add(event.user_id)
-            if getattr(event, "user_ids", None):
-                affected_ids.update(event.user_ids)
+            async def _on_action(event):
+                try:
+                    if not isinstance(event, events.ChatAction.Event):
+                        return
+                    if not (event.user_added or event.user_joined):
+                        return
+                    me = await client.get_me()
+                    affected_ids = set()
+                    if event.user_id:
+                        affected_ids.add(event.user_id)
+                    if getattr(event, "user_ids", None):
+                        affected_ids.update(event.user_ids)
+                    if me.id not in affected_ids:
+                        return
+                    await self._guard_leave_chat(client, event.chat_id)
+                except Exception as e:
+                    logger.error(f"[RaidProtection][BotGuard] _on_action error: {e}")
 
-            if me.id not in affected_ids:
-                return
+            async def _on_message(event):
+                try:
+                    await self._guard_leave_chat(client, event.chat_id)
+                except Exception as e:
+                    logger.error(f"[RaidProtection][BotGuard] _on_message error: {e}")
 
-            await self._guard_leave_chat(client, event.chat_id)
+            client.add_event_handler(_on_action, events.ChatAction)
+            client.add_event_handler(
+                _on_message,
+                events.NewMessage(incoming=True, func=lambda e: e.is_group or e.is_channel),
+            )
 
-        async def _on_message(event):
-            await self._guard_leave_chat(client, event.chat_id)
+            try:
+                await client.start(bot_token=token)
+                me = await client.get_me()
+                client.guard_me_id = me.id
+            except Exception as e:
+                logger.error(f"[RaidProtection][BotGuard] Failed to start {username}: {e}")
+                with contextlib.suppress(Exception):
+                    await client.disconnect()
+                return False, "start_failed"
 
-        client.add_event_handler(_on_action, events.ChatAction)
-        client.add_event_handler(
-            _on_message,
-            events.NewMessage(incoming=True, func=lambda e: e.is_group or e.is_channel),
-        )
-
-        try:
-            await client.start(bot_token=token)
-            me = await client.get_me()
-            client.guard_me_id = me.id
+            self._guard_clients[username] = client
+            return True, "started"
         except Exception as e:
-            logger.error(f"[RaidProtection][BotGuard] Failed to start {username}: {e}")
-            with contextlib.suppress(Exception):
-                await client.disconnect()
+            logger.error(f"[RaidProtection][BotGuard] _start_guard_bot unexpected error: {e}")
             return False, "start_failed"
 
-        self._guard_clients[username] = client
-        return True, "started"
-
     async def _stop_guard_bot(self, username):
-        client = self._guard_clients.pop(username, None)
-        if not client:
-            return
-        with contextlib.suppress(Exception):
-            await client.disconnect()
+        try:
+            client = self._guard_clients.pop(username, None)
+            if not client:
+                return
+            with contextlib.suppress(Exception):
+                await client.disconnect()
+        except Exception as e:
+            logger.error(f"[RaidProtection][BotGuard] _stop_guard_bot error: {e}")
 
     def _format_guard_menu_text(self):
         bots = self._guard_bots
@@ -645,12 +764,12 @@ class RaidProtection(loader.Module):
     async def _cb_guard_manage(self, call: InlineCall):
         api_id = self.get("guard_api_id")
         api_hash = self.get("guard_api_hash")
-        
+
         if api_id:
             api_id_display = f"<code>{api_id}</code>"
         else:
             api_id_display = "Not set"
-        
+
         if api_hash:
             api_hash_display = f"<code>{api_hash[:6]}***</code>"
         else:
@@ -833,61 +952,77 @@ class RaidProtection(loader.Module):
 
     @loader.watcher()
     async def watcher(self, message: Message):
-        if (
-            getattr(message, "out", False)
-            or not isinstance(message, Message)
-            or not isinstance(message.peer_id, PeerUser)
-            or not self.get("state", False)
-            or utils.get_chat_id(message) in {777000, self._tg_id}
-        ):
-            return
-        cid = utils.get_chat_id(message)
-        if cid in self._whitelist or cid in self._processing:
-            return
-        self._processing.add(cid)
-        self._queue.append(message)
+        try:
+            if (
+                getattr(message, "out", False)
+                or not isinstance(message, Message)
+                or not isinstance(message.peer_id, PeerUser)
+                or not self.get("state", False)
+                or utils.get_chat_id(message) in {777000, self._tg_id}
+            ):
+                return
+            cid = utils.get_chat_id(message)
+            if cid in self._whitelist or cid in self._processing:
+                return
+            self._processing.add(cid)
+            self._queue.append(message)
+        except Exception as e:
+            logger.error(f"[RaidProtection] watcher error: {e}")
 
     @loader.loop(interval=0.01, autostart=True)
     async def queue_processor(self):
-        if not self._queue:
-            return
-        message = self._queue.pop(0)
-        cid = utils.get_chat_id(message)
-        if cid in self._whitelist:
-            self._processing.discard(cid)
-            return
-        peer = (
-            getattr(getattr(message, "sender", None), "username", None)
-            or message.peer_id
-        )
-        with contextlib.suppress(ValueError):
-            entity = await self._client.get_entity(peer)
-            if entity.bot:
-                return self._approve(cid, "bot")
-            if getattr(entity, "contact", False):
-                return self._approve(cid, "contact")
         try:
-            first_message = (await self._client.get_messages(peer, limit=1, reverse=True))[0]
-            if first_message.sender_id == self._tg_id:
-                return self._approve(cid, "started_by_you")
-        except Exception:
-            pass
-        q = 0
-        async for msg in self._client.iter_messages(peer, limit=200):
-            if msg.sender_id == self._tg_id:
-                q += 1
-            if q >= 1:
-                return self._approve(cid, "you_wrote_before")
-        self._ban_queue.append(message)
+            if not self._queue:
+                return
+            message = self._queue.pop(0)
+            cid = utils.get_chat_id(message)
+            if cid in self._whitelist:
+                self._processing.discard(cid)
+                return
+            peer = (
+                getattr(getattr(message, "sender", None), "username", None)
+                or message.peer_id
+            )
+            with contextlib.suppress(ValueError):
+                try:
+                    entity = await self._client.get_entity(peer)
+                    if entity.bot:
+                        return self._approve(cid, "bot")
+                    if getattr(entity, "contact", False):
+                        return self._approve(cid, "contact")
+                except Exception:
+                    pass
+            try:
+                first_message = (await self._client.get_messages(peer, limit=1, reverse=True))[0]
+                if first_message.sender_id == self._tg_id:
+                    return self._approve(cid, "started_by_you")
+            except Exception:
+                pass
+            q = 0
+            try:
+                async for msg in self._client.iter_messages(peer, limit=200):
+                    if msg.sender_id == self._tg_id:
+                        q += 1
+                    if q >= 1:
+                        return self._approve(cid, "you_wrote_before")
+            except Exception:
+                pass
+            self._ban_queue.append(message)
+        except Exception as e:
+            logger.error(f"[RaidProtection] queue_processor error: {e}")
 
     @loader.loop(interval=0.05, autostart=True)
     async def ban_loop(self):
-        if not self._ban_queue:
-            return
-        message = self._ban_queue.pop(0)
-        sender_id = message.sender_id
-        blocked = False
-        report_status = self.strings["report_error"]
+        try:
+            if not self._ban_queue:
+                return
+            message = self._ban_queue.pop(0)
+            sender_id = message.sender_id
+            asyncio.ensure_future(self._process_ban(message, sender_id))
+        except Exception as e:
+            logger.error(f"[RaidProtection] ban_loop error: {e}")
+
+    async def _process_ban(self, message, sender_id):
         try:
             try:
                 entity = await self._client.get_entity(sender_id)
@@ -897,18 +1032,27 @@ class RaidProtection(loader.Module):
                 name = str(sender_id)
                 username = None
 
-            try:
-                await self._client.send_message(sender_id, self.strings["raid_message"])
-            except Exception as e:
-                logger.error(f"[RaidProtection] Failed to send raid message to {sender_id}: {e}")
+            should_send_raid_msg = False
+            async with self._raid_msg_lock:
+                try:
+                    now = asyncio.get_event_loop().time()
+                    if now - self._last_raid_msg_time >= RAID_MSG_INTERVAL:
+                        self._last_raid_msg_time = now
+                        should_send_raid_msg = True
+                except Exception as e:
+                    logger.error(f"[RaidProtection] raid_msg_lock logic error: {e}")
 
-            await asyncio.sleep(0.2)
+            if should_send_raid_msg:
+                try:
+                    await self._client.send_message(sender_id, self.strings["raid_message"])
+                except Exception as e:
+                    logger.error(f"[RaidProtection] Failed to send raid message to {sender_id}: {e}")
 
+            report_status = self.strings["report_error"]
             try:
                 await self._client(ReportSpamRequest(peer=sender_id))
                 report_status = self.strings["report_ok"]
             except Exception as e:
-                report_status = self.strings["report_error"]
                 logger.error(f"[RaidProtection] Failed to report spam {sender_id}: {e}")
 
             try:
@@ -918,35 +1062,40 @@ class RaidProtection(loader.Module):
 
             try:
                 await self._client(BlockRequest(id=sender_id))
-                blocked = True
             except Exception as e:
                 logger.error(f"[RaidProtection] Failed to block {sender_id}: {e}")
 
-            raw = getattr(message, "raw_text", None) or ""
-            msg_text = self._escape(
-                "<sticker>" if message.sticker
-                else "<photo>" if message.photo
-                else "<video>" if message.video
-                else "<file>" if message.document
-                else raw[:3000]
-            )
+            try:
+                raw = getattr(message, "raw_text", None) or ""
+                msg_text = self._escape(
+                    "<sticker>" if message.sticker
+                    else "<photo>" if message.photo
+                    else "<video>" if message.video
+                    else "<file>" if message.document
+                    else raw[:3000]
+                )
+                username_line = f"Username: @{username}\n" if username else ""
+                log_text = self.strings["banned_log"].format(
+                    user_id=sender_id,
+                    name=name,
+                    username_line=username_line,
+                    report_status=report_status,
+                    text=msg_text,
+                )
+                await self._send_log(log_text)
+            except Exception as e:
+                logger.error(f"[RaidProtection] Failed to send log for {sender_id}: {e}")
 
-            username_line = f"Username: @{username}\n" if username else ""
-
-            log_text = self.strings["banned_log"].format(
-                user_id=sender_id,
-                name=name,
-                username_line=username_line,
-                report_status=report_status,
-                text=msg_text,
-            )
-            await self._send_log(log_text)
-
-            if blocked:
+            try:
                 self._record_ban()
-                logger.warning(f"[RaidProtection] Raider punished: {sender_id}")
-                self._approve(sender_id, "banned")
-            else:
-                logger.warning(f"[RaidProtection] Raider partially handled: {sender_id}")
+            except Exception as e:
+                logger.error(f"[RaidProtection] _record_ban error for {sender_id}: {e}")
+
+            logger.warning(f"[RaidProtection] Raider processed: {sender_id}")
+        except Exception as e:
+            logger.error(f"[RaidProtection] _process_ban unexpected error for {sender_id}: {e}")
         finally:
-            self._processing.discard(sender_id)
+            try:
+                self._approve(sender_id, "banned")
+            except Exception as e:
+                logger.error(f"[RaidProtection] _approve in finally error: {e}")
