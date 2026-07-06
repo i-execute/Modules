@@ -1,4 +1,4 @@
-__version__ = (3, 2, 5)
+__version__ = (3, 2, 6)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Logger/MetaBanner.jpeg
 
@@ -204,6 +204,41 @@ class Logger(loader.Module):
                 raise
         return None
 
+    async def _send_with_preview(self, chat_id, text):
+        try:
+            msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
+            msg = await self._send_with_flood_wait(
+                self.inline.bot.send_message,
+                chat_id,
+                msg_text,
+                parse_mode=None,
+                entities=entities,
+                message_thread_id=self._logger_topic.id,
+            )
+            if msg:
+                try:
+                    peer = await self.inline.bot.get_input_entity(chat_id)
+                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                    reply_markup = current_msg.reply_markup if current_msg else None
+                    await self.inline.bot(EditMessageRequest(
+                        peer=peer,
+                        id=msg.id,
+                        message=msg_text,
+                        media=InputMediaWebPage(
+                            url=GREETING_MEDIA_URL,
+                            optional=True,
+                            force_large_media=True,
+                        ),
+                        invert_media=True,
+                        reply_markup=reply_markup,
+                        entities=entities,
+                        no_webpage=False,
+                    ))
+                except Exception as e:
+                    logger.error(f"[Logger] Failed to add preview: {e}")
+        except Exception as e:
+            logger.error(f"[Logger] Failed to send message with preview: {e}")
+
     async def client_ready(self):
         self._owner = await self._client.get_me()
         self._owner_usernames = set(self._get_all_usernames(self._owner))
@@ -227,58 +262,15 @@ class Logger(loader.Module):
             logger.error(f"[Logger] Failed to create/get forum topic: {e}")
             return
 
+        chat_id = int(f"-100{self._asset_channel}")
         greeting_key = f"logger_greeted_{self._asset_channel}_{self._logger_topic.id}"
         already_greeted = self.get(greeting_key, False)
-        chat_id = int(f"-100{self._asset_channel}")
 
         if already_greeted:
-            try:
-                await self._send_with_flood_wait(
-                    self.inline.bot.send_message,
-                    chat_id,
-                    self.strings["reloaded"],
-                    parse_mode="html",
-                    message_thread_id=self._logger_topic.id,
-                )
-            except Exception as e:
-                logger.error(f"[Logger] Failed to send reloaded message: {e}")
+            await self._send_with_preview(chat_id, self.strings["reloaded"])
         else:
             self.set(greeting_key, True)
-            try:
-                msg_text, entities = await self.inline.bot._parse_message_text(
-                    self.strings["greeting_first"], "html"
-                )
-                msg = await self._send_with_flood_wait(
-                    self.inline.bot.send_message,
-                    chat_id,
-                    msg_text,
-                    parse_mode=None,
-                    entities=entities,
-                    message_thread_id=self._logger_topic.id,
-                )
-                if msg:
-                    try:
-                        peer = await self.inline.bot.get_input_entity(chat_id)
-                        current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
-                        reply_markup = current_msg.reply_markup if current_msg else None
-                        await self.inline.bot(EditMessageRequest(
-                            peer=peer,
-                            id=msg.id,
-                            message=msg_text,
-                            media=InputMediaWebPage(
-                                url=GREETING_MEDIA_URL,
-                                optional=True,
-                                force_large_media=True,
-                            ),
-                            invert_media=True,
-                            reply_markup=reply_markup,
-                            entities=entities,
-                            no_webpage=False,
-                        ))
-                    except Exception as e:
-                        logger.error(f"[Logger] Failed to add preview: {e}")
-            except Exception as e:
-                logger.error(f"[Logger] Failed to send greeting: {e}")
+            await self._send_with_preview(chat_id, self.strings["greeting_first"])
 
     async def _send_log(self, text: str):
         if not self._logger_topic or not self._asset_channel:
