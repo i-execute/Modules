@@ -157,6 +157,11 @@ class Stickerclone(loader.Module):
             "<b>Error</b>\n"
             "<blockquote>{error}</blockquote>"
         ),
+        "tgs_unsupported": (
+            "<b>Unsupported Pack</b>\n"
+            "<blockquote>This pack contains .tgs stickers.\n"
+            "This module does not support .tgs sticker packs.</blockquote>"
+        ),
         "status_set": "Set",
         "status_not_set": "Not set",
         "checking": "Checking...",
@@ -261,6 +266,11 @@ class Stickerclone(loader.Module):
             "<b>Ошибка</b>\n"
             "<blockquote>{error}</blockquote>"
         ),
+        "tgs_unsupported": (
+            "<b>Пак не поддерживается</b>\n"
+            "<blockquote>Этот пак содержит .tgs стикеры.\n"
+            "Модуль не работает с такими наборами стикеров.</blockquote>"
+        ),
         "status_set": "Задано",
         "status_not_set": "Не задано",
         "checking": "Проверяем...",
@@ -318,7 +328,6 @@ class Stickerclone(loader.Module):
         import subprocess
         ext_map = {
             "video/webm": ".webm",
-            "application/x-tgsticker": ".tgs",
             "image/gif": ".gif",
             "video/mp4": ".mp4",
         }
@@ -421,13 +430,6 @@ class Stickerclone(loader.Module):
                     return uploaded, True
                 return None, False
 
-            if mime == "application/x-tgsticker":
-                data = await self._to_webm(raw, mime, 512)
-                if data:
-                    uploaded = await self._upload_doc(data, "s.webm", True, 512)
-                    return uploaded, True
-                return None, False
-
             if mime in ("image/gif", "video/mp4"):
                 data = await self._to_webm(raw, mime, 512)
                 if data:
@@ -523,6 +525,13 @@ class Stickerclone(loader.Module):
             )
             return
 
+        if any(doc.mime_type == "application/x-tgsticker" for doc in result.documents):
+            await call.edit(
+                self.strings["tgs_unsupported"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
+            )
+            return
+
         self._state["source_link"] = link
         self._state["source_short"] = short_name
         self._state["source_documents"] = result.documents
@@ -598,7 +607,7 @@ class Stickerclone(loader.Module):
 
         from telethon.tl.functions.stickers import CreateStickerSetRequest, AddStickerToSetRequest
         from telethon.tl.functions.messages import UninstallStickerSetRequest
-        from telethon.tl.types import InputStickerSetShortName, InputStickerSetItem
+        from telethon.tl.types import InputStickerSetShortName, InputStickerSetItem, InputUserSelf
         from telethon.errors.rpcerrorlist import PackShortNameOccupiedError
 
         documents = self._state["source_documents"]
@@ -630,11 +639,10 @@ class Stickerclone(loader.Module):
             try:
                 if not pack_created:
                     await self._client(CreateStickerSetRequest(
-                        user_id="me",
+                        user_id=InputUserSelf(),
                         title=pack_title,
                         short_name=short_name,
                         stickers=[InputStickerSetItem(document=input_doc, emoji=emoji)],
-                        animated=animated,
                     ))
                     pack_created = True
                     copied += 1
@@ -697,7 +705,7 @@ class Stickerclone(loader.Module):
         ru_doc="Открыть меню клонирования стикерпака",
         en_doc="Open sticker pack cloner menu",
     )
-    async def stickerclone(self, message):
+    async def sclone(self, message):
         """Open sticker pack cloner menu"""
         await self.inline.form(
             text=self._format_state_menu(),
