@@ -1,8 +1,9 @@
-__version__ = (1, 0, 0)
-# meta developer: I_execute.t.me forked from @elisartix
+__version__ = (1, 1, 0)
+# meta developer: I_execute.t.me froked from @elisartix
 
 import io
 import os
+import re
 import random
 import string
 import logging
@@ -13,6 +14,8 @@ from .. import loader, utils
 from ..inline.types import InlineCall
 
 DEPS = ["Pillow"]
+
+ADDSTICKERS_RE = re.compile(r'^https://t\.me/addstickers/([A-Za-z0-9_]+)$')
 
 
 def _install_deps():
@@ -49,70 +52,75 @@ def _install_deps():
 
 logger = logging.getLogger(__name__)
 
-_TR = {
-    'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
-    'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'j', 'к': 'k', 'л': 'l', 'м': 'm',
-    'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
-    'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
-    'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
-}
-
-
-def _translit(text: str) -> str:
-    out = []
-    for ch in text.lower():
-        if ch in _TR:
-            out.append(_TR[ch])
-        elif ch.isascii() and (ch.isalnum() or ch == '_'):
-            out.append(ch)
-        else:
-            out.append('_')
-    return "".join(out).strip("_") or "pack"
-
 
 @loader.tds
-class StickerClone(loader.Module):
+class Stickerclone(loader.Module):
     """Sticker pack cloner"""
 
     strings = {
         "name": "Stickerclone",
-        "main_menu": (
+        "state_menu": (
             "<b>Stickerclone</b>\n"
-            "<blockquote>Copy any sticker pack to a new one with custom name.\n"
-            "Enter sticker link and pack name to start.</blockquote>"
+            "<blockquote>Source pack: {source_status}\n"
+            "New pack link: {short_status}\n"
+            "Pack name: {name_status}</blockquote>"
         ),
-        "btn_set_link": "Set Sticker Link",
-        "btn_set_name": "Set Pack Name",
+        "btn_set_source": "Source Pack Link",
+        "btn_set_short": "New Pack Link",
+        "btn_set_name": "Pack Name",
         "btn_start": "Start Copy",
         "btn_back": "Back",
         "btn_close": "Close",
-        "input_link": "Send a link to any sticker from the pack (t.me/addstickers/... or direct message link with sticker):",
+        "btn_retry": "Try Again",
+        "input_source": "Send source pack link (https://t.me/addstickers/PackName):",
+        "input_short": "Send new pack link (https://t.me/addstickers/MyNewPack) - must be free:",
         "input_name": "Send the name for the new sticker pack:",
-        "link_set": (
-            "<b>Sticker Link Set</b>\n"
+        "source_set": (
+            "<b>Source Pack Set</b>\n"
+            "<blockquote>{link}\n"
+            "Stickers: {count}</blockquote>"
+        ),
+        "source_invalid_format": (
+            "<b>Invalid Format</b>\n"
+            "<blockquote>Link must start with https://t.me/addstickers/\n"
+            "Example: https://t.me/addstickers/Journey_of_Elaina\n"
+            "This pack was not found - try a different link.</blockquote>"
+        ),
+        "source_invalid_resolve": (
+            "<b>Pack Not Found</b>\n"
+            "<blockquote>Could not find sticker pack at this link.\n"
+            "Make sure the link is correct and the pack exists.\n"
+            "Example: https://t.me/addstickers/Journey_of_Elaina</blockquote>"
+        ),
+        "short_set": (
+            "<b>New Pack Link Set</b>\n"
             "<blockquote>{link}</blockquote>"
+        ),
+        "short_invalid_format": (
+            "<b>Invalid Format</b>\n"
+            "<blockquote>Link must start with https://t.me/addstickers/\n"
+            "Example: https://t.me/addstickers/MyNewPack</blockquote>"
+        ),
+        "short_occupied": (
+            "<b>Link Already Taken</b>\n"
+            "<blockquote>This short name is already in use.\n"
+            "Choose a different link.</blockquote>"
         ),
         "name_set": (
             "<b>Pack Name Set</b>\n"
             "<blockquote>{name}</blockquote>"
         ),
-        "state_menu": (
-            "<b>Stickerclone</b>\n"
-            "<blockquote>Sticker link: {link_status}\n"
-            "Pack name: {name_status}</blockquote>"
+        "no_source": (
+            "<b>No Source Pack</b>\n"
+            "<blockquote>Set the source pack link first</blockquote>"
         ),
-        "no_link": (
-            "<b>No Sticker Link</b>\n"
-            "<blockquote>Set sticker link first</blockquote>"
+        "no_short": (
+            "<b>No New Pack Link</b>\n"
+            "<blockquote>Set the new pack link first</blockquote>"
         ),
         "no_name": (
             "<b>No Pack Name</b>\n"
-            "<blockquote>Set pack name first</blockquote>"
-        ),
-        "link_invalid": (
-            "<b>Invalid Link</b>\n"
-            "<blockquote>Could not resolve sticker pack from this link.\n"
-            "Use t.me/addstickers/packname format.</blockquote>"
+            "<blockquote>Set the pack name first</blockquote>"
         ),
         "fetching": (
             "<b>Fetching Pack</b>\n"
@@ -151,46 +159,72 @@ class StickerClone(loader.Module):
         ),
         "status_set": "Set",
         "status_not_set": "Not set",
+        "checking": "Checking...",
     }
 
     strings_ru = {
-        "main_menu": (
+        "state_menu": (
             "<b>Stickerclone</b>\n"
-            "<blockquote>Копирует стикерпак в новый с заданным именем.\n"
-            "Укажите ссылку на стикер и название нового пака.</blockquote>"
+            "<blockquote>Исходный пак: {source_status}\n"
+            "Ссылка нового пака: {short_status}\n"
+            "Название пака: {name_status}</blockquote>"
         ),
-        "btn_set_link": "Ссылка на стикер",
+        "btn_set_source": "Ссылка исходного пака",
+        "btn_set_short": "Ссылка нового пака",
         "btn_set_name": "Название пака",
         "btn_start": "Начать копирование",
         "btn_back": "Назад",
         "btn_close": "Закрыть",
-        "input_link": "Отправьте ссылку на любой стикер из пака (t.me/addstickers/... или прямая ссылка на сообщение со стикером):",
+        "btn_retry": "Попробовать снова",
+        "input_source": "Отправьте ссылку на исходный пак (https://t.me/addstickers/PackName):",
+        "input_short": "Отправьте ссылку для нового пака (https://t.me/addstickers/MyNewPack) - должна быть свободной:",
         "input_name": "Отправьте название для нового стикерпака:",
-        "link_set": (
-            "<b>Ссылка задана</b>\n"
+        "source_set": (
+            "<b>Исходный пак задан</b>\n"
+            "<blockquote>{link}\n"
+            "Стикеров: {count}</blockquote>"
+        ),
+        "source_invalid_format": (
+            "<b>Неверный формат</b>\n"
+            "<blockquote>Ссылка должна начинаться с https://t.me/addstickers/\n"
+            "Пример: https://t.me/addstickers/Journey_of_Elaina\n"
+            "Пак не найден - попробуйте другую ссылку.</blockquote>"
+        ),
+        "source_invalid_resolve": (
+            "<b>Пак не найден</b>\n"
+            "<blockquote>Не удалось найти стикерпак по этой ссылке.\n"
+            "Убедитесь что ссылка правильная и пак существует.\n"
+            "Пример: https://t.me/addstickers/Journey_of_Elaina</blockquote>"
+        ),
+        "short_set": (
+            "<b>Ссылка нового пака задана</b>\n"
             "<blockquote>{link}</blockquote>"
+        ),
+        "short_invalid_format": (
+            "<b>Неверный формат</b>\n"
+            "<blockquote>Ссылка должна начинаться с https://t.me/addstickers/\n"
+            "Пример: https://t.me/addstickers/MyNewPack</blockquote>"
+        ),
+        "short_occupied": (
+            "<b>Ссылка занята</b>\n"
+            "<blockquote>Это короткое имя уже используется.\n"
+            "Выберите другую ссылку.</blockquote>"
         ),
         "name_set": (
             "<b>Название задано</b>\n"
             "<blockquote>{name}</blockquote>"
         ),
-        "state_menu": (
-            "<b>Stickerclone</b>\n"
-            "<blockquote>Ссылка на стикер: {link_status}\n"
-            "Название пака: {name_status}</blockquote>"
+        "no_source": (
+            "<b>Нет исходного пака</b>\n"
+            "<blockquote>Сначала укажите ссылку на исходный пак</blockquote>"
         ),
-        "no_link": (
-            "<b>Нет ссылки</b>\n"
-            "<blockquote>Сначала укажите ссылку на стикер</blockquote>"
+        "no_short": (
+            "<b>Нет ссылки нового пака</b>\n"
+            "<blockquote>Сначала укажите ссылку для нового пака</blockquote>"
         ),
         "no_name": (
             "<b>Нет названия</b>\n"
             "<blockquote>Сначала укажите название пака</blockquote>"
-        ),
-        "link_invalid": (
-            "<b>Невалидная ссылка</b>\n"
-            "<blockquote>Не удалось получить стикерпак по этой ссылке.\n"
-            "Используйте формат t.me/addstickers/packname.</blockquote>"
         ),
         "fetching": (
             "<b>Получаем пак</b>\n"
@@ -229,10 +263,17 @@ class StickerClone(loader.Module):
         ),
         "status_set": "Задано",
         "status_not_set": "Не задано",
+        "checking": "Проверяем...",
     }
 
     def __init__(self):
-        self._state = {"link": None, "name": None}
+        self._state = {
+            "source_link": None,
+            "source_short": None,
+            "source_documents": None,
+            "new_short": None,
+            "name": None,
+        }
 
     async def client_ready(self, client, db):
         self._client = client
@@ -241,12 +282,6 @@ class StickerClone(loader.Module):
             logger.info("[Stickerclone] Deps:\n" + "\n".join(lines))
         except Exception as e:
             logger.error(f"[Stickerclone] Deps error: {e}")
-
-    def _gen_short_name(self, title: str) -> str:
-        base = _translit(title)
-        suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
-        me_username = getattr(self, "_me_username", "user")
-        return f"{base}_{suffix}_by_{me_username}"[:64]
 
     def _get_sticker_emoji(self, doc) -> str:
         try:
@@ -309,6 +344,7 @@ class StickerClone(loader.Module):
                 timeout=60,
             )
             if r.returncode != 0:
+                logger.warning(f"[Stickerclone] ffmpeg returned {r.returncode}: {r.stderr.decode()[:200]}")
                 return None
             with open(fout, "rb") as f:
                 data = f.read()
@@ -345,7 +381,10 @@ class StickerClone(loader.Module):
                 mime_type="video/webm",
                 attributes=[
                     DocumentAttributeFilename(file_name=fname),
-                    DocumentAttributeVideo(duration=3, w=size, h=size, round_message=False, supports_streaming=True),
+                    DocumentAttributeVideo(
+                        duration=3, w=size, h=size,
+                        round_message=False, supports_streaming=True,
+                    ),
                     DocumentAttributeSticker(alt="", stickerset=InputStickerSetEmpty()),
                 ],
                 nosound_video=True,
@@ -370,62 +409,50 @@ class StickerClone(loader.Module):
             buf = io.BytesIO()
             await self._client.download_file(doc, buf)
             raw = buf.getvalue()
+            logger.debug(f"[Stickerclone] Processing sticker mime={mime} size={len(raw)}")
 
             if mime == "video/webm":
                 if len(raw) <= 256 * 1024:
-                    return await self._upload_doc(raw, "s.webm", True, 512), True
+                    uploaded = await self._upload_doc(raw, "s.webm", True, 512)
+                    return uploaded, True
                 data = await self._to_webm(raw, mime, 512)
                 if data:
-                    return await self._upload_doc(data, "s.webm", True, 512), True
+                    uploaded = await self._upload_doc(data, "s.webm", True, 512)
+                    return uploaded, True
                 return None, False
 
             if mime == "application/x-tgsticker":
                 data = await self._to_webm(raw, mime, 512)
                 if data:
-                    return await self._upload_doc(data, "s.webm", True, 512), True
+                    uploaded = await self._upload_doc(data, "s.webm", True, 512)
+                    return uploaded, True
                 return None, False
 
             if mime in ("image/gif", "video/mp4"):
                 data = await self._to_webm(raw, mime, 512)
                 if data:
-                    return await self._upload_doc(data, "s.webm", True, 512), True
+                    uploaded = await self._upload_doc(data, "s.webm", True, 512)
+                    return uploaded, True
                 data = await self._resize_static(raw, 512)
                 if data:
-                    return await self._upload_doc(data, "s.png", False, 512), False
+                    uploaded = await self._upload_doc(data, "s.png", False, 512)
+                    return uploaded, False
                 return None, False
 
             data = await self._resize_static(raw, 512)
             if not data:
+                logger.warning(f"[Stickerclone] _resize_static returned None for mime={mime}")
                 return None, False
-            return await self._upload_doc(data, "s.png", False, 512), False
+            uploaded = await self._upload_doc(data, "s.png", False, 512)
+            return uploaded, False
 
         except Exception as e:
-            logger.error(f"[Stickerclone] _process_sticker: {e}")
+            logger.error(f"[Stickerclone] _process_sticker error: {e}")
             return None, False
 
-    async def _resolve_pack(self, link: str):
+    async def _try_resolve_pack(self, short_name: str):
         from telethon.tl.functions.messages import GetStickerSetRequest
         from telethon.tl.types import InputStickerSetShortName
-        import re
-
-        link = link.strip()
-        short_name = None
-
-        m = re.search(r't\.me/addstickers/([A-Za-z0-9_]+)', link)
-        if m:
-            short_name = m.group(1)
-
-        if not short_name:
-            m = re.search(r'addstickers[=?/]([A-Za-z0-9_]+)', link)
-            if m:
-                short_name = m.group(1)
-
-        if not short_name:
-            short_name = link.strip().split("/")[-1].split("?")[0]
-
-        if not short_name:
-            return None
-
         try:
             result = await self._client(GetStickerSetRequest(
                 stickerset=InputStickerSetShortName(short_name=short_name),
@@ -433,30 +460,108 @@ class StickerClone(loader.Module):
             ))
             return result
         except Exception as e:
-            logger.error(f"[Stickerclone] _resolve_pack error for '{short_name}': {e}")
+            logger.info(f"[Stickerclone] _try_resolve_pack '{short_name}': {e}")
             return None
 
+    def _extract_short_name(self, link: str):
+        m = ADDSTICKERS_RE.match(link.strip())
+        if m:
+            return m.group(1)
+        return None
+
     def _format_state_menu(self):
-        link_status = self.strings["status_set"] if self._state["link"] else self.strings["status_not_set"]
-        name_status = self.strings["status_set"] if self._state["name"] else self.strings["status_not_set"]
-        return self.strings["state_menu"].format(link_status=link_status, name_status=name_status)
+        s = self._state
+        source_status = s["source_link"] if s["source_link"] else self.strings["status_not_set"]
+        short_status = f"https://t.me/addstickers/{s['new_short']}" if s["new_short"] else self.strings["status_not_set"]
+        name_status = s["name"] if s["name"] else self.strings["status_not_set"]
+        return self.strings["state_menu"].format(
+            source_status=source_status,
+            short_status=short_status,
+            name_status=name_status,
+        )
 
     def _get_state_markup(self):
         return [
             [
-                {"text": self.strings["btn_set_link"], "input": self.strings["input_link"], "handler": self._cb_set_link, "style": "primary"},
+                {"text": self.strings["btn_set_source"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_set_short"], "input": self.strings["input_short"], "handler": self._cb_set_short, "style": "primary"},
                 {"text": self.strings["btn_set_name"], "input": self.strings["input_name"], "handler": self._cb_set_name, "style": "primary"},
             ],
             [{"text": self.strings["btn_start"], "callback": self._cb_start, "style": "success"}],
             [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
         ]
 
-    async def _cb_set_link(self, call: InlineCall, query: str):
+    async def _cb_state_menu(self, call: InlineCall):
+        await call.edit(self._format_state_menu(), reply_markup=self._get_state_markup())
+
+    async def _cb_close(self, call: InlineCall):
+        await call.delete()
+
+    async def _cb_set_source(self, call: InlineCall, query: str):
         link = query.strip()
-        self._state["link"] = link if link else None
-        logger.info(f"[Stickerclone] Link set: {link}")
+        short_name = self._extract_short_name(link)
+
+        if not short_name:
+            await call.edit(
+                self.strings["source_invalid_format"],
+                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"}],
+                              [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
+            )
+            return
+
+        await call.edit(self.strings["checking"])
+        logger.info(f"[Stickerclone] Checking source pack: {short_name}")
+        result = await self._try_resolve_pack(short_name)
+
+        if not result or not result.documents:
+            await call.edit(
+                self.strings["source_invalid_resolve"],
+                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"}],
+                              [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
+            )
+            return
+
+        self._state["source_link"] = link
+        self._state["source_short"] = short_name
+        self._state["source_documents"] = result.documents
+        logger.info(f"[Stickerclone] Source set: {short_name}, {len(result.documents)} stickers")
+
         await call.edit(
-            self.strings["link_set"].format(link=link) if link else self.strings["no_link"],
+            self.strings["source_set"].format(link=link, count=len(result.documents)),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
+        )
+
+    async def _cb_set_short(self, call: InlineCall, query: str):
+        link = query.strip()
+        short_name = self._extract_short_name(link)
+
+        if not short_name:
+            await call.edit(
+                self.strings["short_invalid_format"],
+                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_short"], "handler": self._cb_set_short, "style": "primary"}],
+                              [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
+            )
+            return
+
+        await call.edit(self.strings["checking"])
+        logger.info(f"[Stickerclone] Checking if short name is free: {short_name}")
+        result = await self._try_resolve_pack(short_name)
+
+        if result is not None:
+            await call.edit(
+                self.strings["short_occupied"],
+                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_short"], "handler": self._cb_set_short, "style": "primary"}],
+                              [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
+            )
+            return
+
+        self._state["new_short"] = short_name
+        logger.info(f"[Stickerclone] New short name set: {short_name}")
+
+        await call.edit(
+            self.strings["short_set"].format(link=link),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
         )
 
@@ -465,20 +570,21 @@ class StickerClone(loader.Module):
         self._state["name"] = name if name else None
         logger.info(f"[Stickerclone] Name set: {name}")
         await call.edit(
-            self.strings["name_set"].format(name=name) if name else self.strings["no_name"],
+            self.strings["name_set"].format(name=name),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
         )
 
-    async def _cb_state_menu(self, call: InlineCall):
-        await call.edit(self._format_state_menu(), reply_markup=self._get_state_markup())
-
-    async def _cb_close(self, call: InlineCall):
-        await call.delete()
-
     async def _cb_start(self, call: InlineCall):
-        if not self._state["link"]:
+        if not self._state["source_documents"]:
             await call.edit(
-                self.strings["no_link"],
+                self.strings["no_source"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
+            )
+            return
+
+        if not self._state["new_short"]:
+            await call.edit(
+                self.strings["no_short"],
                 reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
             )
             return
@@ -490,37 +596,18 @@ class StickerClone(loader.Module):
             )
             return
 
-        await call.edit(self.strings["fetching"])
-        logger.info(f"[Stickerclone] Resolving pack from link: {self._state['link']}")
-
-        full_set = await self._resolve_pack(self._state["link"])
-        if not full_set:
-            await call.edit(
-                self.strings["link_invalid"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
-            )
-            return
-
-        if not full_set.documents:
-            await call.edit(
-                self.strings["pack_empty"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
-            )
-            return
-
-        pack_title = self._state["name"]
-        documents = full_set.documents
-        total = len(documents)
-        logger.info(f"[Stickerclone] Starting copy: '{pack_title}', {total} stickers")
-
         from telethon.tl.functions.stickers import CreateStickerSetRequest, AddStickerToSetRequest
         from telethon.tl.functions.messages import UninstallStickerSetRequest
         from telethon.tl.types import InputStickerSetShortName, InputStickerSetItem
         from telethon.errors.rpcerrorlist import PackShortNameOccupiedError
 
-        me = await self._client.get_me()
-        self._me_username = me.username or str(me.id)
-        short_name = self._gen_short_name(pack_title)
+        documents = self._state["source_documents"]
+        pack_title = self._state["name"]
+        short_name = self._state["new_short"]
+        total = len(documents)
+
+        logger.info(f"[Stickerclone] Starting copy: title='{pack_title}' short='{short_name}' total={total}")
+
         pack_created = False
         copied = 0
         failed = 0
@@ -532,10 +619,12 @@ class StickerClone(loader.Module):
                 pass
 
             emoji = self._get_sticker_emoji(doc)
-            input_doc, _ = await self._process_sticker(doc)
+            logger.debug(f"[Stickerclone] Sticker {i}/{total} emoji={emoji} mime={doc.mime_type}")
+
+            input_doc, animated = await self._process_sticker(doc)
             if input_doc is None:
                 failed += 1
-                logger.warning(f"[Stickerclone] Sticker {i}/{total} failed to process")
+                logger.warning(f"[Stickerclone] Sticker {i}/{total} process failed")
                 continue
 
             try:
@@ -545,6 +634,7 @@ class StickerClone(loader.Module):
                         title=pack_title,
                         short_name=short_name,
                         stickers=[InputStickerSetItem(document=input_doc, emoji=emoji)],
+                        animated=animated,
                     ))
                     pack_created = True
                     copied += 1
@@ -556,26 +646,14 @@ class StickerClone(loader.Module):
                     ))
                     copied += 1
             except PackShortNameOccupiedError:
-                short_name = self._gen_short_name(pack_title)
-                logger.warning(f"[Stickerclone] Short name occupied, retrying with {short_name}")
-                try:
-                    await self._client(CreateStickerSetRequest(
-                        user_id="me",
-                        title=pack_title,
-                        short_name=short_name,
-                        stickers=[InputStickerSetItem(document=input_doc, emoji=emoji)],
-                    ))
-                    pack_created = True
-                    copied += 1
-                except Exception as e2:
-                    logger.error(f"[Stickerclone] Pack creation retry failed: {e2}")
-                    await call.edit(
-                        self.strings["error"].format(error=str(e2)[:200]),
-                        reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
-                    )
-                    return
+                logger.warning(f"[Stickerclone] Short name occupied on creation: {short_name}")
+                await call.edit(
+                    self.strings["short_occupied"],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
+                )
+                return
             except Exception as e:
-                logger.error(f"[Stickerclone] Sticker {i} add error: {e}")
+                logger.error(f"[Stickerclone] Sticker {i}/{total} add error: {e}")
                 failed += 1
 
         if not pack_created:
@@ -592,8 +670,15 @@ class StickerClone(loader.Module):
         except Exception:
             pass
 
-        self._state = {"link": None, "name": None}
-        logger.info(f"[Stickerclone] Done. copied={copied}, failed={failed}, total={total}")
+        self._state = {
+            "source_link": None,
+            "source_short": None,
+            "source_documents": None,
+            "new_short": None,
+            "name": None,
+        }
+
+        logger.info(f"[Stickerclone] Done. copied={copied} failed={failed} total={total}")
 
         if failed == 0:
             await call.edit(
@@ -602,7 +687,9 @@ class StickerClone(loader.Module):
             )
         else:
             await call.edit(
-                self.strings["done_partial"].format(name=pack_title, copied=copied, total=total, failed=failed, short=short_name),
+                self.strings["done_partial"].format(
+                    name=pack_title, copied=copied, total=total, failed=failed, short=short_name
+                ),
                 reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
             )
 
