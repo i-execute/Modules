@@ -27,6 +27,7 @@ ServerBox
 Session
 StarsX
 Statistics
+StickerClone
 Stories
 Telega
 Token
