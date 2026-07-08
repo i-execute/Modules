@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 
 @loader.tds
-class Stickerclone(loader.Module):
+class StickerClone(loader.Module):
     """Sticker pack cloner"""
 
     strings = {
