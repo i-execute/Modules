@@ -25,6 +25,7 @@ Robber
 SCMusic
 ServerBox
 Session
+ShorBot
 StarsX
 Statistics
 StickerClone

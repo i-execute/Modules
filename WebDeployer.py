@@ -38,7 +38,7 @@ def _cf_arch():
 
 @loader.tds
 class WebDeployer(loader.Module):
-    """Deploy .js/.jsx files to temporary Cloudflare domains"""
+    """Deploy .js/.jsx/.html files to temporary Cloudflare domains"""
 
     strings = {
         "name": "WebDeployer",
@@ -76,20 +76,26 @@ class WebDeployer(loader.Module):
             "<blockquote>{error}</blockquote>"
         ),
         "collecting_versions": "<b>Collecting versions...</b>",
-        "no_reply": "<b>Reply to a .js or .jsx file</b>",
-        "wrong_type": "<b>File must be .js or .jsx</b>",
+        "no_reply": "<b>Reply to a .js, .jsx or .html file</b>",
+        "wrong_type": "<b>File must be .js, .jsx or .html</b>",
         "no_cf": (
             "<b>cloudflared not installed</b>\n"
-            "<blockquote>Use .wb to open Setup</blockquote>"
+            "<blockquote>Use .wd to open Setup</blockquote>"
         ),
-        "downloading": "<b>Downloading file</b>\n<blockquote><code>{name}</code></blockquote>",
+        "downloading": (
+            "<b>Downloading file</b>\n"
+            "<blockquote><code>{name}</code></blockquote>"
+        ),
         "deploying": (
             "<b>Deploying</b>\n"
-            "<blockquote>File: <code>{name}</code>\nPlease wait...</blockquote>"
+            "<blockquote>"
+            "File: <code>{name}</code>\n"
+            "Please wait..."
+            "</blockquote>"
         ),
         "deploy_fail": (
             "<b>Deploy Failed</b>\n"
-            "<blockquote>{error}</blockquote>"
+            "<blockquote><code>{error}</code></blockquote>"
         ),
         "deployed": (
             "<b>Site Deployed</b>\n"
@@ -104,7 +110,7 @@ class WebDeployer(loader.Module):
         ),
         "no_sites": (
             "<b>No active sites</b>\n"
-            "<blockquote>Reply to .js/.jsx file with .wb to deploy</blockquote>"
+            "<blockquote>Reply to .js/.jsx/.html file with .wd to deploy</blockquote>"
         ),
         "site_detail": (
             "<b>Site Info</b>\n"
@@ -118,13 +124,19 @@ class WebDeployer(loader.Module):
             "<b>Site Stopped</b>\n"
             "<blockquote>URL: <code>{url}</code></blockquote>"
         ),
-        "site_not_found": "<b>Site not found</b>",
+        "site_not_found": (
+            "<b>Site not found</b>\n"
+            "<blockquote>It may have already been stopped</blockquote>"
+        ),
         "token_set": (
             "<b>GitHub token saved</b>\n"
             "<blockquote>Rate limit raised to 5000 req/h</blockquote>"
         ),
         "token_cleared": "<b>GitHub token cleared</b>",
-        "cf_fail": "<b>Failed to get tunnel URL</b>",
+        "cf_fail": (
+            "<b>Failed to get tunnel URL</b>\n"
+            "<blockquote>cloudflared did not return a trycloudflare.com URL in 30 seconds</blockquote>"
+        ),
         "btn_setup": "Setup",
         "btn_back": "Back",
         "btn_close": "Close",
@@ -173,20 +185,26 @@ class WebDeployer(loader.Module):
             "<blockquote>{error}</blockquote>"
         ),
         "collecting_versions": "<b>Сбор версий...</b>",
-        "no_reply": "<b>Ответьте на .js или .jsx файл</b>",
-        "wrong_type": "<b>Файл должен быть .js или .jsx</b>",
+        "no_reply": "<b>Ответьте на .js, .jsx или .html файл</b>",
+        "wrong_type": "<b>Файл должен быть .js, .jsx или .html</b>",
         "no_cf": (
             "<b>cloudflared не установлен</b>\n"
-            "<blockquote>Используйте .wb для Setup</blockquote>"
+            "<blockquote>Используйте .wd для Setup</blockquote>"
         ),
-        "downloading": "<b>Скачивание файла</b>\n<blockquote><code>{name}</code></blockquote>",
+        "downloading": (
+            "<b>Скачивание файла</b>\n"
+            "<blockquote><code>{name}</code></blockquote>"
+        ),
         "deploying": (
             "<b>Деплой</b>\n"
-            "<blockquote>Файл: <code>{name}</code>\nПодождите...</blockquote>"
+            "<blockquote>"
+            "Файл: <code>{name}</code>\n"
+            "Подождите..."
+            "</blockquote>"
         ),
         "deploy_fail": (
             "<b>Ошибка деплоя</b>\n"
-            "<blockquote>{error}</blockquote>"
+            "<blockquote><code>{error}</code></blockquote>"
         ),
         "deployed": (
             "<b>Сайт задеплоен</b>\n"
@@ -201,7 +219,7 @@ class WebDeployer(loader.Module):
         ),
         "no_sites": (
             "<b>Нет активных сайтов</b>\n"
-            "<blockquote>Ответьте на .js/.jsx файл командой .wb для деплоя</blockquote>"
+            "<blockquote>Ответьте на .js/.jsx/.html файл командой .wd для деплоя</blockquote>"
         ),
         "site_detail": (
             "<b>Информация о сайте</b>\n"
@@ -215,13 +233,19 @@ class WebDeployer(loader.Module):
             "<b>Сайт остановлен</b>\n"
             "<blockquote>URL: <code>{url}</code></blockquote>"
         ),
-        "site_not_found": "<b>Сайт не найден</b>",
+        "site_not_found": (
+            "<b>Сайт не найден</b>\n"
+            "<blockquote>Возможно, он уже был остановлен</blockquote>"
+        ),
         "token_set": (
             "<b>GitHub токен сохранён</b>\n"
             "<blockquote>Лимит запросов повышен до 5000/ч</blockquote>"
         ),
         "token_cleared": "<b>GitHub токен очищен</b>",
-        "cf_fail": "<b>Не удалось получить URL туннеля</b>",
+        "cf_fail": (
+            "<b>Не удалось получить URL туннеля</b>\n"
+            "<blockquote>cloudflared не вернул trycloudflare.com URL за 30 секунд</blockquote>"
+        ),
         "btn_setup": "Настройка",
         "btn_back": "Назад",
         "btn_close": "Закрыть",
@@ -399,7 +423,7 @@ class WebDeployer(loader.Module):
         self._releases_cache = None
         return True, tag
 
-    def _build_html(self, js_path: str, filename: str) -> str:
+    def _build_html_from_js(self, js_path: str, filename: str) -> str:
         with open(js_path, "r", encoding="utf-8", errors="replace") as f:
             js_code = f.read()
         return f"""<!DOCTYPE html>
@@ -644,11 +668,11 @@ if (typeof App !== 'undefined') {{
         )
 
     @loader.command(
-        ru_doc="Реплай на .js/.jsx для деплоя | без реплая — меню",
-        en_doc="Reply to .js/.jsx to deploy | without reply — menu",
+        ru_doc="Реплай на .js/.jsx/.html для деплоя | без реплая — меню",
+        en_doc="Reply to .js/.jsx/.html to deploy | without reply — menu",
     )
     async def wd(self, message: Message):
-        """Reply to .js/.jsx to deploy | without reply — menu"""
+        """Reply to .js/.jsx/.html to deploy | without reply — menu"""
         reply = await message.get_reply_message()
 
         if not reply or not reply.media:
@@ -689,7 +713,7 @@ if (typeof App !== 'undefined') {{
             return
 
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        if ext not in ("js", "jsx"):
+        if ext not in ("js", "jsx", "html"):
             await utils.answer(message, self.strings["wrong_type"])
             return
 
@@ -699,14 +723,14 @@ if (typeof App !== 'undefined') {{
 
         site_dir = os.path.join(self._root, f"site_{utils.rand(8)}")
         os.makedirs(site_dir, exist_ok=True)
-        js_path = os.path.join(site_dir, filename)
+        file_path = os.path.join(site_dir, filename)
 
         try:
-            await reply.download_media(file=js_path)
+            await reply.download_media(file=file_path)
         except Exception as e:
             shutil.rmtree(site_dir, ignore_errors=True)
             await m.edit(
-                self.strings["deploy_fail"].format(error=_escape(str(e)[:300])),
+                self.strings["deploy_fail"].format(error=_escape(str(e)[:400])),
                 parse_mode="html",
             )
             return
@@ -717,17 +741,21 @@ if (typeof App !== 'undefined') {{
         )
 
         try:
-            html = self._build_html(js_path, filename)
+            if ext in ("js", "jsx"):
+                html = self._build_html_from_js(file_path, filename)
+                with open(os.path.join(site_dir, "index.html"), "w", encoding="utf-8") as f:
+                    f.write(html)
+            else:
+                dest = os.path.join(site_dir, "index.html")
+                if file_path != dest:
+                    shutil.copy2(file_path, dest)
         except Exception as e:
             shutil.rmtree(site_dir, ignore_errors=True)
             await m.edit(
-                self.strings["deploy_fail"].format(error=_escape(str(e)[:300])),
+                self.strings["deploy_fail"].format(error=_escape(str(e)[:400])),
                 parse_mode="html",
             )
             return
-
-        with open(os.path.join(site_dir, "index.html"), "w", encoding="utf-8") as f:
-            f.write(html)
 
         port = self._next_port()
         http_proc = self._start_http_server(site_dir, port)
