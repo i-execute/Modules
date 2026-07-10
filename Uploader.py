@@ -8,6 +8,7 @@ import time
 import tempfile
 
 from .. import loader, utils
+from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,6 @@ def _detect_type(name):
         "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "tgs": "application/x-tgsticker",
-        "webm_s": "video/webm",
     }
     return types.get(ext, f"file/{ext}" if ext else "unknown")
 
@@ -130,7 +130,10 @@ class Uploader(loader.Module):
             "Other: apk, tgs"
             "</blockquote>"
         ),
-        "no_reply": "<b>Reply to a photo, video or file</b>",
+        "no_reply": (
+            "<b>No reply</b>\n"
+            "<blockquote>Reply to a photo, video or file</blockquote>"
+        ),
         "unsupported": (
             "<b>Unsupported format</b>\n"
             "<blockquote>"
@@ -144,8 +147,14 @@ class Uploader(loader.Module):
             "File size: <code>{size}</code>"
             "</blockquote>"
         ),
-        "downloading": "<b>Downloading</b>\n<blockquote><code>{time}</code></blockquote>",
-        "uploading": "<b>Uploading to x0.at</b>\n<blockquote><code>{time}</code></blockquote>",
+        "downloading": (
+            "<b>Downloading</b>\n"
+            "<blockquote><code>{time}</code></blockquote>"
+        ),
+        "uploading": (
+            "<b>Uploading to x0.at</b>\n"
+            "<blockquote><code>{time}</code></blockquote>"
+        ),
         "done": (
             "<b>Uploaded</b>\n"
             "<b>Link:</b>\n"
@@ -163,8 +172,16 @@ class Uploader(loader.Module):
             "Total: <code>{total_time}</code>"
             "</blockquote>"
         ),
-        "upload_fail": "<b>Upload failed</b>\n<blockquote><code>{error}</code></blockquote>",
-        "download_fail": "<b>Download failed</b>\n<blockquote><code>{error}</code></blockquote>",
+        "upload_fail": (
+            "<b>Upload failed</b>\n"
+            "<blockquote><code>{error}</code></blockquote>"
+        ),
+        "download_fail": (
+            "<b>Download failed</b>\n"
+            "<blockquote><code>{error}</code></blockquote>"
+        ),
+        "btn_close": "Close",
+        "btn_copy": "Copy URL",
     }
 
     strings_ru = {
@@ -184,7 +201,10 @@ class Uploader(loader.Module):
             "Другое: apk, tgs"
             "</blockquote>"
         ),
-        "no_reply": "<b>Ответьте на фото, видео или файл</b>",
+        "no_reply": (
+            "<b>Нет реплая</b>\n"
+            "<blockquote>Ответьте на фото, видео или файл</blockquote>"
+        ),
         "unsupported": (
             "<b>Неподдерживаемый формат</b>\n"
             "<blockquote>"
@@ -198,8 +218,14 @@ class Uploader(loader.Module):
             "Размер файла: <code>{size}</code>"
             "</blockquote>"
         ),
-        "downloading": "<b>Скачивание</b>\n<blockquote><code>{time}</code></blockquote>",
-        "uploading": "<b>Загрузка на x0.at</b>\n<blockquote><code>{time}</code></blockquote>",
+        "downloading": (
+            "<b>Скачивание</b>\n"
+            "<blockquote><code>{time}</code></blockquote>"
+        ),
+        "uploading": (
+            "<b>Загрузка на x0.at</b>\n"
+            "<blockquote><code>{time}</code></blockquote>"
+        ),
         "done": (
             "<b>Загружено</b>\n"
             "<b>Ссылка:</b>\n"
@@ -217,8 +243,16 @@ class Uploader(loader.Module):
             "Всего: <code>{total_time}</code>"
             "</blockquote>"
         ),
-        "upload_fail": "<b>Ошибка загрузки</b>\n<blockquote><code>{error}</code></blockquote>",
-        "download_fail": "<b>Ошибка скачивания</b>\n<blockquote><code>{error}</code></blockquote>",
+        "upload_fail": (
+            "<b>Ошибка загрузки</b>\n"
+            "<blockquote><code>{error}</code></blockquote>"
+        ),
+        "download_fail": (
+            "<b>Ошибка скачивания</b>\n"
+            "<blockquote><code>{error}</code></blockquote>"
+        ),
+        "btn_close": "Закрыть",
+        "btn_copy": "Скопировать URL",
     }
 
     def _s(self, key, **kwargs):
@@ -228,22 +262,6 @@ class Uploader(loader.Module):
             return text.format(prefix=prefix, **kwargs)
         except (KeyError, IndexError):
             return text
-
-    async def _safe_edit(self, msg, text):
-        try:
-            await msg.edit(text)
-        except Exception:
-            pass
-
-    async def _timer_loop(self, msg, key, start_time, stop_event):
-        while not stop_event.is_set():
-            elapsed = time.time() - start_time
-            await self._safe_edit(msg, self._s(key, time=_format_time(elapsed)))
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=1.7)
-                break
-            except asyncio.TimeoutError:
-                pass
 
     def _get_filename(self, media):
         attrs = getattr(media, "attributes", []) or []
@@ -316,6 +334,22 @@ class Uploader(loader.Module):
                     return sz
         return None
 
+    async def _cb_close(self, call: InlineCall):
+        await call.delete()
+
+    async def _timer_loop(self, call: InlineCall, key, start_time, stop_event):
+        while not stop_event.is_set():
+            elapsed = time.time() - start_time
+            try:
+                await call.edit(self._s(key, time=_format_time(elapsed)))
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=1.7)
+                break
+            except asyncio.TimeoutError:
+                pass
+
     @loader.command(
         ru_doc="Реплай на фото/видео/файл - загрузить на x0.at",
         en_doc="Reply to photo/video/file - upload to x0.at",
@@ -323,8 +357,14 @@ class Uploader(loader.Module):
     async def upl(self, message):
         """Reply to photo/video/file - upload to x0.at"""
         reply = await message.get_reply_message()
+
         if not reply or not reply.media:
-            await utils.answer(message, self._s("no_reply"))
+            await self.inline.form(
+                text=self._s("no_reply"),
+                message=message,
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                silent=True,
+            )
             return
 
         media = reply.media
@@ -337,24 +377,37 @@ class Uploader(loader.Module):
             filename = "photo.jpg"
 
         if ext not in ALLOWED_EXTENSIONS:
-            await utils.answer(message, self._s("unsupported"))
+            await self.inline.form(
+                text=self._s("unsupported"),
+                message=message,
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                silent=True,
+            )
             return
 
         file_size_meta = self._get_file_size(media)
         if file_size_meta is not None and file_size_meta > MAX_FILE_SIZE:
-            await utils.answer(
-                message,
-                self._s("too_large", size=_format_bytes(file_size_meta)),
+            await self.inline.form(
+                text=self._s("too_large", size=_format_bytes(file_size_meta)),
+                message=message,
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                silent=True,
             )
             return
 
         file_type = _detect_type(filename)
-        status_msg = await utils.answer(message, self._s("downloading", time="0.00s"))
+
+        form = await self.inline.form(
+            text=self._s("downloading", time="0.00s"),
+            message=message,
+            reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            silent=True,
+        )
 
         stop_event = asyncio.Event()
         dl_start = time.time()
         timer_task = asyncio.ensure_future(
-            self._timer_loop(status_msg, "downloading", dl_start, stop_event)
+            self._timer_loop(form, "downloading", dl_start, stop_event)
         )
 
         tmp_path = None
@@ -373,7 +426,7 @@ class Uploader(loader.Module):
             stop_event = asyncio.Event()
             ul_start = time.time()
             timer_task = asyncio.ensure_future(
-                self._timer_loop(status_msg, "uploading", ul_start, stop_event)
+                self._timer_loop(form, "uploading", ul_start, stop_event)
             )
 
             try:
@@ -391,22 +444,23 @@ class Uploader(loader.Module):
 
                 if proc.returncode != 0 or not out:
                     error = (err or b"").decode().strip() or f"exit code {proc.returncode}"
-                    await self._safe_edit(
-                        status_msg, self._s("upload_fail", error=_escape(error[:300]))
+                    await form.edit(
+                        self._s("upload_fail", error=_escape(error[:300])),
+                        reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
                     )
                     return
 
                 url = out.decode().strip()
                 if not url.startswith("http"):
-                    await self._safe_edit(
-                        status_msg, self._s("upload_fail", error=_escape(url[:300]))
+                    await form.edit(
+                        self._s("upload_fail", error=_escape(url[:300])),
+                        reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
                     )
                     return
 
                 total_elapsed = dl_elapsed + ul_elapsed
 
-                await self._safe_edit(
-                    status_msg,
+                await form.edit(
                     self._s(
                         "done",
                         url=_escape(url),
@@ -417,19 +471,22 @@ class Uploader(loader.Module):
                         ul_time=_format_time(ul_elapsed),
                         total_time=_format_time(total_elapsed),
                     ),
+                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
                 )
 
             except asyncio.TimeoutError:
                 stop_event.set()
                 await timer_task
-                await self._safe_edit(
-                    status_msg, self._s("upload_fail", error="timeout")
+                await form.edit(
+                    self._s("upload_fail", error="timeout"),
+                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
                 )
             except FileNotFoundError:
                 stop_event.set()
                 await timer_task
-                await self._safe_edit(
-                    status_msg, self._s("upload_fail", error="curl not found")
+                await form.edit(
+                    self._s("upload_fail", error="curl not found"),
+                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
                 )
 
         except Exception as e:
@@ -438,8 +495,9 @@ class Uploader(loader.Module):
                 await timer_task
             except Exception:
                 pass
-            await self._safe_edit(
-                status_msg, self._s("download_fail", error=_escape(str(e)[:300]))
+            await form.edit(
+                self._s("download_fail", error=_escape(str(e)[:300])),
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
             )
         finally:
             if tmp_path:
