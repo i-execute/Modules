@@ -1,4 +1,4 @@
-__version__ = (1, 1, 1)
+__version__ = (1, 2, 0)
 # meta developer: I_execute.t.me
 
 import os
@@ -110,14 +110,14 @@ ALLOWED_EXTENSIONS = {
 
 @loader.tds
 class Uploader(loader.Module):
-    """Upload files to x0.at"""
+    """Upload files to x0.at or catbox.moe"""
 
     strings = {
         "name": "Uploader",
         "help": (
             "<b>Uploader</b>\n"
             "<blockquote>"
-            "<code>{prefix}upl</code> - reply to photo/video/file to upload to x0.at"
+            "<code>{prefix}upl</code> - reply to photo/video/file to upload"
             "</blockquote>\n"
             "<b>Supported formats:</b>\n"
             "<blockquote>"
@@ -151,8 +151,16 @@ class Uploader(loader.Module):
             "<b>Downloading</b>\n"
             "<blockquote><code>{time}</code></blockquote>"
         ),
+        "choose_host": (
+            "<b>Downloaded</b>\n"
+            "<blockquote>"
+            "Name: <code>{name}</code>\n"
+            "Size: <code>{size}</code>"
+            "</blockquote>\n"
+            "<b>Choose upload destination:</b>"
+        ),
         "uploading": (
-            "<b>Uploading to x0.at</b>\n"
+            "<b>Uploading to {host}</b>\n"
             "<blockquote><code>{time}</code></blockquote>"
         ),
         "done": (
@@ -180,15 +188,20 @@ class Uploader(loader.Module):
             "<b>Download failed</b>\n"
             "<blockquote><code>{error}</code></blockquote>"
         ),
+        "killed": (
+            "<b>Upload cancelled</b>"
+        ),
         "btn_close": "Close",
-        "btn_copy": "Copy URL",
+        "btn_x0": "x0.at",
+        "btn_catbox": "catbox.moe",
+        "btn_kill": "Kill",
     }
 
     strings_ru = {
         "help": (
             "<b>Uploader</b>\n"
             "<blockquote>"
-            "<code>{prefix}upl</code> - реплай на фото/видео/файл для загрузки на x0.at"
+            "<code>{prefix}upl</code> - реплай на фото/видео/файл для загрузки"
             "</blockquote>\n"
             "<b>Поддерживаемые форматы:</b>\n"
             "<blockquote>"
@@ -222,8 +235,16 @@ class Uploader(loader.Module):
             "<b>Скачивание</b>\n"
             "<blockquote><code>{time}</code></blockquote>"
         ),
+        "choose_host": (
+            "<b>Скачано</b>\n"
+            "<blockquote>"
+            "Имя: <code>{name}</code>\n"
+            "Размер: <code>{size}</code>"
+            "</blockquote>\n"
+            "<b>Выберите куда загрузить:</b>"
+        ),
         "uploading": (
-            "<b>Загрузка на x0.at</b>\n"
+            "<b>Загрузка на {host}</b>\n"
             "<blockquote><code>{time}</code></blockquote>"
         ),
         "done": (
@@ -251,9 +272,17 @@ class Uploader(loader.Module):
             "<b>Ошибка скачивания</b>\n"
             "<blockquote><code>{error}</code></blockquote>"
         ),
+        "killed": (
+            "<b>Загрузка отменена</b>"
+        ),
         "btn_close": "Закрыть",
-        "btn_copy": "Скопировать URL",
+        "btn_x0": "x0.at",
+        "btn_catbox": "catbox.moe",
+        "btn_kill": "Kill",
     }
+
+    def __init__(self):
+        self._upload_procs = {}
 
     def _s(self, key, **kwargs):
         prefix = self.get_prefix()
@@ -337,11 +366,32 @@ class Uploader(loader.Module):
     async def _cb_close(self, call: InlineCall):
         await call.delete()
 
-    async def _timer_loop(self, call: InlineCall, key, start_time, stop_event):
+    async def _cb_kill(self, call: InlineCall, uid):
+        proc = self._upload_procs.get(uid)
+        if proc:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        await call.edit(
+            self._s("killed"),
+            reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+        )
+
+    async def _cb_upload_x0(self, call: InlineCall, uid, tmp_path, filename, file_type, file_size, dl_elapsed):
+        await self._do_upload(call, uid, tmp_path, filename, file_type, file_size, dl_elapsed, "x0.at")
+
+    async def _cb_upload_catbox(self, call: InlineCall, uid, tmp_path, filename, file_type, file_size, dl_elapsed):
+        await self._do_upload(call, uid, tmp_path, filename, file_type, file_size, dl_elapsed, "catbox.moe")
+
+    async def _timer_loop(self, call: InlineCall, key, start_time, stop_event, extra=None):
         while not stop_event.is_set():
             elapsed = time.time() - start_time
             try:
-                await call.edit(self._s(key, time=_format_time(elapsed)))
+                kwargs = {"time": _format_time(elapsed)}
+                if extra:
+                    kwargs.update(extra)
+                await call.edit(self._s(key, **kwargs))
             except Exception:
                 pass
             try:
@@ -350,12 +400,127 @@ class Uploader(loader.Module):
             except asyncio.TimeoutError:
                 pass
 
+    async def _do_upload(self, form, uid, tmp_path, filename, file_type, file_size, dl_elapsed, host):
+        stop_event = asyncio.Event()
+        ul_start = time.time()
+
+        async def _timer_with_kill():
+            while not stop_event.is_set():
+                elapsed = time.time() - ul_start
+                try:
+                    await form.edit(
+                        self._s("uploading", host=host, time=_format_time(elapsed)),
+                        reply_markup=[[
+                            {"text": self.strings["btn_kill"], "callback": self._cb_kill, "args": (uid,), "style": "danger"}
+                        ]],
+                    )
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=1.7)
+                    break
+                except asyncio.TimeoutError:
+                    pass
+
+        timer_task = asyncio.ensure_future(_timer_with_kill())
+
+        try:
+            if host == "x0.at":
+                cmd = [
+                    "curl", "-sL", "--max-time", "120",
+                    "-F", f"file=@{tmp_path}",
+                    "https://x0.at",
+                ]
+            else:
+                cmd = [
+                    "curl", "-sL", "--max-time", "120",
+                    "-F", "reqtype=fileupload",
+                    "-F", f"fileToUpload=@{tmp_path}",
+                    "https://catbox.moe/user/api.php",
+                ]
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            self._upload_procs[uid] = proc
+
+            try:
+                out, err = await asyncio.wait_for(proc.communicate(), timeout=130)
+            except asyncio.TimeoutError:
+                stop_event.set()
+                await timer_task
+                self._upload_procs.pop(uid, None)
+                await form.edit(
+                    self._s("upload_fail", error="timeout"),
+                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                )
+                return
+
+            ul_elapsed = time.time() - ul_start
+            stop_event.set()
+            await timer_task
+            self._upload_procs.pop(uid, None)
+
+            if proc.returncode != 0 or not out:
+                error = (err or b"").decode().strip() or f"exit code {proc.returncode}"
+                await form.edit(
+                    self._s("upload_fail", error=_escape(error[:300])),
+                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                )
+                return
+
+            url = out.decode().strip()
+            if not url.startswith("http"):
+                await form.edit(
+                    self._s("upload_fail", error=_escape(url[:300])),
+                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                )
+                return
+
+            total_elapsed = dl_elapsed + ul_elapsed
+
+            await form.edit(
+                self._s(
+                    "done",
+                    url=_escape(url),
+                    name=_escape(filename),
+                    type=_escape(file_type),
+                    size=_format_bytes(file_size),
+                    dl_time=_format_time(dl_elapsed),
+                    ul_time=_format_time(ul_elapsed),
+                    total_time=_format_time(total_elapsed),
+                ),
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            )
+
+        except FileNotFoundError:
+            stop_event.set()
+            await timer_task
+            self._upload_procs.pop(uid, None)
+            await form.edit(
+                self._s("upload_fail", error="curl not found"),
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            )
+        except Exception as e:
+            stop_event.set()
+            try:
+                await timer_task
+            except Exception:
+                pass
+            self._upload_procs.pop(uid, None)
+            await form.edit(
+                self._s("upload_fail", error=_escape(str(e)[:300])),
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            )
+
     @loader.command(
-        ru_doc="Реплай на фото/видео/файл - загрузить на x0.at",
-        en_doc="Reply to photo/video/file - upload to x0.at",
+        ru_doc="Реплай на фото/видео/файл - загрузить на x0.at или catbox.moe",
+        en_doc="Reply to photo/video/file - upload to x0.at or catbox.moe",
     )
     async def upl(self, message):
-        """Reply to photo/video/file - upload to x0.at"""
+        """Reply to photo/video/file - upload to x0.at or catbox.moe"""
         reply = await message.get_reply_message()
 
         if not reply or not reply.media:
@@ -422,72 +587,28 @@ class Uploader(loader.Module):
             await timer_task
 
             file_size = os.path.getsize(tmp_path)
+            uid = str(id(form))
 
-            stop_event = asyncio.Event()
-            ul_start = time.time()
-            timer_task = asyncio.ensure_future(
-                self._timer_loop(form, "uploading", ul_start, stop_event)
+            await form.edit(
+                self._s("choose_host", name=_escape(filename), size=_format_bytes(file_size)),
+                reply_markup=[
+                    [
+                        {
+                            "text": self.strings["btn_x0"],
+                            "callback": self._cb_upload_x0,
+                            "args": (uid, tmp_path, filename, file_type, file_size, dl_elapsed),
+                            "style": "primary",
+                        },
+                        {
+                            "text": self.strings["btn_catbox"],
+                            "callback": self._cb_upload_catbox,
+                            "args": (uid, tmp_path, filename, file_type, file_size, dl_elapsed),
+                            "style": "primary",
+                        },
+                    ],
+                    [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
+                ],
             )
-
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "curl", "-sL", "--max-time", "120",
-                    "-F", f"file=@{tmp_path}",
-                    "https://x0.at",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                out, err = await asyncio.wait_for(proc.communicate(), timeout=130)
-                ul_elapsed = time.time() - ul_start
-                stop_event.set()
-                await timer_task
-
-                if proc.returncode != 0 or not out:
-                    error = (err or b"").decode().strip() or f"exit code {proc.returncode}"
-                    await form.edit(
-                        self._s("upload_fail", error=_escape(error[:300])),
-                        reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-                    )
-                    return
-
-                url = out.decode().strip()
-                if not url.startswith("http"):
-                    await form.edit(
-                        self._s("upload_fail", error=_escape(url[:300])),
-                        reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-                    )
-                    return
-
-                total_elapsed = dl_elapsed + ul_elapsed
-
-                await form.edit(
-                    self._s(
-                        "done",
-                        url=_escape(url),
-                        name=_escape(filename),
-                        type=_escape(file_type),
-                        size=_format_bytes(file_size),
-                        dl_time=_format_time(dl_elapsed),
-                        ul_time=_format_time(ul_elapsed),
-                        total_time=_format_time(total_elapsed),
-                    ),
-                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-                )
-
-            except asyncio.TimeoutError:
-                stop_event.set()
-                await timer_task
-                await form.edit(
-                    self._s("upload_fail", error="timeout"),
-                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-                )
-            except FileNotFoundError:
-                stop_event.set()
-                await timer_task
-                await form.edit(
-                    self._s("upload_fail", error="curl not found"),
-                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-                )
 
         except Exception as e:
             stop_event.set()
@@ -499,7 +620,6 @@ class Uploader(loader.Module):
                 self._s("download_fail", error=_escape(str(e)[:300])),
                 reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
             )
-        finally:
             if tmp_path:
                 try:
                     os.remove(tmp_path)
