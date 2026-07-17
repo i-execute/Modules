@@ -1,4 +1,4 @@
-__version__ = (2, 0, 0)
+__version__ = (2, 0, 1)
 # meta developer: I_execute.t.me forked from @codrago_m
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/YNDXMusic/MetaBannerNew.jpeg
 
@@ -92,13 +92,32 @@ from yandex_music.exceptions import TimedOutError as YMTimedOutError
 from yandex_music.utils.request_async import Request as _YMRequest
 from yandex_music.exceptions import TimedOutError as _YMTimedOutError, NetworkError as _YMNetworkError
 
-if not getattr(_YMRequest, "_yndx_curl_patched", False):
-    from curl_cffi.requests import AsyncSession as _CurlSession
-    import asyncio as _asyncio
+from curl_cffi.requests import AsyncSession as _CurlSession
 
-    _YNDX_IMPERSONATE = "chrome116"
-    _YNDX_TIMEOUT = 0.7
-    _YNDX_ATTEMPTS = 30
+_YNDX_IMPERSONATE = "chrome116"
+_YNDX_TIMEOUT = 0.7
+_YNDX_ATTEMPTS = 30
+
+
+async def _yndx_curl_get(url, headers=None, timeout=10, attempts=3):
+    """Shared curl_cffi GET used by every raw HTTP call in this module
+    (covers, x0 uploads, etc.) so nothing bypasses the TLS-impersonation
+    wrapper that the yandex_music client itself uses."""
+    last_exc = None
+    async with _CurlSession(impersonate=_YNDX_IMPERSONATE) as session:
+        for _ in range(attempts):
+            try:
+                return await session.get(url, headers=headers, timeout=timeout)
+            except Exception as e:
+                last_exc = e
+                continue
+    if last_exc:
+        raise last_exc
+    return None
+
+
+if not getattr(_YMRequest, "_yndx_curl_patched", False):
+    import asyncio as _asyncio
 
     async def _yndx_curl_request_wrapper(self, *args, **kwargs):
         method = args[0] if args else kwargs.pop("method", "GET")
@@ -226,18 +245,14 @@ def normalize_cover(raw_data, max_size=None, force_jpeg=False):
 async def _get_best_cover_url(cover_uri):
     if not cover_uri:
         return None
-    try:
-        async with aiohttp.ClientSession() as sess:
-            for sz in COVER_SIZES:
-                url = f"https://{cover_uri.replace('%%', f'{sz}x{sz}')}"
-                try:
-                    async with sess.head(url, timeout=aiohttp.ClientTimeout(total=5)) as r:
-                        if r.status == 200:
-                            return url
-                except Exception:
-                    continue
-    except Exception:
-        pass
+    for sz in COVER_SIZES:
+        url = f"https://{cover_uri.replace('%%', f'{sz}x{sz}')}"
+        try:
+            r = await _yndx_curl_get(url, timeout=5, attempts=1)
+            if r is not None and r.status_code == 200:
+                return url
+        except Exception:
+            continue
     return None
 
 
@@ -257,20 +272,19 @@ async def _download_cover_best(cover_uri, covers_dir=None):
     if not url:
         return None
     try:
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                if r.status != 200:
-                    return None
-                data = await r.read()
-                if not data or len(data) < 500:
-                    return None
-                if covers_dir:
-                    try:
-                        with open(cache_path, "wb") as f:
-                            f.write(data)
-                    except Exception:
-                        pass
-                return data
+        r = await _yndx_curl_get(url, timeout=15)
+        if r is None or r.status_code != 200:
+            return None
+        data = r.content
+        if not data or len(data) < 500:
+            return None
+        if covers_dir:
+            try:
+                with open(cache_path, "wb") as f:
+                    f.write(data)
+            except Exception:
+                pass
+        return data
     except Exception:
         return None
 
@@ -1444,8 +1458,6 @@ class YNDXMusic(loader.Module):
                 ]],
                 silent=True,
             )
-            if is_forum and topic_id:
-                form_kwargs["reply_to"] = topic_id
             await self.inline.form(**form_kwargs)
             return
         if _is_ym_track_link(query):
@@ -1582,8 +1594,6 @@ class YNDXMusic(loader.Module):
         )
         if cover_url:
             form_kwargs["photo"] = cover_url
-        if is_forum and topic_id:
-            form_kwargs["reply_to"] = topic_id
         await self.inline.form(**form_kwargs)
         asyncio.ensure_future(self._yms_prefetch_covers(session_id))
 
@@ -1856,8 +1866,6 @@ class YNDXMusic(loader.Module):
             ]],
             silent=True,
         )
-        if is_forum and topic_id:
-            form_kwargs["reply_to"] = topic_id
         await self.inline.form(**form_kwargs)
 
     async def _ymp_show_confirm_form(self, message, session_id, pl_title, count, cover_url, is_forum, topic_id):
@@ -1872,21 +1880,18 @@ class YNDXMusic(loader.Module):
         )
         if cover_url:
             form_kwargs["photo"] = cover_url
-        if is_forum and topic_id:
-            form_kwargs["reply_to"] = topic_id
         await self.inline.form(**form_kwargs)
 
     async def _get_x0_cover_url(self, raw_url, name):
         try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(raw_url, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                    if r.status == 200:
-                        data = await r.read()
-                        return await _upload_to_x0(
-                            normalize_cover(data, force_jpeg=True) or data,
-                            sanitize_fn(name) + ".jpg",
-                            "image/jpeg",
-                        )
+            r = await _yndx_curl_get(raw_url, timeout=10)
+            if r is not None and r.status_code == 200:
+                data = r.content
+                return await _upload_to_x0(
+                    normalize_cover(data, force_jpeg=True) or data,
+                    sanitize_fn(name) + ".jpg",
+                    "image/jpeg",
+                )
         except Exception:
             pass
         return None
@@ -2208,8 +2213,6 @@ class YNDXMusic(loader.Module):
             ]],
             silent=True,
         )
-        if is_forum and topic_id:
-            form_kwargs["reply_to"] = topic_id
         await self.inline.form(**form_kwargs)
 
     async def _ymb_show_book_form(self, message, session_id, al, is_forum, topic_id):
@@ -2241,8 +2244,6 @@ class YNDXMusic(loader.Module):
         )
         if x0_url:
             form_kwargs["photo"] = x0_url
-        if is_forum and topic_id:
-            form_kwargs["reply_to"] = topic_id
         await self.inline.form(**form_kwargs)
 
     async def _ymb_link_input(self, call, query: str, session_id: str):
