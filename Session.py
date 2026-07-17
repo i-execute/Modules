@@ -622,7 +622,7 @@ class Session(loader.Module):
                 full_name = f"{first_name} {last_name}".strip() or "Unknown"
                 
                 if username:
-                    user_link = f"<a href='tg://resolve?domain={username}'>{full_name}</a>"
+                    user_link = f"<a href='@{username}'>{full_name}</a>"
                 else:
                     user_link = f"<a href='tg://user?id={me.id}'>{full_name}</a>"
                 

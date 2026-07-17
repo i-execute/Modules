@@ -334,7 +334,7 @@ class TgBotAPI:
 
 
 @loader.tds
-class ShorBotMod(loader.Module):
+class ShorBot(loader.Module):
     """Demonstration of Shor's algorithm via Telegram bot with RichMessage"""
 
     strings = {
@@ -635,7 +635,7 @@ class ShorBotMod(loader.Module):
         ru_doc="Панель управления ShorBot",
         en_doc="ShorBot control panel",
     )
-    async def shorbot(self, message):
+    async def sb(self, message):
         """ShorBot control panel"""
         await self.inline.form(
             text=self._fmt_menu(),
