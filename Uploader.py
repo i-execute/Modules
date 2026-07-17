@@ -1,4 +1,4 @@
-__version__ = (1, 2, 4)
+__version__ = (1, 2, 5)
 # meta developer: I_execute.t.me
 
 import os
@@ -368,7 +368,7 @@ class Uploader(loader.Module):
         except Exception:
             pass
 
-    def _build_cmd(self, host, tmp_path):
+    def _make_curl_args(self, host, tmp_path):
         ua = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0"
         if host == "x0.at":
             return [
@@ -462,10 +462,10 @@ class Uploader(loader.Module):
         timer_task = asyncio.ensure_future(_timer())
 
         try:
-            cmd = self._build_cmd(host, tmp_path)
+            args = self._make_curl_args(host, tmp_path)
 
             proc = await asyncio.create_subprocess_exec(
-                *cmd,
+                *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
