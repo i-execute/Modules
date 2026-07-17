@@ -1,4 +1,4 @@
-__version__ = (1, 2, 2)
+__version__ = (1, 2, 4)
 # meta developer: I_execute.t.me
 
 import os
@@ -110,7 +110,7 @@ ALLOWED_EXTENSIONS = {
 
 @loader.tds
 class Uploader(loader.Module):
-    """Upload files to x0.at or catbox.moe"""
+    """Upload files to x0.at or litterbox.catbox.moe"""
 
     strings = {
         "name": "Uploader",
@@ -191,7 +191,7 @@ class Uploader(loader.Module):
         "killed": "<b>Upload cancelled</b>",
         "btn_close": "Close",
         "btn_x0": "x0.at",
-        "btn_catbox": "catbox.moe",
+        "btn_litter": "litterbox (72h)",
         "btn_kill": "Kill",
     }
 
@@ -273,7 +273,7 @@ class Uploader(loader.Module):
         "killed": "<b>Загрузка отменена</b>",
         "btn_close": "Закрыть",
         "btn_x0": "x0.at",
-        "btn_catbox": "catbox.moe",
+        "btn_litter": "litterbox (72h)",
         "btn_kill": "Kill",
     }
 
@@ -368,6 +368,26 @@ class Uploader(loader.Module):
         except Exception:
             pass
 
+    def _build_cmd(self, host, tmp_path):
+        ua = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0"
+        if host == "x0.at":
+            return [
+                "curl", "-sL", "--max-time", "120",
+                "-A", ua,
+                "-F", f"file=@{tmp_path}",
+                "https://x0.at",
+            ]
+        if host == "litterbox":
+            return [
+                "curl", "-sL", "--max-time", "120",
+                "-A", ua,
+                "-F", "reqtype=fileupload",
+                "-F", "time=72h",
+                "-F", f"fileToUpload=@{tmp_path}",
+                "https://litterbox.catbox.moe/resources/internals/api.php",
+            ]
+        return []
+
     async def _cb_close(self, call: InlineCall):
         await call.delete()
 
@@ -397,23 +417,31 @@ class Uploader(loader.Module):
         tmp_path, filename, file_type, file_size, dl_elapsed = data
         await self._do_upload(call, uid, tmp_path, filename, file_type, file_size, dl_elapsed, "x0.at")
 
-    async def _cb_upload_catbox(self, call: InlineCall, uid):
+    async def _cb_upload_litter(self, call: InlineCall, uid):
         data = self._pending_files.get(uid)
         if not data:
             return
         tmp_path, filename, file_type, file_size, dl_elapsed = data
-        await self._do_upload(call, uid, tmp_path, filename, file_type, file_size, dl_elapsed, "catbox.moe")
+        await self._do_upload(call, uid, tmp_path, filename, file_type, file_size, dl_elapsed, "litterbox")
 
     async def _do_upload(self, form, uid, tmp_path, filename, file_type, file_size, dl_elapsed, host):
+        if not os.path.exists(tmp_path):
+            await form.edit(
+                self._s("upload_fail", error="temp file not found"),
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            )
+            return
+
         stop_event = asyncio.Event()
         ul_start = time.time()
+        host_label = "x0.at" if host == "x0.at" else "litterbox.catbox.moe"
 
         async def _timer():
             while not stop_event.is_set():
                 elapsed = time.time() - ul_start
                 try:
                     await form.edit(
-                        self._s("uploading", host=host, time=_format_time(elapsed)),
+                        self._s("uploading", host=host_label, time=_format_time(elapsed)),
                         reply_markup=[[
                             {
                                 "text": self.strings["btn_kill"],
@@ -434,19 +462,7 @@ class Uploader(loader.Module):
         timer_task = asyncio.ensure_future(_timer())
 
         try:
-            if host == "x0.at":
-                cmd = [
-                    "curl", "-sL", "--max-time", "120",
-                    "-F", f"file=@{tmp_path}",
-                    "https://x0.at",
-                ]
-            else:
-                cmd = [
-                    "curl", "-sL", "--max-time", "120",
-                    "-F", "reqtype=fileupload",
-                    "-F", f"fileToUpload=@{tmp_path}",
-                    "https://catbox.moe/user/api.php",
-                ]
+            cmd = self._build_cmd(host, tmp_path)
 
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -537,11 +553,11 @@ class Uploader(loader.Module):
             )
 
     @loader.command(
-        ru_doc="Реплай на фото/видео/файл - загрузить на x0.at или catbox.moe",
-        en_doc="Reply to photo/video/file - upload to x0.at or catbox.moe",
+        ru_doc="Реплай на фото/видео/файл - загрузить на x0.at или litterbox.catbox.moe",
+        en_doc="Reply to photo/video/file - upload to x0.at or litterbox.catbox.moe",
     )
     async def upl(self, message):
-        """Reply to photo/video/file - upload to x0.at or catbox.moe"""
+        """Reply to photo/video/file - upload to x0.at or litterbox.catbox.moe"""
         reply = await message.get_reply_message()
 
         if not reply or not reply.media:
@@ -635,8 +651,8 @@ class Uploader(loader.Module):
                             "style": "primary",
                         },
                         {
-                            "text": self.strings["btn_catbox"],
-                            "callback": self._cb_upload_catbox,
+                            "text": self.strings["btn_litter"],
+                            "callback": self._cb_upload_litter,
                             "args": (uid,),
                             "style": "primary",
                         },
