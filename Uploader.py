@@ -1,4 +1,4 @@
-__version__ = (1, 2, 1)
+__version__ = (1, 2, 2)
 # meta developer: I_execute.t.me
 
 import os
@@ -360,14 +360,15 @@ class Uploader(loader.Module):
                     return sz
         return None
 
+    def _cleanup(self, uid, tmp_path):
+        self._upload_procs.pop(uid, None)
+        self._pending_files.pop(uid, None)
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
     async def _cb_close(self, call: InlineCall):
-        uid = getattr(call, "_uid", None)
-        if uid and uid in self._pending_files:
-            tmp_path = self._pending_files.pop(uid)
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
         await call.delete()
 
     async def _cb_kill(self, call: InlineCall, uid):
@@ -377,10 +378,11 @@ class Uploader(loader.Module):
                 proc.kill()
             except Exception:
                 pass
-        tmp_path = self._pending_files.pop(uid, None)
-        if tmp_path:
+        data = self._pending_files.pop(uid, None)
+        self._upload_procs.pop(uid, None)
+        if data:
             try:
-                os.remove(tmp_path)
+                os.remove(data[0])
             except Exception:
                 pass
         await call.edit(
@@ -435,14 +437,14 @@ class Uploader(loader.Module):
             if host == "x0.at":
                 cmd = [
                     "curl", "-sL", "--max-time", "120",
-                    "-F", f"file=@{tmp_path};filename={filename}",
+                    "-F", f"file=@{tmp_path}",
                     "https://x0.at",
                 ]
             else:
                 cmd = [
                     "curl", "-sL", "--max-time", "120",
                     "-F", "reqtype=fileupload",
-                    "-F", f"fileToUpload=@{tmp_path};filename={filename}",
+                    "-F", f"fileToUpload=@{tmp_path}",
                     "https://catbox.moe/user/api.php",
                 ]
 
@@ -458,12 +460,7 @@ class Uploader(loader.Module):
             except asyncio.TimeoutError:
                 stop_event.set()
                 await timer_task
-                self._upload_procs.pop(uid, None)
-                self._pending_files.pop(uid, None)
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
+                self._cleanup(uid, tmp_path)
                 await form.edit(
                     self._s("upload_fail", error="timeout"),
                     reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
@@ -473,30 +470,36 @@ class Uploader(loader.Module):
             ul_elapsed = time.time() - ul_start
             stop_event.set()
             await timer_task
-            self._upload_procs.pop(uid, None)
-            self._pending_files.pop(uid, None)
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
 
-            if proc.returncode != 0 or not out:
-                error = (err or b"").decode().strip() or f"exit code {proc.returncode}"
+            stdout_text = out.decode("utf-8", errors="replace").strip()
+            stderr_text = err.decode("utf-8", errors="replace").strip()
+
+            self._cleanup(uid, tmp_path)
+
+            if proc.returncode != 0:
+                error = stderr_text or stdout_text or f"exit code {proc.returncode}"
                 await form.edit(
                     self._s("upload_fail", error=_escape(error[:300])),
                     reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
                 )
                 return
 
-            url = out.decode().strip()
-
-            if not url.startswith("http"):
+            if not stdout_text:
+                error = stderr_text or "empty response"
                 await form.edit(
-                    self._s("upload_fail", error=_escape(url[:300])),
+                    self._s("upload_fail", error=_escape(error[:300])),
                     reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
                 )
                 return
 
+            if not stdout_text.startswith("http"):
+                await form.edit(
+                    self._s("upload_fail", error=_escape(stdout_text[:300])),
+                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                )
+                return
+
+            url = stdout_text
             total_elapsed = dl_elapsed + ul_elapsed
 
             await form.edit(
@@ -516,12 +519,7 @@ class Uploader(loader.Module):
         except FileNotFoundError:
             stop_event.set()
             await timer_task
-            self._upload_procs.pop(uid, None)
-            self._pending_files.pop(uid, None)
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
+            self._cleanup(uid, tmp_path)
             await form.edit(
                 self._s("upload_fail", error="curl not found"),
                 reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
@@ -532,12 +530,7 @@ class Uploader(loader.Module):
                 await timer_task
             except Exception:
                 pass
-            self._upload_procs.pop(uid, None)
-            self._pending_files.pop(uid, None)
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
+            self._cleanup(uid, tmp_path)
             await form.edit(
                 self._s("upload_fail", error=_escape(str(e)[:300])),
                 reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
