@@ -8,6 +8,7 @@ DeleteMusic
 DepInvoce
 Deleter
 DevTool
+Gift
 Grabber
 Info
 InlineDL
@@ -26,7 +27,6 @@ SCMusic
 ServerBox
 Session
 ShorBot
-StarsX
 Statistics
 StickerClone
 Stories
