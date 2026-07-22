@@ -26,7 +26,6 @@ from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN_PATTERN = re.compile(r'\b\d{8,10}:[A-Za-z0-9_-]{35}\b')
 STRING_SESSION_PATTERN = re.compile(r'1[A-Za-z0-9_-]{200,}={0,2}')
 
 MAX_ACCOUNTS = 10
@@ -113,6 +112,12 @@ class Gift(loader.Module):
         "btn_to_channel": "Channel",
         "input_user_id": "Send user ID or @username:",
         "input_channel_id": "Send channel ID (with or without -100):",
+        "target_input_menu": (
+            "<b>Enter Recipient</b>\n"
+            "<blockquote>Sending from: {from_info}\n"
+            "Type: {to_type}</blockquote>"
+        ),
+        "btn_enter_id": "Enter ID",
         "resolving": (
             "<b>Resolving...</b>\n"
             "<blockquote>Looking up recipient</blockquote>"
@@ -127,6 +132,7 @@ class Gift(loader.Module):
             "Enter gift ID to send</blockquote>"
         ),
         "input_gift_id": "Send gift ID (numeric):",
+        "btn_enter_gift_id": "Enter Gift ID",
         "gift_checking": (
             "<b>Checking gift...</b>\n"
             "<blockquote>Verifying gift ID exists</blockquote>"
@@ -146,6 +152,7 @@ class Gift(loader.Module):
             "How many gifts to send?</blockquote>"
         ),
         "input_count": "Send quantity (number >= 1):",
+        "btn_enter_count": "Enter Count",
         "count_invalid": (
             "<b>Invalid Quantity</b>\n"
             "<blockquote>Must be a positive integer</blockquote>"
@@ -155,6 +162,7 @@ class Gift(loader.Module):
             "<blockquote>Add a message to the gift or skip</blockquote>"
         ),
         "input_comment": "Send comment text:",
+        "btn_enter_comment": "Enter Comment",
         "btn_skip_comment": "Skip",
         "confirm_menu": (
             "<b>Confirm Gift</b>\n"
@@ -193,9 +201,7 @@ class Gift(loader.Module):
             "<blockquote>Detected: <code>{type}</code>\n"
             "Connect this session?</blockquote>"
         ),
-        "connect_select_dc": (
-            "<b>Select DC for HEX session</b>"
-        ),
+        "connect_select_dc": "<b>Select DC for HEX session</b>",
         "connecting": (
             "<b>Connecting...</b>\n"
             "<blockquote>Please wait</blockquote>"
@@ -278,6 +284,12 @@ class Gift(loader.Module):
         "btn_to_channel": "Канал",
         "input_user_id": "Отправьте ID пользователя или @username:",
         "input_channel_id": "Отправьте ID канала (с -100 или без):",
+        "target_input_menu": (
+            "<b>Введите получателя</b>\n"
+            "<blockquote>Отправка с: {from_info}\n"
+            "Тип: {to_type}</blockquote>"
+        ),
+        "btn_enter_id": "Ввести ID",
         "resolving": (
             "<b>Поиск...</b>\n"
             "<blockquote>Определяем получателя</blockquote>"
@@ -292,6 +304,7 @@ class Gift(loader.Module):
             "Введите ID подарка</blockquote>"
         ),
         "input_gift_id": "Отправьте ID подарка (числовой):",
+        "btn_enter_gift_id": "Ввести ID подарка",
         "gift_checking": (
             "<b>Проверяем подарок...</b>\n"
             "<blockquote>Проверяем существование ID</blockquote>"
@@ -311,6 +324,7 @@ class Gift(loader.Module):
             "Сколько подарков отправить?</blockquote>"
         ),
         "input_count": "Отправьте количество (число >= 1):",
+        "btn_enter_count": "Ввести количество",
         "count_invalid": (
             "<b>Неверное количество</b>\n"
             "<blockquote>Должно быть положительным целым числом</blockquote>"
@@ -320,6 +334,7 @@ class Gift(loader.Module):
             "<blockquote>Добавьте сообщение к подарку или пропустите</blockquote>"
         ),
         "input_comment": "Отправьте текст комментария:",
+        "btn_enter_comment": "Ввести комментарий",
         "btn_skip_comment": "Пропустить",
         "confirm_menu": (
             "<b>Подтверждение</b>\n"
@@ -358,9 +373,7 @@ class Gift(loader.Module):
             "<blockquote>Обнаружено: <code>{type}</code>\n"
             "Подключить эту сессию?</blockquote>"
         ),
-        "connect_select_dc": (
-            "<b>Выберите DC для HEX-сессии</b>"
-        ),
+        "connect_select_dc": "<b>Выберите DC для HEX-сессии</b>",
         "connecting": (
             "<b>Подключаемся...</b>\n"
             "<blockquote>Пожалуйста, подождите</blockquote>"
@@ -494,7 +507,6 @@ class Gift(loader.Module):
                 if g.id == gift_id:
                     return True, g.stars
         try:
-            from telethon.tl.types import InputPeerSelf
             me_input = await self._client.get_input_entity(self._owner_id)
             inv = InputInvoiceStarGift(me_input, gift_id, message=TextWithEntities("", []))
             form = await self._client(GetPaymentFormRequest(inv))
@@ -640,7 +652,7 @@ class Gift(loader.Module):
                 {"text": self.strings["btn_user"], "callback": self._cb_select_user, "style": "primary"},
                 {"text": self.strings["btn_bot"], "callback": self._cb_bot_menu, "style": "primary"},
             ],
-            [{"text": self.strings["btn_connected"], "callback": self._cb_connected_menu, "style": "success"}],
+            [{"text": self.strings["btn_connected"], "callback": self._cb_connected_menu, "style": "primary"}],
             [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
         ]
 
@@ -677,7 +689,7 @@ class Gift(loader.Module):
             "text": self.strings["btn_add_token"],
             "input": self.strings["input_token"],
             "handler": self._cb_handle_token,
-            "style": "success",
+            "style": "primary",
         }])
         rows.append([{
             "text": self.strings["btn_back"],
@@ -720,14 +732,11 @@ class Gift(loader.Module):
         self._set_state(call, state)
         await call.edit(
             self.strings["bot_valid"].format(username=username),
-            reply_markup=[[{
-                "text": self.strings["btn_back"],
-                "callback": self._cb_bot_menu,
-                "style": "danger",
-            }]],
+            reply_markup=[
+                [{"text": "Continue", "callback": self._show_target_menu, "style": "success"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_bot_menu, "style": "danger"}],
+            ],
         )
-        await asyncio.sleep(1)
-        await self._show_target_menu(call)
 
     async def _cb_select_bot_slot(self, call: InlineCall, slot: int):
         info = self._sessions.get(slot)
@@ -799,49 +808,59 @@ class Gift(loader.Module):
             self.strings["target_menu"].format(from_info=state.get("from_info", "?")),
             reply_markup=[
                 [
-                    {
-                        "text": self.strings["btn_to_user"],
-                        "input": self.strings["input_user_id"],
-                        "handler": self._cb_got_user_target,
-                        "style": "primary",
-                    },
-                    {
-                        "text": self.strings["btn_to_channel"],
-                        "input": self.strings["input_channel_id"],
-                        "handler": self._cb_got_channel_target,
-                        "style": "primary",
-                    },
+                    {"text": self.strings["btn_to_user"], "callback": self._cb_chose_user_target, "style": "primary"},
+                    {"text": self.strings["btn_to_channel"], "callback": self._cb_chose_channel_target, "style": "primary"},
                 ],
                 [{"text": self.strings["btn_back"], "callback": self._cb_main, "style": "danger"}],
             ],
         )
 
-    async def _cb_got_user_target(self, call: InlineCall, raw: str):
-        await call.edit(self.strings["resolving"])
-        target_id, target_name = await self._resolve(raw.strip())
-        if not target_id:
-            await call.edit(
-                self.strings["not_found"],
-                reply_markup=[[{
-                    "text": self.strings["btn_back"],
-                    "callback": self._show_target_menu,
-                    "style": "danger",
-                }]],
-            )
-            return
+    async def _cb_chose_user_target(self, call: InlineCall):
         state = self._get_state(call)
-        state.update({
-            "to_type": "user",
-            "target_id": target_id,
-            "target_name": _esc(target_name),
-        })
+        state["to_type"] = "user"
         self._set_state(call, state)
-        await self._show_gift_id_menu(call)
+        await call.edit(
+            self.strings["target_input_menu"].format(
+                from_info=state.get("from_info", "?"),
+                to_type=self.strings["btn_to_user"],
+            ),
+            reply_markup=[
+                [{
+                    "text": self.strings["btn_enter_id"],
+                    "input": self.strings["input_user_id"],
+                    "handler": self._cb_got_target_id,
+                    "style": "primary",
+                }],
+                [{"text": self.strings["btn_back"], "callback": self._show_target_menu, "style": "danger"}],
+            ],
+        )
 
-    async def _cb_got_channel_target(self, call: InlineCall, raw: str):
+    async def _cb_chose_channel_target(self, call: InlineCall):
+        state = self._get_state(call)
+        state["to_type"] = "channel"
+        self._set_state(call, state)
+        await call.edit(
+            self.strings["target_input_menu"].format(
+                from_info=state.get("from_info", "?"),
+                to_type=self.strings["btn_to_channel"],
+            ),
+            reply_markup=[
+                [{
+                    "text": self.strings["btn_enter_id"],
+                    "input": self.strings["input_channel_id"],
+                    "handler": self._cb_got_target_id,
+                    "style": "primary",
+                }],
+                [{"text": self.strings["btn_back"], "callback": self._show_target_menu, "style": "danger"}],
+            ],
+        )
+
+    async def _cb_got_target_id(self, call: InlineCall, raw: str):
+        state = self._get_state(call)
+        to_type = state.get("to_type", "user")
         await call.edit(self.strings["resolving"])
         raw = raw.strip()
-        if re.match(r'^\d+$', raw):
+        if to_type == "channel" and re.match(r'^\d+$', raw):
             raw = f"-100{raw}"
         target_id, target_name = await self._resolve(raw)
         if not target_id:
@@ -854,11 +873,10 @@ class Gift(loader.Module):
                 }]],
             )
             return
-        chan_id = abs(target_id)
-        state = self._get_state(call)
+        if to_type == "channel":
+            target_id = abs(target_id)
         state.update({
-            "to_type": "channel",
-            "target_id": chan_id,
+            "target_id": target_id,
             "target_name": _esc(target_name),
         })
         self._set_state(call, state)
@@ -880,10 +898,10 @@ class Gift(loader.Module):
             self.strings["gift_id_menu"].format(target_name=state.get("target_name", "?")),
             reply_markup=[
                 [{
-                    "text": "Enter Gift ID",
+                    "text": self.strings["btn_enter_gift_id"],
                     "input": self.strings["input_gift_id"],
                     "handler": self._cb_got_gift_id,
-                    "style": "success",
+                    "style": "primary",
                 }],
                 [{"text": self.strings["btn_back"], "callback": self._show_target_menu, "style": "danger"}],
             ],
@@ -920,14 +938,11 @@ class Gift(loader.Module):
         self._set_state(call, state)
         await call.edit(
             self.strings["gift_found"].format(gift_id=gift_id, stars=stars),
-            reply_markup=[[{
-                "text": "Continue",
-                "callback": self._show_count_menu,
-                "style": "success",
-            }]],
+            reply_markup=[
+                [{"text": "Continue", "callback": self._show_count_menu, "style": "success"}],
+                [{"text": self.strings["btn_back"], "callback": self._show_gift_id_menu, "style": "danger"}],
+            ],
         )
-        await asyncio.sleep(0.8)
-        await self._show_count_menu(call)
 
     async def _show_count_menu(self, call: InlineCall):
         state = self._get_state(call)
@@ -938,10 +953,10 @@ class Gift(loader.Module):
             ),
             reply_markup=[
                 [{
-                    "text": "Enter Count",
+                    "text": self.strings["btn_enter_count"],
                     "input": self.strings["input_count"],
                     "handler": self._cb_got_count,
-                    "style": "success",
+                    "style": "primary",
                 }],
                 [{"text": self.strings["btn_back"], "callback": self._show_gift_id_menu, "style": "danger"}],
             ],
@@ -971,12 +986,12 @@ class Gift(loader.Module):
             self.strings["comment_menu"],
             reply_markup=[
                 [{
-                    "text": "Enter Comment",
+                    "text": self.strings["btn_enter_comment"],
                     "input": self.strings["input_comment"],
                     "handler": self._cb_got_comment,
                     "style": "primary",
                 }],
-                [{"text": self.strings["btn_skip_comment"], "callback": self._cb_skip_comment, "style": "success"}],
+                [{"text": self.strings["btn_skip_comment"], "callback": self._cb_skip_comment, "style": "primary"}],
                 [{"text": self.strings["btn_back"], "callback": self._show_count_menu, "style": "danger"}],
             ],
         )
@@ -1064,7 +1079,6 @@ class Gift(loader.Module):
                 await asyncio.sleep(0.5)
 
         self._clear_state(call)
-
         back_row = [[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]]
 
         if success == count:
@@ -1125,7 +1139,7 @@ class Gift(loader.Module):
                             "text": self.strings["btn_connect"],
                             "callback": self._cb_connect_string_wrap,
                             "args": (string_session,),
-                            "style": "success",
+                            "style": "primary",
                         }],
                         [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
                     ],
