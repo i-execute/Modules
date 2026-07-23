@@ -129,7 +129,8 @@ class Gift(loader.Module):
         "gift_id_menu": (
             "<b>Gift ID</b>\n"
             "<blockquote>Recipient: {target_name}\n"
-            "Enter gift ID to send</blockquote>"
+            "Enter gift ID to send"
+            "You can see it in Hotaru_gift_id.t.me</blockquote>"
         ),
         "input_gift_id": "Send gift ID (numeric):",
         "btn_enter_gift_id": "Enter Gift ID",
@@ -301,7 +302,8 @@ class Gift(loader.Module):
         "gift_id_menu": (
             "<b>ID подарка</b>\n"
             "<blockquote>Получатель: {target_name}\n"
-            "Введите ID подарка</blockquote>"
+            "Введите ID подарка"
+            "Вы можете посмотреть его в Hotaru_gift_id.t.me</blockquote>"
         ),
         "input_gift_id": "Отправьте ID подарка (числовой):",
         "btn_enter_gift_id": "Ввести ID подарка",
