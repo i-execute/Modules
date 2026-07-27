@@ -13,6 +13,7 @@ Gift2Sticker
 Grabber
 Info
 InlineDL
+IPScanner
 Logger
 Manager
 MessageEditor
