@@ -99,13 +99,36 @@ async def _generate_qr(data: str):
 
 async def _decode_qr(image_data: bytes):
     if not PYZBAR_OK or not PIL_OK:
+        logger.error(
+            "SwiftQR: pyzbar_ok=%s pil_ok=%s (pyzbar needs the system libzbar0 "
+            "shared library, not just the pip package — run: apt install -y libzbar0)",
+            PYZBAR_OK, PIL_OK,
+        )
         return None
     try:
         img = Image.open(io.BytesIO(image_data))
-        decoded = pyzbar_decode(img)
-        if not decoded:
-            return None
-        return decoded[0].data.decode("utf-8", errors="replace")
+
+        if img.mode not in ("L", "RGB"):
+            img = img.convert("RGB")
+
+        attempts = [img]
+
+        w, h = img.size
+        if max(w, h) < 800:
+            scale = 800 / max(w, h)
+            attempts.append(img.resize((int(w * scale), int(h * scale)), Image.LANCZOS))
+
+        attempts.append(img.convert("L"))
+
+        for candidate in attempts:
+            try:
+                decoded = pyzbar_decode(candidate)
+            except Exception:
+                decoded = None
+            if decoded:
+                return decoded[0].data.decode("utf-8", errors="replace")
+
+        return None
     except Exception as e:
         logger.exception("_decode_qr error: %s", e)
         return None
@@ -154,7 +177,9 @@ class SwiftQR(loader.Module):
 
         "no_qr_found": (
             "<b>QR Code Not Found</b>\n"
-            "<blockquote>No QR code detected in image</blockquote>"
+            "<blockquote>No QR code detected in image</blockquote>\n"
+            "<blockquote>If this happens on every image, install the missing "
+            "system library first: <code>apt install -y libzbar0</code></blockquote>"
         ),
 
         "no_reply": (
@@ -200,7 +225,9 @@ class SwiftQR(loader.Module):
 
         "no_qr_found": (
             "<b>QR код не найден</b>\n"
-            "<blockquote>QR код не обнаружен на изображении</blockquote>"
+            "<blockquote>QR код не обнаружен на изображении</blockquote>\n"
+            "<blockquote>Если это происходит на любом изображении, сначала "
+            "установите системную библиотеку: <code>apt install -y libzbar0</code></blockquote>"
         ),
 
         "no_reply": (
