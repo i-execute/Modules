@@ -33,6 +33,7 @@ ShorBot
 Statistics
 StickerClone
 Stories
+SwiftQR
 Telega
 Token
 TONScanner
