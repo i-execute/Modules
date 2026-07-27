@@ -9,6 +9,7 @@ DepInvoce
 Deleter
 DevTool
 Gift
+Gift2Sticker
 Grabber
 Info
 InlineDL
