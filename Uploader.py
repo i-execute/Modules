@@ -65,6 +65,27 @@ def _detect_type(name):
         "aac": "audio/aac",
         "py": "text/x-python",
         "sh": "text/x-shellscript",
+        "go": "text/x-go",
+        "swift": "text/x-swift",
+        "ts": "text/typescript",
+        "tsx": "text/typescript",
+        "jsx": "text/javascript",
+        "java": "text/x-java",
+        "kt": "text/x-kotlin",
+        "c": "text/x-c",
+        "h": "text/x-c",
+        "cpp": "text/x-c++",
+        "hpp": "text/x-c++",
+        "cs": "text/x-csharp",
+        "rb": "text/x-ruby",
+        "php": "text/x-php",
+        "rs": "text/x-rust",
+        "lua": "text/x-lua",
+        "dart": "text/x-dart",
+        "sql": "text/x-sql",
+        "r": "text/x-r",
+        "scala": "text/x-scala",
+        "pl": "text/x-perl",
         "txt": "text/plain",
         "json": "application/json",
         "xml": "text/xml",
@@ -100,7 +121,10 @@ ALLOWED_EXTENSIONS = {
     "png", "jpg", "jpeg", "heif", "heic", "gif", "webp", "bmp", "svg",
     "mp4", "mov", "avi", "mkv", "webm",
     "mp3", "wav", "ogg", "flac", "aac",
-    "py", "sh", "txt", "json", "xml", "html", "css", "js", "md", "csv",
+    "py", "sh", "go", "swift", "ts", "tsx", "jsx", "java", "kt",
+    "c", "h", "cpp", "hpp", "cs", "rb", "php", "rs", "lua", "dart",
+    "sql", "r", "scala", "pl",
+    "txt", "json", "xml", "html", "css", "js", "md", "csv",
     "log", "cfg", "ini", "yaml", "yml", "toml",
     "zip", "rar", "7z", "tar", "gz",
     "apk", "pdf", "doc", "docx", "xls", "xlsx", "pptx",
@@ -124,7 +148,7 @@ class Uploader(loader.Module):
             "Images: png, jpeg, jpg, heif, heic, gif, webp, bmp, svg\n"
             "Video: mp4, mov, avi, mkv, webm\n"
             "Audio: mp3, wav, ogg, flac, aac\n"
-            "Text: py, sh, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
+            "Text: py, sh, go, swift, ts, tsx, jsx, java, kt, c, h, cpp, hpp, cs, rb, php, rs, lua, dart, sql, r, scala, pl, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
             "Archives: zip, rar, 7z, tar, gz\n"
             "Docs: pdf, doc, docx, xls, xlsx, pptx\n"
             "Other: apk, tgs"
@@ -206,7 +230,7 @@ class Uploader(loader.Module):
             "Изображения: png, jpeg, jpg, heif, heic, gif, webp, bmp, svg\n"
             "Видео: mp4, mov, avi, mkv, webm\n"
             "Аудио: mp3, wav, ogg, flac, aac\n"
-            "Текст: py, sh, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
+            "Текст: py, sh, go, swift, ts, tsx, jsx, java, kt, c, h, cpp, hpp, cs, rb, php, rs, lua, dart, sql, r, scala, pl, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
             "Архивы: zip, rar, 7z, tar, gz\n"
             "Документы: pdf, doc, docx, xls, xlsx, pptx\n"
             "Другое: apk, tgs"

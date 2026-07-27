@@ -22,6 +22,7 @@ NewYear
 NFTChecker
 Note
 OnlineKeeper
+ProxyScanner
 QRAuthDumper
 RaidProtection
 Robber
