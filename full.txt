@@ -35,6 +35,7 @@ StickerClone
 Stories
 SwiftQR
 Telega
+TGS2Json
 Token
 TONScanner
 Twin
