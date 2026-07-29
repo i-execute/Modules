@@ -313,7 +313,7 @@ class SwiftQR(loader.Module):
         ru_doc="[текст] - сгенерировать QR код",
         en_doc="[text] - generate QR code",
     )
-    async def sqr(self, message: Message):
+    async def gqr(self, message: Message):
         """[text] - generate QR code"""
         text = utils.get_args_raw(message).strip()
 

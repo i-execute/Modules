@@ -12,12 +12,12 @@ from .. import loader, utils
 
 def _tgs_bytes_to_json_bytes(data: bytes) -> bytes:
     raw = gzip.decompress(data)
-    parsed = json.loads(raw)
+    parsed = json.loads(raw)  # валидируем, что это действительно json/lottie
     return json.dumps(parsed, ensure_ascii=False).encode("utf-8")
 
 
 def _json_bytes_to_tgs_bytes(data: bytes) -> bytes:
-    parsed = json.loads(data)
+    parsed = json.loads(data)  # валидируем, что это валидный json/lottie
     raw = json.dumps(parsed, ensure_ascii=False).encode("utf-8")
     return gzip.compress(raw)
 
@@ -29,35 +29,35 @@ class TGS2Json(loader.Module):
     strings = {
         "name": "TGS2Json",
 
-        "loading": "<b>Конвертирую...</b>",
+        "loading": "<b>Converting...</b>",
 
         "err_no_reply": (
-            "<b>Ошибка</b>\n"
-            "<blockquote>Ответь на сообщение со стикером/.tgs файлом</blockquote>"
+            "<b>Error</b>\n"
+            "<blockquote>Reply to a message with a sticker/.tgs file</blockquote>"
         ),
 
         "err_no_doc": (
-            "<b>Ошибка</b>\n"
-            "<blockquote>В сообщении нет файла</blockquote>"
+            "<b>Error</b>\n"
+            "<blockquote>No file found in the message</blockquote>"
         ),
 
         "err_download_failed": (
-            "<b>Ошибка</b>\n"
-            "<blockquote>Не удалось скачать файл</blockquote>"
+            "<b>Error</b>\n"
+            "<blockquote>Failed to download the file</blockquote>"
         ),
 
         "err_not_tgs": (
-            "<b>Ошибка</b>\n"
-            "<blockquote>Файл не похож на .tgs (gzip Lottie): {error}</blockquote>"
+            "<b>Error</b>\n"
+            "<blockquote>File doesn't look like .tgs (gzip Lottie): {error}</blockquote>"
         ),
 
         "err_not_json": (
-            "<b>Ошибка</b>\n"
-            "<blockquote>Файл не похож на валидный json/Lottie: {error}</blockquote>"
+            "<b>Error</b>\n"
+            "<blockquote>File doesn't look like valid json/Lottie: {error}</blockquote>"
         ),
 
-        "success": "<b>Готово, держи .json</b>",
-        "success_tgs": "<b>Готово, держи .tgs</b>",
+        "success": "<b>Done, here's your .json</b>",
+        "success_tgs": "<b>Done, here's your .tgs</b>",
     }
 
     strings_ru = {

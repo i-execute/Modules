@@ -106,6 +106,7 @@ def _detect_type(name):
         "tar": "application/x-tar",
         "gz": "application/gzip",
         "apk": "application/vnd.android.package-archive",
+        "ipa": "application/octet-stream",
         "pdf": "application/pdf",
         "doc": "application/msword",
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -127,7 +128,7 @@ ALLOWED_EXTENSIONS = {
     "txt", "json", "xml", "html", "css", "js", "md", "csv",
     "log", "cfg", "ini", "yaml", "yml", "toml",
     "zip", "rar", "7z", "tar", "gz",
-    "apk", "pdf", "doc", "docx", "xls", "xlsx", "pptx",
+    "apk", "ipa", "pdf", "doc", "docx", "xls", "xlsx", "pptx",
     "tgs",
 }
 
@@ -151,7 +152,7 @@ class Uploader(loader.Module):
             "Text: py, sh, go, swift, ts, tsx, jsx, java, kt, c, h, cpp, hpp, cs, rb, php, rs, lua, dart, sql, r, scala, pl, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
             "Archives: zip, rar, 7z, tar, gz\n"
             "Docs: pdf, doc, docx, xls, xlsx, pptx\n"
-            "Other: apk, tgs"
+            "Other: apk, ipa, tgs"
             "</blockquote>"
         ),
         "no_reply": (
@@ -233,7 +234,7 @@ class Uploader(loader.Module):
             "Текст: py, sh, go, swift, ts, tsx, jsx, java, kt, c, h, cpp, hpp, cs, rb, php, rs, lua, dart, sql, r, scala, pl, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
             "Архивы: zip, rar, 7z, tar, gz\n"
             "Документы: pdf, doc, docx, xls, xlsx, pptx\n"
-            "Другое: apk, tgs"
+            "Другое: apk, ipa, tgs"
             "</blockquote>"
         ),
         "no_reply": (
