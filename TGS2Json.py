@@ -12,12 +12,12 @@ from .. import loader, utils
 
 def _tgs_bytes_to_json_bytes(data: bytes) -> bytes:
     raw = gzip.decompress(data)
-    parsed = json.loads(raw)  # валидируем, что это действительно json/lottie
+    parsed = json.loads(raw)
     return json.dumps(parsed, ensure_ascii=False).encode("utf-8")
 
 
 def _json_bytes_to_tgs_bytes(data: bytes) -> bytes:
-    parsed = json.loads(data)  # валидируем, что это валидный json/lottie
+    parsed = json.loads(data)
     raw = json.dumps(parsed, ensure_ascii=False).encode("utf-8")
     return gzip.compress(raw)
 
