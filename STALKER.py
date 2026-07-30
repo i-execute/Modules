@@ -33,12 +33,12 @@ class STALKER(loader.Module):
     strings = {
         "name": "STALKER",
         "log_entry": (
-            "<blockquote><b>Передумал писать</b>\n"
-            "<b>От:</b> {from_name}\n"
+            "<blockquote><b>Stopped typing</b>\n"
+            "<b>From:</b> {from_name}\n"
             "{from_uname}"
-            "<b>Чат:</b> {chat_name}\n"
+            "<b>Chat:</b> {chat_name}\n"
             "{chat_uname}"
-            "<b>Печатал(а) {duration}с, затем молчание {timeout}с — сообщение так и не пришло</b></blockquote>"
+            "<b>Typed for {duration}s, then stayed silent for {timeout} sec. The message was never sent.</blockquote>"
         ),
     }
 
@@ -49,7 +49,7 @@ class STALKER(loader.Module):
             "{from_uname}"
             "<b>Чат:</b> {chat_name}\n"
             "{chat_uname}"
-            "<b>Печатал(а) {duration}с, затем молчание {timeout}с — сообщение так и не пришло</b></blockquote>"
+            "Печатал(а) {duration}с, затем молчание {timeout}сек. Сообщение так и не пришло</blockquote>"
         ),
     }
 
