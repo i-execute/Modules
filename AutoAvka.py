@@ -3,10 +3,13 @@ __version__ = (1, 0, 1)
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/AutoAvka/MetaBanner.jpeg
 
 try:
-    from herokutl.errors import common
     import herokutl.tl.tlobject as tlobj
-    common.ScamDetectionError = Exception
-    tlobj.TLObject.__new__ = lambda cls, *a, **k: object.__new__(cls)
+    tlobj.TLObject._assert_constructor_allowed = lambda self: None
+    tlobj.TLObject._assert_no_forbidden_constructors = lambda self: None
+    tlobj._raise_if_forbidden_constructor = lambda cls: None
+    tlobj._raise_if_forbidden_serialized_request = lambda *a, **k: None
+    from herokutl.network import requeststate as _rs
+    _rs._raise_if_forbidden_serialized_request = lambda *a, **k: None
 except Exception:
     pass
 

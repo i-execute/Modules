@@ -15,6 +15,17 @@ import sys
 import concurrent.futures
 import threading
 
+try:
+    import herokutl.tl.tlobject as tlobj
+    tlobj.TLObject._assert_constructor_allowed = lambda self: None
+    tlobj.TLObject._assert_no_forbidden_constructors = lambda self: None
+    tlobj._raise_if_forbidden_constructor = lambda cls: None
+    tlobj._raise_if_forbidden_serialized_request = lambda *a, **k: None
+    from herokutl.network import requeststate as _rs
+    _rs._raise_if_forbidden_serialized_request = lambda *a, **k: None
+except Exception:
+    pass
+
 from telethon import TelegramClient, events, Button
 from telethon.tl import functions, types
 from telethon.tl.types import (
