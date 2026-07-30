@@ -12,6 +12,7 @@ from herokutl.tl.types import (
     UpdateUserTyping,
     UpdateChatUserTyping,
     UpdateChannelUserTyping,
+    SendMessageCancelAction,
     User,
     Channel,
 )
@@ -20,7 +21,8 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-CANCEL_TIMEOUT = 20  
+CANCEL_TIMEOUT = 20
+CANCEL_GRACE = 5
 CHECK_INTERVAL = 2
 
 
@@ -36,7 +38,7 @@ class STALKER(loader.Module):
             "{from_uname}"
             "<b>Чат:</b> {chat_name}\n"
             "{chat_uname}"
-            "<b>Печатал(а):</b> {duration}с назад, сообщение так и не пришло</blockquote>"
+            "<b>Печатал(а) {duration}с, затем молчание {timeout}с — сообщение так и не пришло</b></blockquote>"
         ),
     }
 
@@ -47,7 +49,7 @@ class STALKER(loader.Module):
             "{from_uname}"
             "<b>Чат:</b> {chat_name}\n"
             "{chat_uname}"
-            "<b>Печатал(а):</b> {duration}с назад, сообщение так и не пришло</blockquote>"
+            "<b>Печатал(а) {duration}с, затем молчание {timeout}с — сообщение так и не пришло</b></blockquote>"
         ),
     }
 
@@ -178,11 +180,20 @@ class STALKER(loader.Module):
 
             now = time.time()
             state_key = (chat_key, user_id)
+            is_cancel = isinstance(getattr(update, "action", None), SendMessageCancelAction)
 
             if state_key not in self._typing_state:
-                self._typing_state[state_key] = {"first_ts": now, "last_ts": now}
+                if is_cancel:
+                    return
+                self._typing_state[state_key] = {
+                    "first_ts": now,
+                    "last_ts": now,
+                    "cancelled_ts": None,
+                }
             else:
-                self._typing_state[state_key]["last_ts"] = now
+                state = self._typing_state[state_key]
+                state["last_ts"] = now
+                state["cancelled_ts"] = now if is_cancel else None
         except Exception as e:
             logger.error(f"[STALKER] typing_handler error: {e}")
 
@@ -215,7 +226,12 @@ class STALKER(loader.Module):
                 now = time.time()
 
                 for state_key, ts in list(self._typing_state.items()):
-                    if now - ts["last_ts"] >= CANCEL_TIMEOUT:
+                    timed_out = now - ts["last_ts"] >= CANCEL_TIMEOUT
+                    explicitly_cancelled = (
+                        ts.get("cancelled_ts") is not None
+                        and now - ts["cancelled_ts"] >= CANCEL_GRACE
+                    )
+                    if timed_out or explicitly_cancelled:
                         chat_key, user_id = state_key
                         del self._typing_state[state_key]
                         asyncio.ensure_future(self._trigger(chat_key, user_id, ts))
@@ -236,7 +252,7 @@ class STALKER(loader.Module):
             else:
                 chat = await self._client.get_entity(PeerChannel(chat_id))
 
-            duration = int(ts["last_ts"] - ts["first_ts"]) or CANCEL_TIMEOUT
+            duration = max(int(ts["last_ts"] - ts["first_ts"]), 0)
 
             log_text = self.strings["log_entry"].format(
                 from_name=self._get_display_name(sender),
@@ -244,6 +260,7 @@ class STALKER(loader.Module):
                 chat_name=self._get_display_name(chat),
                 chat_uname=self._format_username_row(chat) if kind != "user" else "",
                 duration=duration,
+                timeout=CANCEL_TIMEOUT,
             )
 
             await self._send_log(log_text)
