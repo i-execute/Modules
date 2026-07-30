@@ -30,6 +30,7 @@ SCMusic
 ServerBox
 Session
 ShorBot
+STALKER
 Statistics
 StickerClone
 Stories
