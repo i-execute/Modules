@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 
 FAVORITE_COVER_URL = "https://github.com/i-execute/Modules/raw/main/Storage/YNDXMusic/Favorite.jpeg"
 
-YM_CLIENT_ID = "23cabbbdc6cd418abb4b39c32c41195d"
 YM_TOKEN_PATTERN = re.compile(r"access_token=([^&]+)")
 YM_ALBUM_TRACK_RE = re.compile(
     r"https?://music\.yandex\.(?:ru|com|by|kz|uz)/album/\d+/track/(\d+)"
@@ -100,9 +99,6 @@ _YNDX_ATTEMPTS = 30
 
 
 async def _yndx_curl_get(url, headers=None, timeout=10, attempts=3):
-    """Shared curl_cffi GET used by every raw HTTP call in this module
-    (covers, x0 uploads, etc.) so nothing bypasses the TLS-impersonation
-    wrapper that the yandex_music client itself uses."""
     last_exc = None
     async with _CurlSession(impersonate=_YNDX_IMPERSONATE) as session:
         for _ in range(attempts):
@@ -187,10 +183,10 @@ def extract_ym_token(text):
     return m.group(1) if m else None
 
 
-def _build_ym_auth_url():
+def _build_ym_auth_url(client_id):
     return (
         f"https://oauth.yandex.ru/authorize?"
-        f"response_type=token&client_id={YM_CLIENT_ID}"
+        f"response_type=token&client_id={client_id}"
     )
 
 
@@ -506,6 +502,23 @@ class YMApiClient:
             _log("BOOKS", f"fetch_liked_albums_books error: {e}")
             return []
 
+    async def fetch_liked_albums_music(self):
+        if not self._client:
+            return []
+        try:
+            liked = await self._client.users_likes_albums(self._uid)
+            if not liked:
+                return []
+            result = []
+            for item in liked:
+                al = getattr(item, 'album', item)
+                if getattr(al, 'type', None) not in ('audiobook', 'podcast'):
+                    result.append(al)
+            return result
+        except Exception as e:
+            _log("ALBUMS", f"fetch_liked_albums_music error: {e}")
+            return []
+
     async def fetch_album_with_tracks(self, album_id):
         if not self._client:
             return None
@@ -693,6 +706,22 @@ class YNDXMusic(loader.Module):
         "ymb_kill": "Kill",
         "ymb_no_books": "<b>No audiobooks in library</b>",
         "ymb_stopped": "<b>Download stopped: {done}/{total} parts sent.</b>\n<blockquote>Failed on part {idx}: {name}\nReason: {error}</blockquote>",
+        "yma_menu_title": "<b>Yandex Music</b>\n<blockquote>Select album source</blockquote>",
+        "yma_menu_my": "My albums",
+        "yma_menu_link": "Enter link",
+        "yma_enter_link": "Enter album link:",
+        "yma_no_albums": "<b>No albums in library</b>",
+        "yma_no_link": "<b>Provide an album link.</b> Usage: <code>{prefix}yma &lt;link&gt;</code>",
+        "yma_not_album": "<b>This is not an album link</b>",
+        "yma_is_book": "<b>This album is an audiobook.</b> Use <code>{prefix}ymb</code>",
+        "yma_fetching": "<b>Fetching album...</b>",
+        "yma_not_found": "<b>Album not found</b>",
+        "yma_title": "<b>{name}</b>\n<blockquote>{artist}\n{count} tracks</blockquote>",
+        "yma_progress": "<b>{name}</b>\n<blockquote>{done}/{total} tracks downloaded</blockquote>",
+        "yma_download": "Download",
+        "yma_cancel": "Cancel",
+        "yma_kill": "Kill",
+        "yma_stopped": "<b>Download stopped: {done}/{total} tracks sent.</b>\n<blockquote>Failed on track {idx}: {name}\nReason: {error}</blockquote>",
         "btn_left": "⬅️",
         "btn_right": "➡️",
         "unknown_device": "Unknown",
@@ -778,6 +807,22 @@ class YNDXMusic(loader.Module):
         "ymb_kill": "Остановить",
         "ymb_no_books": "<b>Нет аудиокниг в библиотеке</b>",
         "ymb_stopped": "<b>Загрузка остановлена: {done}/{total} частей отправлено.</b>\n<blockquote>Ошибка на части {idx}: {name}\nПричина: {error}</blockquote>",
+        "yma_menu_title": "<b>Yandex Music</b>\n<blockquote>Выберите источник альбома</blockquote>",
+        "yma_menu_my": "Мои альбомы",
+        "yma_menu_link": "Ввести ссылку",
+        "yma_enter_link": "Введите ссылку на альбом:",
+        "yma_no_albums": "<b>Нет альбомов в библиотеке</b>",
+        "yma_no_link": "<b>Укажи ссылку на альбом.</b> Использование: <code>{prefix}yma &lt;ссылка&gt;</code>",
+        "yma_not_album": "<b>Это не ссылка на альбом</b>",
+        "yma_is_book": "<b>Это аудиокнига.</b> Используй <code>{prefix}ymb</code>",
+        "yma_fetching": "<b>Получаю альбом...</b>",
+        "yma_not_found": "<b>Альбом не найден</b>",
+        "yma_title": "<b>{name}</b>\n<blockquote>{artist}\n{count} треков</blockquote>",
+        "yma_progress": "<b>{name}</b>\n<blockquote>{done}/{total} треков загружено</blockquote>",
+        "yma_download": "Скачать",
+        "yma_cancel": "Отмена",
+        "yma_kill": "Остановить",
+        "yma_stopped": "<b>Загрузка остановлена: {done}/{total} треков отправлено.</b>\n<blockquote>Ошибка на треке {idx}: {name}\nПричина: {error}</blockquote>",
         "btn_left": "⬅️",
         "btn_right": "➡️",
         "unknown_device": "Неизвестно",
@@ -797,6 +842,11 @@ class YNDXMusic(loader.Module):
                 "Search results limit (1-10)",
                 validator=loader.validators.Integer(minimum=1, maximum=10),
             ),
+            loader.ConfigValue(
+                "YM_CLIENT_ID", "",
+                "OAuth client_id used for Yandex Music authorization",
+                validator=loader.validators.Hidden(),
+            ),
         )
         self._tmp = None
         self._covers_dir = None
@@ -811,6 +861,8 @@ class YNDXMusic(loader.Module):
         self._ymp_my_sessions = {}
         self._ymb_sessions = {}
         self._ymb_my_sessions = {}
+        self._yma_sessions = {}
+        self._yma_my_sessions = {}
 
     def _init_dirs(self):
         if self._tmp and os.path.exists(self._tmp):
@@ -838,6 +890,14 @@ class YNDXMusic(loader.Module):
         if self._ym.ok and self._ym._token == token:
             return True
         return await self._ym.auth(token)
+
+    def _get_client_id(self):
+        cid = (self.config["YM_CLIENT_ID"] or "").strip()
+        if cid:
+            return cid
+        cid = uuid.uuid4().hex
+        self.config["YM_CLIENT_ID"] = cid
+        return cid
 
     def _get_limit(self):
         try:
@@ -1264,7 +1324,7 @@ class YNDXMusic(loader.Module):
         session_id = str(id(message))
         self._ymauth_sessions[session_id] = {"chat_id": message.chat_id}
         await self.inline.form(
-            text=self.strings["ymauth_menu_title"].format(ym_url=_build_ym_auth_url()),
+            text=self.strings["ymauth_menu_title"].format(ym_url=_build_ym_auth_url(self._get_client_id())),
             message=message,
             reply_markup=[[
                 {
@@ -2470,6 +2530,313 @@ class YNDXMusic(loader.Module):
         self._ymb_my_sessions.pop(session_id + "_my", None)
         await call.delete()
 
+    @loader.command(
+        ru_doc="Скачать альбом целиком. Пример: .yma <ссылка>",
+        en_doc="Download a whole album. Usage: .yma <link>",
+    )
+    async def yma(self, message: Message):
+        """Download a whole album. Usage: .yma <link>"""
+        prefix = self.get_prefix()
+        if not await self._ensure_ym():
+            await utils.answer(message, self.strings["no_token"].format(prefix=prefix))
+            return
+        args = utils.get_args_raw(message).strip()
+        is_forum = await self._is_forum_chat(message)
+        topic_id = self._get_topic_id(message) if is_forum else None
+        session_id = str(id(message))
+        self._yma_sessions[session_id] = {
+            "chat_id": message.chat_id,
+            "is_forum": is_forum,
+            "topic_id": topic_id,
+            "kill": False,
+        }
+        if args:
+            if not _is_ym_album_link(args):
+                await utils.answer(message, self.strings["yma_not_album"])
+                return
+            m = YM_ALBUM_RE.search(args)
+            if not m:
+                await utils.answer(message, self.strings["yma_not_found"])
+                return
+            album_id = int(m.group(1))
+            msg = await utils.answer(message, self.strings["yma_fetching"])
+            al = await self._ym.fetch_album_with_tracks(album_id)
+            if not al:
+                await utils.answer(msg, self.strings["yma_not_found"])
+                return
+            if getattr(al, "type", None) == "audiobook":
+                await utils.answer(msg, self.strings["yma_is_book"].format(prefix=prefix))
+                return
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            await self._yma_show_album_form(message, session_id, al, is_forum, topic_id)
+            return
+        form_kwargs = dict(
+            text=self.strings["yma_menu_title"],
+            message=message,
+            reply_markup=[[
+                {"text": self.strings["yma_menu_my"], "callback": self._yma_open_my, "args": (session_id,), "style": "primary"},
+                {"text": self.strings["yma_menu_link"], "input": self.strings["yma_enter_link"], "handler": self._yma_link_input, "args": (session_id,), "style": "primary"},
+            ]],
+            silent=True,
+        )
+        await self.inline.form(**form_kwargs)
+
+    async def _yma_show_album_form(self, message, session_id, al, is_forum, topic_id):
+        title = getattr(al, "title", None) or "Album"
+        tracks = [t for vol in (al.volumes or []) for t in vol]
+        count = len(tracks)
+        artist_names = ", ".join(a.name for a in (al.artists or []) if a.name) or "Unknown"
+        self._yma_sessions[session_id].update({
+            "album": al,
+            "tracks": tracks,
+            "title": title,
+            "artist": artist_names,
+            "count": count,
+        })
+        cover_uri = getattr(al, "cover_uri", None) or getattr(al, "og_image", None)
+        x0_url = None
+        if cover_uri:
+            raw = await _download_cover_best(cover_uri, self._covers_dir)
+            if raw:
+                x0_url = await _upload_to_x0(normalize_cover(raw, force_jpeg=True) or raw, sanitize_fn(title) + ".jpg", "image/jpeg")
+        form_kwargs = dict(
+            text=self.strings["yma_title"].format(name=escape_html(title), artist=escape_html(artist_names), count=count),
+            message=message,
+            reply_markup=[[
+                {"text": self.strings["yma_download"], "callback": self._yma_download, "args": (session_id,), "style": "success"},
+                {"text": self.strings["yma_cancel"], "callback": self._yma_cancel, "args": (session_id,), "style": "danger"},
+            ]],
+            silent=True,
+        )
+        if x0_url:
+            form_kwargs["photo"] = x0_url
+        await self.inline.form(**form_kwargs)
+
+    async def _yma_link_input(self, call, query: str, session_id: str):
+        url = query.strip()
+        sess = self._yma_sessions.get(session_id)
+        if not sess:
+            await call.answer("Session expired", show_alert=True)
+            return
+        prefix = self.get_prefix()
+        if not _is_ym_album_link(url):
+            await call.edit(self.strings["yma_not_album"])
+            return
+        m = YM_ALBUM_RE.search(url)
+        if not m:
+            await call.edit(self.strings["yma_not_found"])
+            return
+        album_id = int(m.group(1))
+        await call.edit(self.strings["yma_fetching"])
+        al = await self._ym.fetch_album_with_tracks(album_id)
+        if not al:
+            await call.edit(self.strings["yma_not_found"])
+            return
+        if getattr(al, "type", None) == "audiobook":
+            await call.edit(self.strings["yma_is_book"].format(prefix=prefix))
+            return
+        title = getattr(al, "title", None) or "Album"
+        tracks = [t for vol in (al.volumes or []) for t in vol]
+        count = len(tracks)
+        artist_names = ", ".join(a.name for a in (al.artists or []) if a.name) or "Unknown"
+        sess.update({"album": al, "tracks": tracks, "title": title, "artist": artist_names, "count": count})
+        cover_uri = getattr(al, "cover_uri", None) or getattr(al, "og_image", None)
+        x0_url = None
+        if cover_uri:
+            raw = await _download_cover_best(cover_uri, self._covers_dir)
+            if raw:
+                x0_url = await _upload_to_x0(normalize_cover(raw, force_jpeg=True) or raw, sanitize_fn(title) + ".jpg", "image/jpeg")
+        markup = [[
+            {"text": self.strings["yma_download"], "callback": self._yma_download, "args": (session_id,), "style": "success"},
+            {"text": self.strings["yma_cancel"], "callback": self._yma_cancel, "args": (session_id,), "style": "danger"},
+        ]]
+        edit_kwargs = dict(text=self.strings["yma_title"].format(name=escape_html(title), artist=escape_html(artist_names), count=count), reply_markup=markup)
+        if x0_url:
+            edit_kwargs["photo"] = x0_url
+        await call.edit(**edit_kwargs)
+
+    async def _yma_open_my(self, call, session_id: str):
+        sess = self._yma_sessions.get(session_id)
+        if not sess:
+            await call.answer()
+            return
+        await call.edit(self.strings["yma_fetching"])
+        albums = await self._ym.fetch_liked_albums_music()
+        if not albums:
+            await call.edit(self.strings["yma_no_albums"], reply_markup=[[{"text": self.strings["yma_cancel"], "callback": self._yma_cancel, "args": (session_id,), "style": "danger"}]])
+            return
+        cover_cache = {}
+        for i, al in enumerate(albums):
+            uri = getattr(al, "cover_uri", None) or getattr(al, "og_image", None)
+            if uri:
+                best = await _get_best_cover_url(uri)
+                if best:
+                    cover_cache[i] = best
+        my_sid = session_id + "_my"
+        self._yma_my_sessions[my_sid] = {"albums": albums, "index": 0, "cover_cache": cover_cache, "x0_cache": {}, "parent_sid": session_id}
+        await self._yma_my_render(call, my_sid)
+
+    async def _yma_my_render(self, call, my_sid: str):
+        sess = self._yma_my_sessions.get(my_sid)
+        if not sess:
+            return
+        idx = sess["index"]
+        al = sess["albums"][idx]
+        title = getattr(al, "title", None) or "Album"
+        track_count = getattr(al, "track_count", None) or 0
+        artist_names = ", ".join(a.name for a in (al.artists or []) if a.name) or "Unknown"
+        raw_cover = sess["cover_cache"].get(idx)
+        x0_url = sess["x0_cache"].get(idx)
+        if raw_cover and not x0_url:
+            x0_url = await self._get_x0_cover_url(raw_cover, title)
+            sess["x0_cache"][idx] = x0_url
+        markup = self._yma_my_markup(my_sid, len(sess["albums"]))
+        edit_kwargs = dict(text=self.strings["yma_title"].format(name=escape_html(title), artist=escape_html(artist_names), count=track_count), reply_markup=markup)
+        if x0_url:
+            edit_kwargs["photo"] = x0_url
+        await call.edit(**edit_kwargs)
+
+    def _yma_my_markup(self, my_sid: str, total: int):
+        sess = self._yma_my_sessions.get(my_sid, {})
+        idx = sess.get("index", 0)
+        parent_sid = sess.get("parent_sid", my_sid.replace("_my", ""))
+        left = {"text": self.strings["btn_left"], "callback": self._yma_my_left, "args": (my_sid,)}
+        right = {"text": self.strings["btn_right"], "callback": self._yma_my_right, "args": (my_sid,)}
+        if idx > 0:
+            left["style"] = "primary"
+        if idx < total - 1:
+            right["style"] = "primary"
+        return [
+            [{"text": self.strings["yma_download"], "callback": self._yma_my_select, "args": (my_sid,), "style": "success"}],
+            [left, right],
+            [{"text": self.strings["yma_cancel"], "callback": self._yma_cancel, "args": (parent_sid,), "style": "danger"}],
+        ]
+
+    async def _yma_my_left(self, call, my_sid: str):
+        sess = self._yma_my_sessions.get(my_sid)
+        if not sess or sess["index"] <= 0:
+            await call.answer()
+            return
+        sess["index"] -= 1
+        await self._yma_my_render(call, my_sid)
+
+    async def _yma_my_right(self, call, my_sid: str):
+        sess = self._yma_my_sessions.get(my_sid)
+        if not sess or sess["index"] >= len(sess["albums"]) - 1:
+            await call.answer()
+            return
+        sess["index"] += 1
+        await self._yma_my_render(call, my_sid)
+
+    async def _yma_my_select(self, call, my_sid: str):
+        sess = self._yma_my_sessions.get(my_sid)
+        if not sess:
+            await call.answer()
+            return
+        idx = sess["index"]
+        al_meta = sess["albums"][idx]
+        parent_sid = sess.get("parent_sid", my_sid.replace("_my", ""))
+        self._yma_my_sessions.pop(my_sid, None)
+        parent_sess = self._yma_sessions.get(parent_sid)
+        if not parent_sess:
+            await call.answer()
+            return
+        await call.edit(self.strings["yma_fetching"])
+        al = await self._ym.fetch_album_with_tracks(al_meta.id)
+        if not al:
+            await call.edit(self.strings["yma_not_found"])
+            return
+        title = getattr(al, "title", None) or "Album"
+        tracks = [t for vol in (al.volumes or []) for t in vol]
+        artist_names = ", ".join(a.name for a in (al.artists or []) if a.name) or "Unknown"
+        parent_sess.update({"album": al, "tracks": tracks, "title": title, "artist": artist_names, "count": len(tracks)})
+        await self._yma_download(call, parent_sid)
+
+    async def _yma_download(self, call, session_id: str):
+        sess = self._yma_sessions.get(session_id)
+        if not sess:
+            await call.answer()
+            return
+        album_title = sess["title"]
+        artist = sess["artist"]
+        tracks = sess["tracks"]
+        count = sess["count"]
+        chat_id = sess["chat_id"]
+        is_forum = sess.get("is_forum", False)
+        topic_id = sess.get("topic_id")
+        reply_to = topic_id if is_forum and topic_id else None
+        await call.edit(
+            self.strings["yma_progress"].format(name=escape_html(album_title), done=0, total=count),
+            reply_markup=[[{"text": self.strings["yma_kill"], "callback": self._yma_kill, "args": (session_id,), "style": "danger"}]],
+        )
+        done = 0
+        stopped_at = None
+        for idx, track in enumerate(tracks, start=1):
+            if sess.get("kill"):
+                break
+            part_title = YMApiClient.track_title(track)
+            try:
+                ddir = tempfile.mkdtemp(dir=self._tmp)
+                try:
+                    info, err = await self._prepare_track_file(track, ddir, with_cover=True)
+                    if err:
+                        _log("ALBUM", f"Stopped at track {idx} ({part_title}): {err}")
+                        stopped_at = (idx, part_title, err)
+                        break
+                    sent_ok = await self._send_audio(chat_id, info, reply_to=reply_to)
+                    if not sent_ok:
+                        _log("ALBUM", f"Stopped at track {idx} ({part_title}): send_fail")
+                        stopped_at = (idx, part_title, "send_fail")
+                        break
+                    done += 1
+                finally:
+                    if os.path.exists(ddir):
+                        shutil.rmtree(ddir, ignore_errors=True)
+                if not sess.get("kill"):
+                    try:
+                        await call.edit(
+                            self.strings["yma_progress"].format(name=escape_html(album_title), done=done, total=count),
+                            reply_markup=[[{"text": self.strings["yma_kill"], "callback": self._yma_kill, "args": (session_id,), "style": "danger"}]],
+                        )
+                    except Exception:
+                        pass
+            except Exception as e:
+                _log("ALBUM", f"Stopped at track {idx} ({part_title}) error: {e}")
+                stopped_at = (idx, part_title, str(e))
+                break
+        self._yma_sessions.pop(session_id, None)
+        try:
+            await call.delete()
+        except Exception:
+            pass
+        if stopped_at:
+            idx, part_title, err = stopped_at
+            try:
+                await self._client.send_message(
+                    chat_id,
+                    self.strings["yma_stopped"].format(
+                        done=done, total=count, idx=idx, name=escape_html(part_title), error=escape_html(str(err))
+                    ),
+                    parse_mode="html",
+                    reply_to=reply_to,
+                )
+            except Exception:
+                pass
+
+    async def _yma_kill(self, call, session_id: str):
+        sess = self._yma_sessions.get(session_id)
+        if sess:
+            sess["kill"] = True
+        await call.answer()
+
+    async def _yma_cancel(self, call, session_id: str):
+        self._yma_sessions.pop(session_id, None)
+        self._yma_my_sessions.pop(session_id + "_my", None)
+        await call.delete()
+
     async def on_unload(self):
         self._ymauth_sessions.clear()
         self._yms_sessions.clear()
@@ -2478,5 +2845,7 @@ class YNDXMusic(loader.Module):
         self._ymp_my_sessions.clear()
         self._ymb_sessions.clear()
         self._ymb_my_sessions.clear()
+        self._yma_sessions.clear()
+        self._yma_my_sessions.clear()
         if self._tmp and os.path.exists(self._tmp):
             shutil.rmtree(self._tmp, ignore_errors=True)
