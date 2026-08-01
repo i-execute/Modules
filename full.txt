@@ -15,7 +15,6 @@ Info
 InlineDL
 IPScanner
 Logger
-Manager
 MessageEditor
 NetTester
 NewYear
