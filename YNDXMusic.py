@@ -96,9 +96,6 @@ from curl_cffi.requests import AsyncSession as _CurlSession
 _YNDX_IMPERSONATE = "chrome116"
 _YNDX_TIMEOUT = 0.7
 _YNDX_ATTEMPTS = 30
-# Requests with a body larger than this (e.g. batch tracks() calls with many
-# ids) need more than the throttling-bypass timeout of 0.7s per attempt, or
-# they time out on every single attempt (TimedOutError) before completing.
 _YNDX_HEAVY_BODY_THRESHOLD = 200
 _YNDX_HEAVY_TIMEOUT = 3.0
 
@@ -470,12 +467,6 @@ class YMApiClient:
             return []
 
     async def fetch_liked_tracks(self):
-        """Return the tracks currently in the "Мне нравится" playlist.
-
-        Note: users_likes_tracks() returns every track ever liked over the
-        account's whole history (a much larger, stale set that doesn't match
-        what's actually in favorites today), so it must not be used here.
-        The kind=3 playlist is the actual current favorites list."""
         if not self._client or not self._login:
             return []
         try:
@@ -926,9 +917,6 @@ class YNDXMusic(loader.Module):
         cid = (self.config["YM_CLIENT_ID"] or "").strip()
         if cid:
             return cid
-        # Public client_id documented by the yandex-music-api project for the
-        # authorize?response_type=token OAuth flow. A random uuid4 (the old
-        # fallback here) is not registered with Yandex at all.
         return "23cabbbdc6cd418abb4b39c32c41195d"
 
     def _get_limit(self):
