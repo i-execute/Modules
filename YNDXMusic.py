@@ -874,7 +874,7 @@ class YNDXMusic(loader.Module):
                 validator=loader.validators.Integer(minimum=1, maximum=10),
             ),
             loader.ConfigValue(
-                "YM_CLIENT_ID", "",
+                "YM_CLIENT_ID", "23cabbbdc6cd418abb4b39c32c41195d",
                 "OAuth client_id used for Yandex Music authorization",
                 validator=loader.validators.Hidden(),
             ),
@@ -926,10 +926,9 @@ class YNDXMusic(loader.Module):
         cid = (self.config["YM_CLIENT_ID"] or "").strip()
         if cid:
             return cid
-        # Public OAuth client_id of the official Yandex Music app (used by the
-        # yandex-music-api community for the token-auth flow). A random uuid4
-        # is NOT a registered client_id and Yandex rejects it with
-        # "no such client_id" — this constant is a real registered app id.
+        # Public client_id documented by the yandex-music-api project for the
+        # authorize?response_type=token OAuth flow. A random uuid4 (the old
+        # fallback here) is not registered with Yandex at all.
         return "23cabbbdc6cd418abb4b39c32c41195d"
 
     def _get_limit(self):
