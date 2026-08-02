@@ -96,6 +96,23 @@ from curl_cffi.requests import AsyncSession as _CurlSession
 _YNDX_IMPERSONATE = "chrome116"
 _YNDX_TIMEOUT = 0.7
 _YNDX_ATTEMPTS = 30
+# Requests with a body larger than this (e.g. batch tracks() calls with many
+# ids) need more than the throttling-bypass timeout of 0.7s per attempt, or
+# they time out on every single attempt (TimedOutError) before completing.
+_YNDX_HEAVY_BODY_THRESHOLD = 200
+_YNDX_HEAVY_TIMEOUT = 3.0
+
+
+def _yndx_request_body_size(params, data, json):
+    size = 0
+    for part in (params, data, json):
+        if not part:
+            continue
+        try:
+            size += len(str(part))
+        except Exception:
+            pass
+    return size
 
 
 async def _yndx_curl_get(url, headers=None, timeout=10, attempts=3):
@@ -124,6 +141,8 @@ if not getattr(_YMRequest, "_yndx_curl_patched", False):
         data = kwargs.pop("data", None)
         json = kwargs.pop("json", None)
         proxy = kwargs.pop("proxy", self.proxy_url)
+        body_size = _yndx_request_body_size(params, data, json)
+        req_timeout = _YNDX_HEAVY_TIMEOUT if body_size > _YNDX_HEAVY_BODY_THRESHOLD else _YNDX_TIMEOUT
 
         last_exc = None
         async with _CurlSession(impersonate=_YNDX_IMPERSONATE) as session:
@@ -136,7 +155,7 @@ if not getattr(_YMRequest, "_yndx_curl_patched", False):
                         data=data,
                         json=json,
                         proxy=proxy,
-                        timeout=_YNDX_TIMEOUT,
+                        timeout=req_timeout,
                     )
                     content = r.content
                     if 200 <= r.status_code <= 299:
@@ -451,10 +470,16 @@ class YMApiClient:
             return []
 
     async def fetch_liked_tracks(self):
-        if not self._client:
+        """Return the tracks currently in the "Мне нравится" playlist.
+
+        Note: users_likes_tracks() returns every track ever liked over the
+        account's whole history (a much larger, stale set that doesn't match
+        what's actually in favorites today), so it must not be used here.
+        The kind=3 playlist is the actual current favorites list."""
+        if not self._client or not self._login:
             return []
         try:
-            result = await self._client.users_likes_tracks(self._uid)
+            result = await self._client.users_playlists(3, self._login)
             if not result:
                 return []
             tracks_short = getattr(result, "tracks", None) or []
@@ -654,7 +679,10 @@ class YNDXMusic(loader.Module):
         "no_plus": "<b>Yandex Plus not active.</b> Download may fail.",
         "no_playing": "<b>Nothing is playing right now</b>",
         "fetching": "<b>Fetching current track...</b>",
+        "downloading": "<b>Downloading...</b>",
         "uploading": "<b>Uploading...</b>",
+        "fetching_link": "<b>Fetching link...</b>",
+        "invalid_link": "<b>Invalid link</b>",
         "error": "<b>Error:</b> {msg}",
         "download_fail": "<b>Download failed.</b> Check your Yandex Plus subscription or try again.",
         "track_text": (
@@ -755,7 +783,10 @@ class YNDXMusic(loader.Module):
         "no_plus": "<b>Яндекс Плюс не активен.</b> Скачивание может не работать.",
         "no_playing": "<b>Сейчас ничего не играет</b>",
         "fetching": "<b>Получение текущего трека...</b>",
+        "downloading": "<b>Скачивание...</b>",
         "uploading": "<b>Загрузка...</b>",
+        "fetching_link": "<b>Получаю ссылку...</b>",
+        "invalid_link": "<b>Некорректная ссылка</b>",
         "error": "<b>Ошибка:</b> {msg}",
         "download_fail": "<b>Ошибка скачивания.</b> Проверьте подписку Яндекс Плюс или попробуйте позже.",
         "track_text": (
@@ -895,9 +926,11 @@ class YNDXMusic(loader.Module):
         cid = (self.config["YM_CLIENT_ID"] or "").strip()
         if cid:
             return cid
-        cid = uuid.uuid4().hex
-        self.config["YM_CLIENT_ID"] = cid
-        return cid
+        # Public OAuth client_id of the official Yandex Music app (used by the
+        # yandex-music-api community for the token-auth flow). A random uuid4
+        # is NOT a registered client_id and Yandex rejects it with
+        # "no such client_id" — this constant is a real registered app id.
+        return "23cabbbdc6cd418abb4b39c32c41195d"
 
     def _get_limit(self):
         try:
@@ -1391,7 +1424,7 @@ class YNDXMusic(loader.Module):
         track = now["track"]
         artist = YMApiClient.track_artist(track)
         title = YMApiClient.track_title(track)
-        await utils.answer(msg, self.strings["uploading"])
+        await utils.answer(msg, self.strings["downloading"])
         if self._now_track_id != now["playable_id"]:
             self._now_track_id = now["playable_id"]
             self._now_mp3_url = None
@@ -1402,6 +1435,7 @@ class YNDXMusic(loader.Module):
                 if err:
                     await utils.answer(msg, self.strings["download_fail"] if err == "download_fail" else self.strings["error"].format(msg=err))
                     return
+                await utils.answer(msg, self.strings["uploading"])
                 try:
                     await msg.delete()
                 except Exception:
@@ -1415,6 +1449,7 @@ class YNDXMusic(loader.Module):
             return
         if self._now_mp3_url:
             mp3_url = self._now_mp3_url
+            await utils.answer(msg, self.strings["uploading"])
         else:
             ddir = tempfile.mkdtemp(dir=self._tmp)
             try:
@@ -1422,6 +1457,7 @@ class YNDXMusic(loader.Module):
                 if err:
                     await utils.answer(msg, self.strings["download_fail"] if err == "download_fail" else self.strings["error"].format(msg=err))
                     return
+                await utils.answer(msg, self.strings["uploading"])
                 with open(info["path"], "rb") as f:
                     mp3_bytes = f.read()
                 filename = sanitize_fn(f"{artist} - {title}") + ".mp3"
@@ -1596,8 +1632,12 @@ class YNDXMusic(loader.Module):
         asyncio.ensure_future(self._yms_prefetch_covers(new_sid))
 
     async def _yms_download_by_link(self, message, url, is_forum, topic_id):
+        msg = await utils.answer(message, self.strings["fetching_link"])
         track_id = parse_ym_track_id(url)
-        msg = await utils.answer(message, self.strings["uploading"])
+        if not track_id:
+            await utils.answer(msg, self.strings["invalid_link"])
+            return
+        await utils.answer(msg, self.strings["downloading"])
         track = await self._ym.fetch_track(track_id)
         if not track:
             await utils.answer(msg, self.strings["yms_no_results"])
@@ -1608,6 +1648,7 @@ class YNDXMusic(loader.Module):
             if err:
                 await utils.answer(msg, self.strings["download_fail"] if err == "download_fail" else self.strings["error"].format(msg=err))
                 return
+            await utils.answer(msg, self.strings["uploading"])
             try:
                 await msg.delete()
             except Exception:
@@ -1871,7 +1912,8 @@ class YNDXMusic(loader.Module):
             "kill": False,
         }
         if args:
-            msg = await utils.answer(message, self.strings["ymp_fetching_pl"])
+            msg = await utils.answer(message, self.strings["fetching_link"])
+            await utils.answer(msg, self.strings["ymp_fetching_pl"])
             playlist, is_liked = await self._resolve_playlist_url(args)
             if is_liked:
                 tracks = await self._ym.fetch_liked_tracks()
@@ -2245,15 +2287,16 @@ class YNDXMusic(loader.Module):
             "kill": False,
         }
         if args:
+            msg = await utils.answer(message, self.strings["fetching_link"])
             if not _is_ym_album_link(args):
-                await utils.answer(message, self.strings["ymb_not_book"])
+                await utils.answer(msg, self.strings["ymb_not_book"])
                 return
             m = YM_ALBUM_RE.search(args)
             if not m:
-                await utils.answer(message, self.strings["ymb_not_found"])
+                await utils.answer(msg, self.strings["ymb_not_found"])
                 return
             album_id = int(m.group(1))
-            msg = await utils.answer(message, self.strings["ymb_fetching"])
+            await utils.answer(msg, self.strings["ymb_fetching"])
             al = await self._ym.fetch_album_with_tracks(album_id)
             if not al or getattr(al, "type", None) != "audiobook":
                 await utils.answer(msg, self.strings["ymb_not_book"])
@@ -2551,15 +2594,16 @@ class YNDXMusic(loader.Module):
             "kill": False,
         }
         if args:
+            msg = await utils.answer(message, self.strings["fetching_link"])
             if not _is_ym_album_link(args):
-                await utils.answer(message, self.strings["yma_not_album"])
+                await utils.answer(msg, self.strings["yma_not_album"])
                 return
             m = YM_ALBUM_RE.search(args)
             if not m:
-                await utils.answer(message, self.strings["yma_not_found"])
+                await utils.answer(msg, self.strings["yma_not_found"])
                 return
             album_id = int(m.group(1))
-            msg = await utils.answer(message, self.strings["yma_fetching"])
+            await utils.answer(msg, self.strings["yma_fetching"])
             al = await self._ym.fetch_album_with_tracks(album_id)
             if not al:
                 await utils.answer(msg, self.strings["yma_not_found"])

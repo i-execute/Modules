@@ -1,11 +1,10 @@
-__version__ = (2, 1, 0)
-# meta developer: I_execute.t.me 
+__version__ = (2, 3, 0)
+# meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/ServerBox/MetaBanner.jpeg
 
 import logging
 import asyncio
 import socket
-import psutil
 import time
 
 from telethon.errors import FloodWaitError
@@ -31,7 +30,7 @@ class ServerBox(loader.Module):
         "reloaded": "<blockquote><b>ServerBox module reloaded, monitoring resumed.</b></blockquote>",
         "cpu_alert": (
             "<pre><code class=\"language-serverbox\">"
-            "CPU ALERT\n"
+            "<b>CPU ALERT</b>\n"
             "----------------\n"
             "Usage:     {cpu}%\n"
             "Threshold: {threshold}%\n"
@@ -40,7 +39,7 @@ class ServerBox(loader.Module):
         ),
         "ram_alert": (
             "<pre><code class=\"language-serverbox\">"
-            "RAM ALERT\n"
+            "<b>RAM ALERT</b>\n"
             "----------------\n"
             "Usage:     {ram}%\n"
             "Used:      {used} MB\n"
@@ -49,9 +48,18 @@ class ServerBox(loader.Module):
             "Host:      {hostname}"
             "</code></pre>"
         ),
+        "ram_process_alert": (
+            "<pre><code class=\"language-serverbox\">"
+            "<b>RAM PROCESS ALERT</b>\n"
+            "----------------\n"
+            "Usage:     {used} MB\n"
+            "Threshold: {threshold} MB\n"
+            "Host:      {hostname}"
+            "</code></pre>"
+        ),
         "swap_alert": (
             "<pre><code class=\"language-serverbox\">"
-            "SWAP ALERT\n"
+            "<b>SWAP ALERT</b>\n"
             "----------------\n"
             "Usage:     {swap}%\n"
             "Used:      {used} MB\n"
@@ -67,7 +75,7 @@ class ServerBox(loader.Module):
             "Host:      {hostname}\n"
             "CPU:       {cpu}%\n"
             "RAM:       {ram}% ({ram_used}/{ram_total} MB)\n"
-            "Swap:      {swap}% ({swap_used}/{swap_total} MB)"
+            "Swap:      {swap}"
             "</code></pre>"
         ),
         "monitor_started": "<blockquote><b>ServerBox:</b> Monitoring started.</blockquote>",
@@ -83,7 +91,7 @@ class ServerBox(loader.Module):
         "reloaded": "<blockquote><b>Модуль ServerBox перезагружен, мониторинг возобновлён.</b></blockquote>",
         "cpu_alert": (
             "<pre><code class=\"language-serverbox\">"
-            "CPU ALERT\n"
+            "<b>CPU ALERT</b>\n"
             "----------------\n"
             "Usage:     {cpu}%\n"
             "Threshold: {threshold}%\n"
@@ -92,7 +100,7 @@ class ServerBox(loader.Module):
         ),
         "ram_alert": (
             "<pre><code class=\"language-serverbox\">"
-            "RAM ALERT\n"
+            "<b>RAM ALERT</b>\n"
             "----------------\n"
             "Usage:     {ram}%\n"
             "Used:      {used} MB\n"
@@ -101,9 +109,18 @@ class ServerBox(loader.Module):
             "Host:      {hostname}"
             "</code></pre>"
         ),
+        "ram_process_alert": (
+            "<pre><code class=\"language-serverbox\">"
+            "<b>RAM PROCESS ALERT</b>\n"
+            "----------------\n"
+            "Usage:     {used} MB\n"
+            "Threshold: {threshold} MB\n"
+            "Host:      {hostname}"
+            "</code></pre>"
+        ),
         "swap_alert": (
             "<pre><code class=\"language-serverbox\">"
-            "SWAP ALERT\n"
+            "<b>SWAP ALERT</b>\n"
             "----------------\n"
             "Usage:     {swap}%\n"
             "Used:      {used} MB\n"
@@ -119,7 +136,7 @@ class ServerBox(loader.Module):
             "Host:      {hostname}\n"
             "CPU:       {cpu}%\n"
             "RAM:       {ram}% ({ram_used}/{ram_total} MB)\n"
-            "Swap:      {swap}% ({swap_used}/{swap_total} MB)"
+            "Swap:      {swap}"
             "</code></pre>"
         ),
         "monitor_started": "<blockquote><b>ServerBox:</b> Мониторинг запущен.</blockquote>",
@@ -135,9 +152,15 @@ class ServerBox(loader.Module):
                 validator=loader.validators.Float(),
             ),
             loader.ConfigValue(
-                "ram_threshold",
+                "ram_system_threshold",
                 80.0,
-                "RAM usage alert threshold (percent)",
+                "System RAM usage alert threshold (percent)",
+                validator=loader.validators.Float(),
+            ),
+            loader.ConfigValue(
+                "ram_process_threshold",
+                500.0,
+                "Process RAM usage alert threshold (MB)",
                 validator=loader.validators.Float(),
             ),
             loader.ConfigValue(
@@ -159,10 +182,9 @@ class ServerBox(loader.Module):
         self._asset_channel = None
         self._monitor_task = None
         self._last_cpu_alert = 0
-        self._last_ram_alert = 0
+        self._last_ram_system_alert = 0
+        self._last_ram_process_alert = 0
         self._last_swap_alert = 0
-
-        psutil.cpu_percent(interval=None)
 
     async def client_ready(self):
         self._owner = await self._client.get_me()
@@ -188,7 +210,7 @@ class ServerBox(loader.Module):
         try:
             chat_id = int(f"-100{self._asset_channel}")
             msg_text, entities = await self.inline.bot._parse_message_text(self.strings["greeting_first"], "html")
-            
+
             msg = await self._send_with_flood_wait(
                 self.inline.bot.send_message,
                 chat_id,
@@ -197,13 +219,13 @@ class ServerBox(loader.Module):
                 entities=entities,
                 message_thread_id=self._logger_topic.id,
             )
-            
+
             if msg:
                 try:
                     peer = await self.inline.bot.get_input_entity(chat_id)
                     current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
                     reply_markup = current_msg.reply_markup if current_msg else None
-                    
+
                     await self.inline.bot(EditMessageRequest(
                         peer=peer,
                         id=msg.id,
@@ -262,23 +284,16 @@ class ServerBox(loader.Module):
             return "unknown"
 
     def _get_cpu(self):
-        return psutil.cpu_percent(interval=1)
+        return float(utils.get_cpu_usage())
 
     def _get_ram(self):
-        vm = psutil.virtual_memory()
-        return {
-            "percent": vm.percent,
-            "used": round(vm.used / 1024 / 1024),
-            "total": round(vm.total / 1024 / 1024),
-        }
+        return utils.get_ram_usage_system()
+
+    def _get_ram_process(self):
+        return utils.get_ram_usage()
 
     def _get_swap(self):
-        sw = psutil.swap_memory()
-        return {
-            "percent": sw.percent,
-            "used": round(sw.used / 1024 / 1024),
-            "total": round(sw.total / 1024 / 1024),
-        }
+        return utils.get_swap_usage()
 
     def _start_monitor(self):
         if self._monitor_task is None or self._monitor_task.done():
@@ -312,25 +327,37 @@ class ServerBox(loader.Module):
                         self._last_cpu_alert = now
 
                 ram = self._get_ram()
-                if ram["percent"] >= self.config["ram_threshold"]:
-                    if now - self._last_ram_alert >= interval:
+                if "error" not in ram and ram["percent"] >= self.config["ram_system_threshold"]:
+                    if now - self._last_ram_system_alert >= interval:
                         await self._send_log(
                             self.strings["ram_alert"].format(
-                                ram=round(ram["percent"], 1),
+                                ram=ram["percent"],
                                 used=ram["used"],
                                 total=ram["total"],
-                                threshold=self.config["ram_threshold"],
+                                threshold=self.config["ram_system_threshold"],
                                 hostname=hostname,
                             )
                         )
-                        self._last_ram_alert = now
+                        self._last_ram_system_alert = now
+
+                ram_process = self._get_ram_process()
+                if ram_process >= self.config["ram_process_threshold"]:
+                    if now - self._last_ram_process_alert >= interval:
+                        await self._send_log(
+                            self.strings["ram_process_alert"].format(
+                                used=round(ram_process, 1),
+                                threshold=self.config["ram_process_threshold"],
+                                hostname=hostname,
+                            )
+                        )
+                        self._last_ram_process_alert = now
 
                 swap = self._get_swap()
-                if swap["total"] > 0 and swap["percent"] >= self.config["swap_threshold"]:
+                if "error" not in swap and swap["percent"] >= self.config["swap_threshold"]:
                     if now - self._last_swap_alert >= interval:
                         await self._send_log(
                             self.strings["swap_alert"].format(
-                                swap=round(swap["percent"], 1),
+                                swap=swap["percent"],
                                 used=swap["used"],
                                 total=swap["total"],
                                 threshold=self.config["swap_threshold"],
