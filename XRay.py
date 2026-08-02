@@ -1,4 +1,4 @@
-__version__ = (4, 0, 4)
+__version__ = (4, 1, 0)
 # meta developer: I_execute.t.me 
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
@@ -743,11 +743,11 @@ class XRay(loader.Module):
         self._me = await client.get_me()
 
         tg_user_id = self._me.id
-        self._root = os.path.join(tempfile.gettempdir(), f"XRay_{tg_user_id}")
+        self._root = os.path.join(os.path.expanduser("~"), ".xray_on_userbot", str(tg_user_id))
         self._xray_path = os.path.join(self._root, "xray")
         
-        os.makedirs(self._root, exist_ok=True)
-        os.makedirs(os.path.join(self._root, "users"), exist_ok=True)
+        os.makedirs(self._root, mode=0o700, exist_ok=True)
+        os.makedirs(os.path.join(self._root, "users"), mode=0o700, exist_ok=True)
 
         self._users = self._db.get("XR", "users", {})
         self._external_ip = await self._detect_external_ip()
@@ -1262,8 +1262,7 @@ class XRay(loader.Module):
                 "security": "reality",
                 "xhttpSettings": {
                     "path": user.get("path", "/xhttps"),
-                    "host": sni,
-                    "mode": "auto",
+                    "mode": "packet-up",
                     "noSSEHeader": False,
                     "xPaddingBytes": padding,
                     "scMaxBufferedPosts": 30,
@@ -1325,8 +1324,7 @@ class XRay(loader.Module):
                 "encryption": "none",
                 "security": "reality",
                 "path": path,
-                "host": sni,
-                "mode": "auto",
+                "mode": "packet-up",
                 "extra": extra,
                 "pbk": public_key,
                 "fp": fp,
@@ -1457,7 +1455,7 @@ class XRay(loader.Module):
     def _get_active_connections(self, port: int) -> int:
         try:
             p = subprocess.run(
-                ["ss", "-tn", "state", "established", f"sport = :{port}"],
+                ["ss", "-Htn", "state", "established", f"sport = :{port}"],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -1466,19 +1464,27 @@ class XRay(loader.Module):
                 return 0
             
             unique_ips = set()
-            for line in p.stdout.strip().split("\n")[1:]:
+            for line in p.stdout.strip().splitlines():
                 parts = line.split()
-                if len(parts) >= 4:
-                    peer = parts[3]
-                    m = re.match(r"(\d+\.\d+\.\d+\.\d+):\d+", peer)
-                    if m:
-                        ip = m.group(1)
-                        try:
-                            addr = ipaddress.IPv4Address(ip)
-                            if not addr.is_private and not addr.is_loopback:
-                                unique_ips.add(ip)
-                        except:
-                            pass
+                if len(parts) < 2:
+                    continue
+                peer = parts[-1]
+                if peer.startswith("["):
+                    ip = peer[1:].split("]", 1)[0]
+                else:
+                    ip = peer.rsplit(":", 1)[0]
+                try:
+                    addr = ipaddress.ip_address(ip)
+                    if not (
+                        addr.is_private
+                        or addr.is_loopback
+                        or addr.is_link_local
+                        or addr.is_multicast
+                        or addr.is_unspecified
+                    ):
+                        unique_ips.add(addr.compressed)
+                except ValueError:
+                    continue
             
             return len(unique_ips)
         except:
