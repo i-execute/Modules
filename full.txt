@@ -23,7 +23,6 @@ OnlineKeeper
 ProxyScanner
 QRAuthDumper
 RaidProtection
-RestrictAPI
 Robber
 SCMusic
 ServerBox
