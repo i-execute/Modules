@@ -303,7 +303,25 @@ class ODIRouter(loader.Module):
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
-        self._keys = self._db.get("ODIRouter", "keys", [])
+        raw = self._db.get("ODIRouter", "keys", [])
+        self._keys = self._normalize_keys(raw)
+        self._save_keys()
+
+    def _normalize_keys(self, raw: list) -> list:
+        normalized = []
+        for entry in raw:
+            if isinstance(entry, str):
+                normalized.append({
+                    "key": 0,
+                    "value": entry,
+                    "status": "unknown",
+                    "date": "-",
+                })
+            elif isinstance(entry, dict):
+                normalized.append(entry)
+        for i, entry in enumerate(normalized, start=1):
+            entry["key"] = i
+        return normalized
 
     def _save_keys(self):
         self._db.set("ODIRouter", "keys", self._keys)
