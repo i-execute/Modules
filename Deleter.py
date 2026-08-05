@@ -215,7 +215,7 @@ class Deleter(loader.Module):
                     self._asset_channel,
                     "Deleter",
                     description="Logs of message deletion by Deleter module.",
-                    icon_emoji_id=5188466187448650036,
+                    icon_emoji_id=5303138391162919957,
                 )
                 logger.info(
                     "[Deleter] Forum topic ready: id=%s name=%s",
