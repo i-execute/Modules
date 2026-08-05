@@ -1,6 +1,6 @@
-__version__ = (1, 1, 0)
+__version__ = (1, 2, 0)
 # meta developer: I_execute.t.me
-# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/TONScanner/MetaBanner.jpeg
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/GRAMScanner/MetaBanner.jpeg
 
 import re
 import time
@@ -22,11 +22,11 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/TONScanner/InlineQuery.png"
+BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/GRAMScanner/InlineQuery.png"
 
 TONAPI_BASE = "https://tonapi.io/v2"
 
-TON_ADDR_RE = re.compile(r"^[UEk0-9A-Za-z_-]{48}$")
+GRAM_ADDR_RE = re.compile(r"^[UEk0-9A-Za-z_-]{48}$")
 
 CACHE_TTL = 120
 
@@ -35,13 +35,13 @@ def escape_html(t):
     return html.escape(t or "")
 
 
-def nano_to_ton(nano):
+def nano_to_gram(nano):
     if nano is None:
         return 0.0
     return int(nano) / 1_000_000_000
 
 
-def fmt_ton(val):
+def fmt_gram(val):
     if val == 0:
         return "0"
     if val < 0.001:
@@ -109,7 +109,7 @@ async def scan_wallet(addr):
         return None
 
     balance_nano = acc_data.get("balance", 0)
-    balance_ton = nano_to_ton(balance_nano)
+    balance_gram = nano_to_gram(balance_nano)
     status = acc_data.get("status", "unknown")
     name = acc_data.get("name")
     is_scam = acc_data.get("is_scam", False)
@@ -152,10 +152,10 @@ async def scan_wallet(addr):
                 total_out += out_val
                 out_count += 1
 
-    total_in_ton = nano_to_ton(total_in)
-    total_out_ton = nano_to_ton(total_out)
-    total_fees_ton = nano_to_ton(total_fees)
-    volume_ton = total_in_ton + total_out_ton
+    total_in_gram = nano_to_gram(total_in)
+    total_out_gram = nano_to_gram(total_out)
+    total_fees_gram = nano_to_gram(total_fees)
+    volume_gram = total_in_gram + total_out_gram
 
     jetton_count = 0
     jetton_list = []
@@ -190,9 +190,9 @@ async def scan_wallet(addr):
 
     return {
         "addr": addr,
-        "balance_ton": balance_ton,
-        "balance_rub": balance_ton * rub_price,
-        "balance_usd": balance_ton * usd_price,
+        "balance_gram": balance_gram,
+        "balance_rub": balance_gram * rub_price,
+        "balance_usd": balance_gram * usd_price,
         "rub_price": rub_price,
         "usd_price": usd_price,
         "diff_24h_rub": diff_24h_rub,
@@ -208,14 +208,14 @@ async def scan_wallet(addr):
         "tx_count": len(all_txs),
         "in_count": in_count,
         "out_count": out_count,
-        "total_in_ton": total_in_ton,
-        "total_out_ton": total_out_ton,
-        "volume_ton": volume_ton,
-        "total_fees_ton": total_fees_ton,
-        "total_in_rub": total_in_ton * rub_price,
-        "total_out_rub": total_out_ton * rub_price,
-        "volume_rub": volume_ton * rub_price,
-        "fees_rub": total_fees_ton * rub_price,
+        "total_in_gram": total_in_gram,
+        "total_out_gram": total_out_gram,
+        "volume_gram": volume_gram,
+        "total_fees_gram": total_fees_gram,
+        "total_in_rub": total_in_gram * rub_price,
+        "total_out_rub": total_out_gram * rub_price,
+        "volume_rub": volume_gram * rub_price,
+        "fees_rub": total_fees_gram * rub_price,
         "jetton_count": jetton_count,
         "jetton_list": jetton_list,
         "nft_count": nft_count,
@@ -225,7 +225,7 @@ async def scan_wallet(addr):
 
 def build_message(d):
     lines = []
-    lines.append(f'<b><a href="https://tonviewer.com/{d["addr"]}">TONScanner</a></b>')
+    lines.append(f'<b><a href="https://tonviewer.com/{d["addr"]}">GRAMScanner</a></b>')
 
     info_lines = []
     info_lines.append(f"<b>Address:</b> <code>{d['addr']}</code>")
@@ -240,11 +240,11 @@ def build_message(d):
 
     bal_lines = []
     bal_lines.append(
-        f"<b>Balance:</b> <code>{fmt_ton(d['balance_ton'])}</code> TON"
+        f"<b>Balance:</b> <code>{fmt_gram(d['balance_gram'])}</code> GRAM"
         f" (<code>{fmt_rub(d['balance_rub'])}</code> RUB)"
     )
     bal_lines.append(
-        f"<b>Rate:</b> 1 TON = {d['rub_price']:.2f} RUB / {d['usd_price']:.4f} USD"
+        f"<b>Rate:</b> 1 GRAM = {d['rub_price']:.2f} RUB / {d['usd_price']:.4f} USD"
     )
     if d["diff_24h_rub"] or d["diff_7d_rub"] or d["diff_30d_rub"]:
         parts = []
@@ -261,20 +261,20 @@ def build_message(d):
     tx_lines.append(f"<b>Transactions:</b> {d['tx_count']}")
     tx_lines.append(
         f"<b>Incoming:</b> {d['in_count']} txs / "
-        f"<code>{fmt_ton(d['total_in_ton'])}</code> TON"
+        f"<code>{fmt_gram(d['total_in_gram'])}</code> GRAM"
         f" (<code>{fmt_rub(d['total_in_rub'])}</code> RUB)"
     )
     tx_lines.append(
         f"<b>Outgoing:</b> {d['out_count']} txs / "
-        f"<code>{fmt_ton(d['total_out_ton'])}</code> TON"
+        f"<code>{fmt_gram(d['total_out_gram'])}</code> GRAM"
         f" (<code>{fmt_rub(d['total_out_rub'])}</code> RUB)"
     )
     tx_lines.append(
-        f"<b>Volume:</b> <code>{fmt_ton(d['volume_ton'])}</code> TON"
+        f"<b>Volume:</b> <code>{fmt_gram(d['volume_gram'])}</code> GRAM"
         f" (<code>{fmt_rub(d['volume_rub'])}</code> RUB)"
     )
     tx_lines.append(
-        f"<b>Fees:</b> <code>{fmt_ton(d['total_fees_ton'])}</code> TON"
+        f"<b>Fees:</b> <code>{fmt_gram(d['total_fees_gram'])}</code> GRAM"
         f" (<code>{fmt_rub(d['fees_rub'])}</code> RUB)"
     )
     lines.append("<blockquote>" + "\n".join(tx_lines) + "</blockquote>")
@@ -306,39 +306,47 @@ def build_message(d):
 
 
 @loader.tds
-class TONScanner(loader.Module):
-    """TON wallet scanner via inline query"""
+class GRAMScanner(loader.Module):
+    """GRAM wallet scanner via inline query"""
 
     strings = {
-        "name": "TONScanner",
-        "hint_title": "TONScanner",
-        "hint_desc": "Paste TON address",
-        "hint_msg": "<b>TONScanner:</b> Paste a TON wallet address",
+        "name": "GRAMScanner",
+        "hint_title": "GRAMScanner",
+        "hint_desc": "Paste GRAM address",
+        "hint_msg": "<b>GRAMScanner:</b> Paste a GRAM wallet address",
         "invalid_title": "Invalid address",
-        "invalid_desc": "This does not look like a valid TON address",
-        "invalid_msg": "<b>TONScanner:</b> Invalid TON address format",
+        "invalid_desc": "This does not look like a valid GRAM address",
+        "invalid_msg": "<b>GRAMScanner:</b> Invalid GRAM address format",
         "loading_title": "Scanning...",
         "loading_desc": "Fetching wallet data, wait a few seconds",
-        "loading_msg": "<b>TONScanner:</b> Scanning wallet... Try again in a few seconds.",
+        "loading_msg": "<b>GRAMScanner:</b> Scanning wallet... Try again in a few seconds.",
         "err_title": "Error",
         "err_not_found": "Wallet not found or API error",
     }
 
     strings_ru = {
-        "hint_title": "TONScanner",
-        "hint_desc": "Вставьте адрес TON кошелька",
-        "hint_msg": "<b>TONScanner:</b> Вставьте адрес TON кошелька",
+        "hint_title": "GRAMScanner",
+        "hint_desc": "Вставьте адрес GRAM кошелька",
+        "hint_msg": "<b>GRAMScanner:</b> Вставьте адрес GRAM кошелька",
         "invalid_title": "Неверный адрес",
-        "invalid_desc": "Это не похоже на валидный TON адрес",
-        "invalid_msg": "<b>TONScanner:</b> Неверный формат TON адреса",
+        "invalid_desc": "Это не похоже на валидный GRAM адрес",
+        "invalid_msg": "<b>GRAMScanner:</b> Неверный формат GRAM адреса",
         "loading_title": "Сканирую...",
         "loading_desc": "Получаю данные кошелька, подождите несколько секунд",
-        "loading_msg": "<b>TONScanner:</b> Сканирую кошелек... Повторите запрос через несколько секунд.",
+        "loading_msg": "<b>GRAMScanner:</b> Сканирую кошелек... Повторите запрос через несколько секунд.",
         "err_title": "Ошибка",
         "err_not_found": "Кошелек не найден или ошибка API",
     }
 
     def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "USE_CACHE",
+                True,
+                "If True uses cache for wallet data, if False fetches fresh data every time",
+                validator=loader.validators.Boolean(),
+            ),
+        )
         self._pending = {}
         self._cache = {}
 
@@ -347,6 +355,8 @@ class TONScanner(loader.Module):
         self._db = db
 
     def _cache_get(self, key):
+        if not self.config["USE_CACHE"]:
+            return None
         entry = self._cache.get(key)
         if not entry:
             return None
@@ -396,14 +406,14 @@ class TONScanner(loader.Module):
         )
 
     @loader.inline_handler(
-        ru_doc="Сканировать TON кошелек",
-        en_doc="Scan TON wallet",
+        ru_doc="Сканировать GRAM кошелек",
+        en_doc="Scan GRAM wallet",
     )
-    async def ton_inline_handler(self, query):
-        """Scan TON wallet"""
+    async def gram_inline_handler(self, query):
+        """Scan GRAM wallet"""
         text = query.query.strip()
-        if text.lower().startswith("ton"):
-            text = text[3:].strip()
+        if text.lower().startswith("gram"):
+            text = text[4:].strip()
 
         if not text:
             await query.answer(
@@ -419,7 +429,7 @@ class TONScanner(loader.Module):
             return
 
         addr = text.strip()
-        if not TON_ADDR_RE.match(addr):
+        if not GRAM_ADDR_RE.match(addr):
             await query.answer(
                 results=[self._make_article(
                     f"inv_{int(time.time())}",
@@ -432,7 +442,7 @@ class TONScanner(loader.Module):
             )
             return
 
-        cache_key = f"ton_{addr}"
+        cache_key = f"gram_{addr}"
 
         cached = self._cache_get(cache_key)
         if cached:
@@ -442,7 +452,7 @@ class TONScanner(loader.Module):
                         f"e_{int(time.time())}",
                         self.strings["err_title"],
                         str(cached["error"])[:100],
-                        f"<b>TONScanner:</b> {escape_html(str(cached['error']))}",
+                        f"<b>GRAMScanner:</b> {escape_html(str(cached['error']))}",
                     )],
                     cache_time=0,
                     private=True,
@@ -452,7 +462,7 @@ class TONScanner(loader.Module):
                 await query.answer(
                     results=[self._make_article(
                         f"r_{int(time.time())}",
-                        "TONScanner",
+                        "GRAMScanner",
                         f"Wallet: {cached.get('addr', '?')[:20]}...",
                         cached["message"],
                     )],
@@ -460,6 +470,9 @@ class TONScanner(loader.Module):
                     private=True,
                 )
                 return
+
+        if not self.config["USE_CACHE"]:
+            self._pending.pop(cache_key, None)
 
         if cache_key in self._pending:
             fut = self._pending[cache_key]
@@ -475,7 +488,7 @@ class TONScanner(loader.Module):
                             f"e_{int(time.time())}",
                             self.strings["err_title"],
                             str(res["error"])[:100],
-                            f"<b>TONScanner:</b> {escape_html(str(res['error']))}",
+                            f"<b>GRAMScanner:</b> {escape_html(str(res['error']))}",
                         )],
                         cache_time=0,
                         private=True,
@@ -484,7 +497,7 @@ class TONScanner(loader.Module):
                     await query.answer(
                         results=[self._make_article(
                             f"r_{int(time.time())}",
-                            "TONScanner",
+                            "GRAMScanner",
                             f"Wallet: {res.get('addr', '?')[:20]}...",
                             res["message"],
                         )],
@@ -497,7 +510,7 @@ class TONScanner(loader.Module):
                             f"e_{int(time.time())}",
                             self.strings["err_title"],
                             "Unknown error",
-                            "<b>TONScanner:</b> Unknown error",
+                            "<b>GRAMScanner:</b> Unknown error",
                         )],
                         cache_time=0,
                         private=True,
