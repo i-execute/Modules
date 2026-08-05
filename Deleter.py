@@ -1,4 +1,4 @@
-__version__ = (2, 2, 1)
+__version__ = (2, 2, 2)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/MetaBanner.jpeg
 
@@ -189,33 +189,60 @@ class Deleter(loader.Module):
         self._purger_tasks = {}
         self._purger_chats = set()
 
-    async def client_ready(self):
-        self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
+    async def client_ready(self, client, db):
+        self._client = client
+        self._db = db
+
+        self._asset_channel = db.get("heroku.forums", "channel_id", None)
 
         if not self._asset_channel:
             logger.warning("[Deleter] heroku.forums channel_id not found in DB, notifications will be disabled.")
             return
 
-        try:
-            self._deleter_topic = await utils.asset_forum_topic(
-                self._client,
-                self._db,
-                self._asset_channel,
-                "Deleter",
-                description="Logs of message deletion by Deleter module.",
-                icon_emoji_id=5188466187448650036,
-            )
-        except Exception as e:
-            logger.error(f"[Deleter] Failed to create/get forum topic: {e}")
+        await self._ensure_topic()
+
+    async def _ensure_topic(self):
+        if not self._asset_channel:
+            logger.warning("[Deleter] _ensure_topic: asset_channel not set, skipping.")
+            return
+
+        for attempt in range(1, 4):
+            try:
+                logger.info("[Deleter] Creating/getting forum topic, attempt %d...", attempt)
+                self._deleter_topic = await utils.asset_forum_topic(
+                    self._client,
+                    self._db,
+                    self._asset_channel,
+                    "Deleter",
+                    description="Logs of message deletion by Deleter module.",
+                    icon_emoji_id=5188466187448650036,
+                )
+                logger.info(
+                    "[Deleter] Forum topic ready: id=%s name=%s",
+                    getattr(self._deleter_topic, 'id', '?'),
+                    getattr(self._deleter_topic, 'title', '?'),
+                )
+                return
+            except Exception as e:
+                logger.error("[Deleter] Failed to create/get forum topic (attempt %d): %s", attempt, e)
+                if attempt < 3:
+                    await asyncio.sleep(3 * attempt)
+
+        logger.error("[Deleter] All attempts to create forum topic failed. Logs will go to Saved Messages.")
 
     async def _send_log(self, text: str):
         if not self._deleter_topic or not self._asset_channel:
-            try:
-                me = await self._client.get_me()
-                await self._client.send_message(me.id, text, parse_mode="html")
-            except Exception as e:
-                logger.error(f"[Deleter] Failed to send fallback log: {e}")
-            return
+            if not self._deleter_topic and self._asset_channel:
+                logger.info("[Deleter] Topic not ready, retrying creation before sending log.")
+                await self._ensure_topic()
+
+            if not self._deleter_topic or not self._asset_channel:
+                try:
+                    me = await self._client.get_me()
+                    await self._client.send_message(me.id, text, parse_mode="html")
+                except Exception as e:
+                    logger.error("[Deleter] Failed to send fallback log to Saved Messages: %s", e)
+                return
 
         try:
             await self.inline.bot.send_message(
@@ -225,7 +252,12 @@ class Deleter(loader.Module):
                 message_thread_id=self._deleter_topic.id,
             )
         except Exception as e:
-            logger.error(f"[Deleter] Failed to send log to topic: {e}")
+            logger.error("[Deleter] Failed to send log to topic: %s", e)
+            try:
+                me = await self._client.get_me()
+                await self._client.send_message(me.id, text, parse_mode="html")
+            except Exception as e2:
+                logger.error("[Deleter] Failed to send fallback log: %s", e2)
 
     async def _bulk_delete(self, client, chat_id, msg_ids: list) -> tuple:
         deleted = 0
@@ -368,16 +400,16 @@ class Deleter(loader.Module):
                         try:
                             await self._client.delete_messages(chat_id, new_msgs)
                         except Exception as e:
-                            logger.error(f"[Deleter] Purger delete error: {e}")
+                            logger.error("[Deleter] Purger delete error: %s", e)
 
                 except Exception as e:
-                    logger.error(f"[Deleter] Purger iter error: {e}")
+                    logger.error("[Deleter] Purger iter error: %s", e)
                     await asyncio.sleep(5)
 
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"[Deleter] Purger worker error: {e}")
+            logger.error("[Deleter] Purger worker error: %s", e)
 
     async def _cb_del_today_confirm(self, call: InlineCall):
         await call.edit(
@@ -426,7 +458,7 @@ class Deleter(loader.Module):
             )
 
         except Exception as e:
-            logger.error(f"[Deleter] del today execute error: {e}")
+            logger.error("[Deleter] del today execute error: %s", e)
             await call.edit(
                 self.strings["error"].format(error=str(e)),
                 reply_markup=[
@@ -522,7 +554,7 @@ class Deleter(loader.Module):
             else:
                 await self._delete_me_simple(client, chat_id, chat_name)
         except Exception as e:
-            logger.error(f"[Deleter] del me error: {e}")
+            logger.error("[Deleter] del me error: %s", e)
             await self._send_log(self.strings["error"].format(error=str(e)))
 
     async def _delete_me_simple(self, client, chat_id, chat_name: str):
@@ -546,7 +578,7 @@ class Deleter(loader.Module):
             )
 
         except Exception as e:
-            logger.error(f"[Deleter] _delete_me_simple error: {e}")
+            logger.error("[Deleter] _delete_me_simple error: %s", e)
             await self._send_log(self.strings["error"].format(error=str(e)))
 
     async def _delete_me_and_leave(self, client, chat_id, chat_name: str, cmd_msg_id: int):
@@ -566,11 +598,9 @@ class Deleter(loader.Module):
             count = len(ids_to_delete)
 
             try:
-                sayonara_msg = await client.send_file(chat_id, SAYONARA_URL)
-                sayonara_msg_id = sayonara_msg.id
+                await client.send_file(chat_id, SAYONARA_URL)
             except Exception as e:
-                logger.error(f"[Deleter] Failed to send Sayonara: {e}")
-                sayonara_msg_id = None
+                logger.error("[Deleter] Failed to send Sayonara: %s", e)
 
             if ids_to_delete:
                 await self._bulk_delete(client, chat_id, ids_to_delete)
@@ -579,7 +609,7 @@ class Deleter(loader.Module):
 
             def fmt_date(d):
                 if d is None:
-                    return "—"
+                    return "-"
                 return d.strftime("%Y-%m-%d %H:%M:%S UTC")
 
             log_text = self.strings["done_leave"].format(
@@ -591,7 +621,7 @@ class Deleter(loader.Module):
             await self._send_log(log_text)
 
         except Exception as e:
-            logger.error(f"[Deleter] _delete_me_and_leave error: {e}")
+            logger.error("[Deleter] _delete_me_and_leave error: %s", e)
             await self._send_log(self.strings["error"].format(error=str(e)))
 
     async def _leave_chat(self, client, chat_id):
@@ -601,7 +631,7 @@ class Deleter(loader.Module):
             try:
                 await client.kick_participant(chat_id, "me")
             except Exception as e:
-                logger.error(f"[Deleter] leave error: {e}")
+                logger.error("[Deleter] leave error: %s", e)
 
     async def _delete_own_n(self, message: Message, count: int):
         if count <= 0:
@@ -627,7 +657,7 @@ class Deleter(loader.Module):
             if failed:
                 await message.client.send_message(chat_id, self.strings["no_perms"])
         except Exception as e:
-            logger.error(f"[Deleter] del n error: {e}")
+            logger.error("[Deleter] del n error: %s", e)
             await message.client.send_message(
                 chat_id, self.strings["error"].format(error=str(e))
             )
@@ -650,7 +680,7 @@ class Deleter(loader.Module):
             if failed:
                 await message.client.send_message(chat_id, self.strings["no_perms"])
         except Exception as e:
-            logger.error(f"[Deleter] del before error: {e}")
+            logger.error("[Deleter] del before error: %s", e)
             await message.client.send_message(
                 chat_id, self.strings["error"].format(error=str(e))
             )
@@ -674,7 +704,7 @@ class Deleter(loader.Module):
             if failed:
                 await message.client.send_message(chat_id, self.strings["no_perms"])
         except Exception as e:
-            logger.error(f"[Deleter] del after error: {e}")
+            logger.error("[Deleter] del after error: %s", e)
             await message.client.send_message(
                 chat_id, self.strings["error"].format(error=str(e))
             )
@@ -699,7 +729,7 @@ class Deleter(loader.Module):
             if failed:
                 await message.client.send_message(chat_id, self.strings["no_perms"])
         except Exception as e:
-            logger.error(f"[Deleter] del now error: {e}")
+            logger.error("[Deleter] del now error: %s", e)
             await message.client.send_message(
                 chat_id, self.strings["error"].format(error=str(e))
             )
@@ -728,7 +758,7 @@ class Deleter(loader.Module):
             if failed:
                 await message.client.send_message(chat_id, self.strings["no_perms"])
         except Exception as e:
-            logger.error(f"[Deleter] del today error: {e}")
+            logger.error("[Deleter] del today error: %s", e)
             await message.client.send_message(
                 chat_id, self.strings["error"].format(error=str(e))
             )
@@ -757,7 +787,7 @@ class Deleter(loader.Module):
             if failed:
                 await message.client.send_message(chat_id, self.strings["no_perms"])
         except Exception as e:
-            logger.error(f"[Deleter] del user error: {e}")
+            logger.error("[Deleter] del user error: %s", e)
             await message.client.send_message(
                 chat_id, self.strings["error"].format(error=str(e))
             )
