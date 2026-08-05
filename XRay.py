@@ -1,4 +1,4 @@
-__version__ = (4, 1, 0)
+__version__ = (4, 2, 0)
 # meta developer: I_execute.t.me 
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
@@ -6,6 +6,7 @@ import os
 import asyncio
 import logging
 import signal
+import socket
 import time
 import platform
 import json
@@ -252,7 +253,8 @@ class XRay(loader.Module):
         "btn_settings": "Settings",
         "btn_delete": "Delete User",
         "btn_xhttp": "XHTTP",
-        "btn_tcp": "TCP+Vision",
+        "btn_raw": "RAW",
+        "btn_websocket": "WebSocket",
         "btn_set_sni": "Set SNI",
         "btn_set_dest": "Set Dest",
         "btn_set_path": "Set Path",
@@ -334,10 +336,56 @@ class XRay(loader.Module):
             "User: {name}\n"
             "Limit: {limit}\n"
             "Active: {active}\n"
-            "Process killed"
+            "Process stopped\n"
+            "Autostart disabled"
             "</blockquote>"
         ),
-        
+
+        "log_user_started": (
+            "<pre><code class=\"language-xray\">"
+            "XRAY STARTED\n"
+            "----------------\n"
+            "User:      {name}\n"
+            "Port:      {port}\n"
+            "Transport: {transport}\n"
+            "Autostart: {autostart}"
+            "</code></pre>"
+        ),
+        "log_user_stopped": (
+            "<pre><code class=\"language-xray\">"
+            "XRAY STOPPED\n"
+            "----------------\n"
+            "User:      {name}\n"
+            "Port:      {port}\n"
+            "Transport: {transport}\n"
+            "Reason:    {reason}"
+            "</code></pre>"
+        ),
+        "log_device_limit": (
+            "<pre><code class=\"language-xray\">"
+            "DEVICE LIMIT EXCEEDED\n"
+            "---------------------\n"
+            "User:      {name}\n"
+            "Port:      {port}\n"
+            "Transport: {transport}\n"
+            "Limit:     {limit}\n"
+            "Active:    {active}\n"
+            "Autostart: disabled"
+            "</code></pre>"
+        ),
+        "log_user_deleted": (
+            "<pre><code class=\"language-xray\">"
+            "XRAY USER DELETED\n"
+            "-----------------\n"
+            "User:      {name}\n"
+            "Port:      {port}\n"
+            "Transport: {transport}"
+            "</code></pre>"
+        ),
+        "log_reason_manual": "manual",
+        "log_reason_restart": "restart",
+        "log_reason_limit": "device limit",
+
         "status_online": "Online",
         "status_offline": "Offline",
 
@@ -397,6 +445,7 @@ class XRay(loader.Module):
     }
 
     strings_ru = {
+        "name": "XRay",
         "main_menu": (
             "<b>XRay Мультиюзерный VPN</b>\n"
             "<blockquote>Всего юзеров: {total}\n"
@@ -568,7 +617,8 @@ class XRay(loader.Module):
         "btn_settings": "Настройки",
         "btn_delete": "Удалить",
         "btn_xhttp": "XHTTP",
-        "btn_tcp": "TCP+Vision",
+        "btn_raw": "RAW",
+        "btn_websocket": "WebSocket",
         "btn_set_sni": "SNI",
         "btn_set_dest": "Dest",
         "btn_set_path": "Путь",
@@ -646,10 +696,56 @@ class XRay(loader.Module):
             "Юзер: {name}\n"
             "Лимит: {limit}\n"
             "Активных: {active}\n"
-            "Процесс убит"
+            "Процесс остановлен\n"
+            "Автозапуск отключён"
             "</blockquote>"
         ),
-        
+
+        "log_user_started": (
+            "<pre><code class=\"language-xray\">"
+            "XRAY STARTED\n"
+            "----------------\n"
+            "User:      {name}\n"
+            "Port:      {port}\n"
+            "Transport: {transport}\n"
+            "Autostart: {autostart}"
+            "</code></pre>"
+        ),
+        "log_user_stopped": (
+            "<pre><code class=\"language-xray\">"
+            "XRAY STOPPED\n"
+            "----------------\n"
+            "User:      {name}\n"
+            "Port:      {port}\n"
+            "Transport: {transport}\n"
+            "Reason:    {reason}"
+            "</code></pre>"
+        ),
+        "log_device_limit": (
+            "<pre><code class=\"language-xray\">"
+            "DEVICE LIMIT EXCEEDED\n"
+            "---------------------\n"
+            "User:      {name}\n"
+            "Port:      {port}\n"
+            "Transport: {transport}\n"
+            "Limit:     {limit}\n"
+            "Active:    {active}\n"
+            "Autostart: disabled"
+            "</code></pre>"
+        ),
+        "log_user_deleted": (
+            "<pre><code class=\"language-xray\">"
+            "XRAY USER DELETED\n"
+            "-----------------\n"
+            "User:      {name}\n"
+            "Port:      {port}\n"
+            "Transport: {transport}"
+            "</code></pre>"
+        ),
+        "log_reason_manual": "manual",
+        "log_reason_restart": "restart",
+        "log_reason_limit": "device limit",
+
         "status_online": "Онлайн",
         "status_offline": "Офлайн",
 
@@ -736,6 +832,10 @@ class XRay(loader.Module):
         self._monitor_task = None
         self._external_ip = ""
         self._link_cache: Dict[str, str] = {}
+        self._tunnels: Dict[str, subprocess.Popen] = {}
+        self._site_processes: Dict[str, subprocess.Popen] = {}
+        self._logger_topic = None
+        self._asset_channel = None
 
     async def client_ready(self, client, db):
         self._client = client
@@ -751,11 +851,34 @@ class XRay(loader.Module):
 
         self._users = self._db.get("XR", "users", {})
         self._external_ip = await self._detect_external_ip()
+        self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
+
+        if self._asset_channel:
+            try:
+                self._logger_topic = await utils.asset_forum_topic(
+                    self._client,
+                    self._db,
+                    self._asset_channel,
+                    "XRay",
+                    description="XRay users and device limit logs",
+                    icon_emoji_id=5449413488227166358,
+                )
+            except Exception as e:
+                logger.error(f"[XR] Failed to create/get forum topic: {e}")
         
         if not self._xray_installed():
             logger.warning("[XR] XRay not installed")
         
         await self._reattach_processes()
+        for name, user in self._users.items():
+            if user.get("transport") != "websocket" or name not in self._processes:
+                continue
+            user_dir = os.path.join(self._root, "users", name)
+            ok, error = await self._start_websocket_site(name, user_dir)
+            if ok:
+                ok, error = await self._start_websocket_tunnel(name, user_dir)
+            if not ok:
+                logger.error(f"[XR] WebSocket recovery failed for {name}: {error}")
         self._start_monitor()
 
     async def on_unload(self):
@@ -768,7 +891,193 @@ class XRay(loader.Module):
         
         for name in list(self._processes.keys()):
             await self._stop_user(name)
+        for name in list(self._tunnels.keys()):
+            await self._stop_websocket_tunnel(name)
+        for name in list(self._site_processes.keys()):
+            await self._stop_websocket_site(name)
 
+    def _transport_label(self, transport: str) -> str:
+        labels = {
+            "tcp": "RAW",
+            "xhttp": "XHTTP",
+            "socks5": "SOCKS5",
+            "websocket": "WebSocket",
+        }
+        return labels.get(transport, str(transport).upper())
+
+    def _find_free_loopback_port(self) -> int:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind(("127.0.0.1", 0))
+            return sock.getsockname()[1]
+        finally:
+            sock.close()
+
+    def _websocket_site_script(self, path: str, backend_port: int, site_port: int) -> str:
+        animation = "https://raw.githubusercontent.com/i-execute/Media/main/Animation/Evil_Rat.json"
+        return f'''import asyncio
+from aiohttp import web, ClientSession, WSMsgType
+
+PATH = {path!r}
+BACKEND = "ws://127.0.0.1:{backend_port}" + PATH
+HTML = """<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Loading</title><style>html,body{{height:100%;margin:0;background:#0d1017;overflow:hidden}}#animation{{width:min(512px,86vw);height:min(512px,86vw);margin:auto;position:absolute;inset:0}}</style></head><body><div id=\"animation\"></div><script src=\"https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js\"></script><script>lottie.loadAnimation({{container:document.getElementById('animation'),renderer:'svg',loop:true,autoplay:true,path:'{animation}'}});</script></body></html>"""
+
+async def index(request):
+    return web.Response(text=HTML, content_type="text/html")
+
+async def proxy(request):
+    client_ws = web.WebSocketResponse()
+    await client_ws.prepare(request)
+    async with ClientSession() as session:
+        async with session.ws_connect(BACKEND, autoping=False) as backend_ws:
+            async def forward(source, target):
+                async for message in source:
+                    if message.type == WSMsgType.BINARY:
+                        await target.send_bytes(message.data)
+                    elif message.type == WSMsgType.TEXT:
+                        await target.send_str(message.data)
+                    elif message.type == WSMsgType.PING:
+                        await target.ping()
+                    elif message.type == WSMsgType.PONG:
+                        await target.pong()
+                    elif message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
+                        break
+            await asyncio.gather(forward(client_ws, backend_ws), forward(backend_ws, client_ws))
+    return client_ws
+
+app = web.Application()
+app.router.add_get(PATH, proxy)
+app.router.add_get('/', index)
+web.run_app(app, host='127.0.0.1', port={site_port})
+'''
+
+    async def _start_websocket_site(self, name: str, user_dir: str) -> Tuple[bool, str]:
+        if name in self._site_processes:
+            return True, ""
+        user = self._users[name]
+        site_port = self._find_free_loopback_port()
+        path = user.get("path") or f"/ws-{secrets.token_urlsafe(12)}"
+        user["path"] = path
+        user["site_port"] = site_port
+        script_path = os.path.join(user_dir, "websocket_site.py")
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(self._websocket_site_script(path, user["port"], site_port))
+        try:
+            proc = subprocess.Popen(
+                ["python3", script_path],
+                cwd=user_dir,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+            )
+            await asyncio.sleep(1)
+            if proc.poll() is not None:
+                return False, "site_start_failed"
+            self._site_processes[name] = proc
+            self._save_users()
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+
+    async def _stop_websocket_site(self, name: str):
+        proc = self._site_processes.pop(name, None)
+        if not proc:
+            return
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            else:
+                proc.terminate()
+            proc.wait(timeout=3)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    async def _start_websocket_tunnel(self, name: str, user_dir: str) -> Tuple[bool, str]:
+        if name in self._tunnels:
+            return True, ""
+        user = self._users[name]
+        site_port = user.get("site_port")
+        if not site_port:
+            return False, "site_not_running"
+        cloudflared = shutil.which("cloudflared") or os.path.expanduser("~/.local/bin/cloudflared")
+        if not os.path.isfile(cloudflared):
+            return False, "cloudflared_not_found"
+        log_path = os.path.join(user_dir, "cloudflared.log")
+        try:
+            log_fd = open(log_path, "ab")
+            proc = subprocess.Popen(
+                [cloudflared, "tunnel", "--url", f"http://127.0.0.1:{site_port}", "--no-autoupdate"],
+                stdout=log_fd,
+                stderr=log_fd,
+                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+            )
+            deadline = time.time() + 25
+            hostname = ""
+            while time.time() < deadline:
+                await asyncio.sleep(1)
+                try:
+                    text = open(log_path, "r", errors="replace").read()
+                except OSError:
+                    text = ""
+                match = re.search(r"https://([a-z0-9-]+\.trycloudflare\.com)", text, re.I)
+                if match:
+                    hostname = match.group(1)
+                    break
+                if proc.poll() is not None:
+                    break
+            if not hostname:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                return False, "cloudflared_tunnel_failed"
+            self._tunnels[name] = proc
+            user["tunnel_host"] = hostname
+            self._save_users()
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+
+    async def _stop_websocket_tunnel(self, name: str):
+        proc = self._tunnels.pop(name, None)
+        if not proc:
+            return
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            else:
+                proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    async def _send_log(self, text: str):
+        if not self._logger_topic or not self._asset_channel:
+            return
+        try:
+            await self._client.send_message(
+                int(f"-100{self._asset_channel}"),
+                text,
+                parse_mode="html",
+                reply_to=self._logger_topic.id,
+                link_preview=False,
+            )
+        except Exception as e:
+            logger.error(f"[XR] Failed to send log: {e}")
+
+    def _log_user_data(self, user: Dict) -> Dict:
+        return {
+            "name": _escape(user.get("name", "unknown")),
+            "port": user.get("port", "n/a"),
+            "transport": self._transport_label(user.get("transport", "unknown")),
+            "autostart": "on" if user.get("autostart") else "off",
+        }
 
     async def _reattach_processes(self):
         if not self._xray_installed():
@@ -1219,11 +1528,11 @@ class XRay(loader.Module):
             }
 
         if transport == "tcp":
-            sni = user.get("sni", "www.sony.com")
-            dest = user.get("dest", "www.sony.com:443")
+            sni = user.get("sni", "www.cloudflare.com")
+            dest = user.get("dest", "www.cloudflare.com:443")
         else:
-            sni = user.get("sni", "www.microsoft.com")
-            dest = user.get("dest", "www.microsoft.com:443")
+            sni = user.get("sni", "www.cloudflare.com")
+            dest = user.get("dest", "www.cloudflare.com:443")
         short_id = user["short_id"]
 
         config = {
@@ -1255,19 +1564,24 @@ class XRay(loader.Module):
             ],
         }
 
-        if transport == "xhttp":
-            padding = user.get("padding", "100-1000")
+        if transport == "websocket":
+            config["inbounds"][0]["settings"]["fallbacks"] = [{
+                "dest": user.get("site_port", 80),
+                "xver": 0,
+            }]
+            config["inbounds"][0]["streamSettings"] = {
+                "network": "ws",
+                "security": "none",
+                "wsSettings": {
+                    "path": user.get("path", "/"),
+                },
+            }
+        elif transport == "xhttp":
             config["inbounds"][0]["streamSettings"] = {
                 "network": "xhttp",
                 "security": "reality",
                 "xhttpSettings": {
                     "path": user.get("path", "/xhttps"),
-                    "mode": "packet-up",
-                    "noSSEHeader": False,
-                    "xPaddingBytes": padding,
-                    "scMaxBufferedPosts": 30,
-                    "scMaxEachPostBytes": "1000000",
-                    "scStreamUpServerSecs": "20-80",
                 },
                 "realitySettings": {
                     "show": False,
@@ -1313,19 +1627,30 @@ class XRay(loader.Module):
 
         import json as _json
 
+        if transport == "websocket":
+            host = user.get("tunnel_host", "")
+            if not host:
+                return ""
+            path = user.get("path", "/")
+            params = urllib.parse.urlencode({
+                "type": "ws",
+                "encryption": "none",
+                "path": path,
+                "host": host,
+                "security": "tls",
+                "sni": host,
+            })
+            return f"vless://{uuid_str}@{host}:443?{params}#{urllib.parse.quote(name, safe='')}"
+
         if transport == "xhttp":
-            sni = user.get("sni", "www.microsoft.com")
+            sni = user.get("sni", "www.cloudflare.com")
             path = user.get("path", "/xhttps")
-            padding = user.get("padding", "100-1000")
-            extra = _json.dumps({"xPaddingBytes": padding}, separators=(",", ":"))
 
             params = urllib.parse.urlencode({
                 "type": "xhttp",
                 "encryption": "none",
                 "security": "reality",
                 "path": path,
-                "mode": "packet-up",
-                "extra": extra,
                 "pbk": public_key,
                 "fp": fp,
                 "sni": sni,
@@ -1334,7 +1659,7 @@ class XRay(loader.Module):
             })
             return f"vless://{uuid_str}@{ip}:{port}?{params}#{urllib.parse.quote(name, safe='')}"
         else:
-            sni = user.get("sni", "www.sony.com")
+            sni = user.get("sni", "www.cloudflare.com")
             params = urllib.parse.urlencode({
                 "type": "tcp",
                 "encryption": "none",
@@ -1355,7 +1680,7 @@ class XRay(loader.Module):
         user = self._users.get(name)
         if not user:
             return False, "user_not_found"
-        
+
         if not self._xray_installed():
             return False, "xray_not_installed"
         
@@ -1368,6 +1693,11 @@ class XRay(loader.Module):
         
         user_dir = os.path.join(self._root, "users", name)
         os.makedirs(user_dir, exist_ok=True)
+
+        if user["transport"] == "websocket":
+            ok, error = await self._start_websocket_site(name, user_dir)
+            if not ok:
+                return False, error
         
         config = self._build_config(user)
         config_path = os.path.join(user_dir, "config.json")
@@ -1411,7 +1741,25 @@ class XRay(loader.Module):
 
             self._processes[name] = proc
             user["start_time"] = time.time()
+
+            if user["transport"] == "websocket":
+                ok, error = await self._start_websocket_tunnel(name, user_dir)
+                if not ok:
+                    try:
+                        if hasattr(os, "killpg"):
+                            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                        else:
+                            proc.terminate()
+                    except Exception:
+                        pass
+                    self._processes.pop(name, None)
+                    await self._stop_websocket_site(name)
+                    return False, error
+
             self._save_users()
+            await self._send_log(
+                self.strings["log_user_started"].format(**self._log_user_data(user))
+            )
 
             return True, ""
 
@@ -1422,7 +1770,7 @@ class XRay(loader.Module):
                 pass
             return False, str(e)
 
-    async def _stop_user(self, name: str) -> bool:
+    async def _stop_user(self, name: str, reason: str = "manual") -> bool:
         proc = self._processes.get(name)
         if not proc:
             return False
@@ -1445,10 +1793,21 @@ class XRay(loader.Module):
             pass
         
         del self._processes[name]
+
+        if self._users.get(name, {}).get("transport") == "websocket":
+            await self._stop_websocket_tunnel(name)
+            await self._stop_websocket_site(name)
         
         if name in self._users:
             self._users[name]["start_time"] = 0
             self._save_users()
+            user = self._users[name]
+            await self._send_log(
+                self.strings["log_user_stopped"].format(
+                    **self._log_user_data(user),
+                    reason=_escape(reason),
+                )
+            )
         
         return True
 
@@ -1507,7 +1866,16 @@ class XRay(loader.Module):
                     active = self._get_active_connections(user["port"])
                     
                     if active > limit:
-                        await self._stop_user(name)
+                        user["autostart"] = False
+                        self._save_users()
+                        await self._stop_user(name, self.strings["log_reason_limit"])
+                        await self._send_log(
+                            self.strings["log_device_limit"].format(
+                                **self._log_user_data(user),
+                                limit=limit,
+                                active=active,
+                            )
+                        )
                         
                         try:
                             await self._client.send_message(
@@ -1861,7 +2229,7 @@ class XRay(loader.Module):
     async def _cb_restart_user(self, call: InlineCall, name: str):
         await call.edit(self.strings["loading"])
         
-        await self._stop_user(name)
+        await self._stop_user(name, self.strings["log_reason_restart"])
         await asyncio.sleep(1)
         ok, err = await self._start_user(name)
         
@@ -1878,7 +2246,15 @@ class XRay(loader.Module):
     async def _cb_delete_user(self, call: InlineCall, name: str):
         await call.edit(self.strings["loading"])
         
-        await self._stop_user(name)
+        user = self._users.get(name)
+        if not user:
+            await call.answer("User not found", show_alert=True)
+            return
+
+        await self._stop_user(name, self.strings["log_reason_manual"])
+        await self._send_log(
+            self.strings["log_user_deleted"].format(**self._log_user_data(user))
+        )
         
         user_dir = os.path.join(self._root, "users", name)
         if os.path.exists(user_dir):
@@ -2065,12 +2441,13 @@ class XRay(loader.Module):
             return
         
         is_socks5 = user["transport"] == "socks5"
-        transport = user["transport"].upper()
-        sni = user.get("sni", "www.microsoft.com") if not is_socks5 else "n/a"
-        dest = user.get("dest", "www.microsoft.com:443") if not is_socks5 else "n/a"
-        path = user.get("path", "/xhttps") if user["transport"] == "xhttp" else "n/a"
+        is_websocket = user["transport"] == "websocket"
+        transport = self._transport_label(user["transport"])
+        sni = user.get("sni", "www.cloudflare.com") if not is_socks5 and not is_websocket else "n/a"
+        dest = user.get("dest", "www.cloudflare.com:443") if not is_socks5 and not is_websocket else "n/a"
+        path = user.get("path", "/xhttps") if user["transport"] in {"xhttp", "websocket"} else "n/a"
         padding = user.get("padding", "100-1000") if user["transport"] == "xhttp" else "n/a"
-        fp = user.get("fingerprint", "firefox") if not is_socks5 else "n/a"
+        fp = user.get("fingerprint", "firefox") if not is_socks5 and not is_websocket else "n/a"
         limit = user.get("device_limit", 0)
         limit_text = "Unlimited" if limit == 0 else str(limit)
         
@@ -2111,8 +2488,9 @@ class XRay(loader.Module):
             return
         
         markup = [
-            [{"text": self.strings["btn_tcp"], "callback": self._cb_set_transport, "args": (name, "tcp"), "style": "primary"}],
+            [{"text": self.strings["btn_raw"], "callback": self._cb_set_transport, "args": (name, "tcp"), "style": "primary"}],
             [{"text": self.strings["btn_xhttp"], "callback": self._cb_set_transport, "args": (name, "xhttp"), "style": "primary"}],
+            [{"text": self.strings["btn_websocket"], "callback": self._cb_set_transport, "args": (name, "websocket"), "style": "primary"}],
             [{"text": self.strings["btn_socks5"], "callback": self._cb_set_transport, "args": (name, "socks5"), "style": "primary"}],
             [{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}],
         ]
@@ -2145,6 +2523,12 @@ class XRay(loader.Module):
         if name in self._processes and user.get("autostart"):
             await self._stop_user(name)
             await self._start_user(name)
+
+        if transport == "websocket":
+            user.pop("tunnel_host", None)
+            user.pop("site_port", None)
+            user["path"] = ""
+            self._save_users()
         
         await call.edit(
             self.strings["transport_set"].format(transport=transport.upper()),
@@ -2345,7 +2729,8 @@ class XRay(loader.Module):
         
         markup = [
             [{"text": self.strings["btn_xhttp"], "callback": self._cb_add_user_limit_input, "args": (name, "xhttp"), "style": "primary"}],
-            [{"text": self.strings["btn_tcp"], "callback": self._cb_add_user_limit_input, "args": (name, "tcp"), "style": "primary"}],
+            [{"text": self.strings["btn_raw"], "callback": self._cb_add_user_limit_input, "args": (name, "tcp"), "style": "primary"}],
+            [{"text": self.strings["btn_websocket"], "callback": self._cb_add_user_limit_input, "args": (name, "websocket"), "style": "primary"}],
             [{"text": self.strings["btn_socks5"], "callback": self._cb_add_user_limit_input, "args": (name, "socks5"), "style": "primary"}],
             [{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}],
         ]
@@ -2399,11 +2784,11 @@ class XRay(loader.Module):
         port = await self._get_next_port()
         
         if transport == "tcp":
-            default_sni = "www.sony.com"
-            default_dest = "www.sony.com:443"
+            default_sni = "www.cloudflare.com"
+            default_dest = "www.cloudflare.com:443"
         else:
-            default_sni = "www.microsoft.com"
-            default_dest = "www.microsoft.com:443"
+            default_sni = "www.cloudflare.com"
+            default_dest = "www.cloudflare.com:443"
 
         user = {
             "name": name,
