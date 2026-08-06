@@ -351,7 +351,7 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre>Xray started</pre>"
+            "<pre><code class=\"language-Xray started\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -361,7 +361,7 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
         "log_user_stopped": (
-            "<pre>Xray stopped</pre>"
+            "<pre><code class=\"language-Xray stoped\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -717,7 +717,7 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre>Xray started</pre>"
+            "<pre><code class=\"language-Xray started\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -727,7 +727,7 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
         "log_user_stopped": (
-            "<pre>Xray stopped</pre>"
+            "<pre><code class=\"language-Xray stoped\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -2496,8 +2496,8 @@ class XRay(loader.Module):
             tmp.close()
 
             try:
-                await self._client.send_file(
-                    call.form["chat"],
+                await utils.answer_file(
+                    call,
                     tmp.name,
                     attributes=[],
                     force_document=True,
@@ -2538,8 +2538,8 @@ class XRay(loader.Module):
         tmp.close()
 
         try:
-            await self.inline.bot.send_document(
-                call.form["chat"],
+            await utils.answer_file(
+                call,
                 tmp.name,
                 attributes=[],
                 force_document=True,
@@ -2602,8 +2602,8 @@ class XRay(loader.Module):
         tmp.close()
 
         try:
-            await self._client.send_file(
-                call.form["chat"],
+            await utils.answer_file(
+                call,
                 tmp.name,
                 force_document=True,
                 file_name=f"xray_{name}_{label}.txt",
