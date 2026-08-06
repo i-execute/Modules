@@ -1,4 +1,4 @@
-__version__ = (1, 1, 0)
+__version__ = (1, 1, 1)
 # meta developer: I_execute.t.me
 
 from telethon.tl.types import Message
@@ -130,7 +130,7 @@ class Gift2Sticker(loader.Module):
 
         "err_no_saved_gifts": (
             "<b>Error</b>\n"
-            "<blockquote>User has no saved NFT gifts</blockquote>"
+            "<blockquote>User has no saved gifts</blockquote>"
         ),
 
         "stopped": (
@@ -236,7 +236,7 @@ class Gift2Sticker(loader.Module):
 
         "err_no_saved_gifts": (
             "<b>Ошибка</b>\n"
-            "<blockquote>У пользователя нет сохранённых NFT подарков</blockquote>"
+            "<blockquote>У пользователя нет сохранённых подарков</blockquote>"
         ),
 
         "stopped": (
@@ -405,6 +405,25 @@ class Gift2Sticker(loader.Module):
                 pass
             return False
 
+    async def _fetch_all_saved_gifts(self, peer):
+        all_gifts = []
+        offset = ""
+        while True:
+            try:
+                r = await self._client(GetSavedStarGiftsRequest(peer=peer, offset=offset, limit=10))
+                if not r.gifts:
+                    break
+                all_gifts.extend(r.gifts)
+                if len(r.gifts) < 10:
+                    break
+                offset = getattr(r, 'next_offset', "") or ""
+                if not offset:
+                    break
+                await asyncio.sleep(0.3)
+            except Exception:
+                break
+        return all_gifts
+
     async def _handle_nft_link(self, call: InlineCall, value: str):
         value = value.strip()
         slug = _parse_nft_slug(value)
@@ -415,10 +434,7 @@ class Gift2Sticker(loader.Module):
             )
             return
 
-        await call.edit(
-            self.strings["loading"],
-            reply_markup=[],
-        )
+        await call.edit(self.strings["loading"], reply_markup=[])
 
         try:
             r = await self._client(GetUniqueStarGiftRequest(slug=slug))
@@ -564,11 +580,9 @@ class Gift2Sticker(loader.Module):
             gifts = []
 
         sticker = None
-        stars = None
         for g in gifts:
             if g.id == gift_id:
                 sticker = getattr(g, 'sticker', None)
-                stars = getattr(g, 'stars', None)
                 break
 
         if sticker:
@@ -639,37 +653,36 @@ class Gift2Sticker(loader.Module):
             )
             return
 
-        all_gifts = []
-        offset = ""
-        while True:
-            try:
-                r = await self._client(GetSavedStarGiftsRequest(peer=peer, offset=offset, limit=10))
-                if not r.gifts:
-                    break
-                all_gifts.extend(r.gifts)
-                if len(r.gifts) < 10:
-                    break
-                offset = getattr(r, 'next_offset', "") or ""
-                if not offset:
-                    break
-                await asyncio.sleep(0.3)
-            except Exception:
-                break
+        all_saved = await self._fetch_all_saved_gifts(peer)
 
-        unique_gifts = []
-        for sg in all_gifts:
-            gift = sg.gift
-            if type(gift).__name__ == "StarGiftUnique":
-                unique_gifts.append(gift)
-
-        if not unique_gifts:
+        if not all_saved:
             await call.edit(
                 self.strings["err_no_saved_gifts"],
                 reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
             )
             return
 
-        total = len(unique_gifts)
+        seen_ids = set()
+        to_send = []
+
+        for sg in all_saved:
+            gift = sg.gift
+            gtype = type(gift).__name__
+            gid = getattr(gift, 'id', None)
+
+            if gid in seen_ids:
+                continue
+            seen_ids.add(gid)
+            to_send.append((gtype, gift))
+
+        if not to_send:
+            await call.edit(
+                self.strings["err_no_saved_gifts"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
+            )
+            return
+
+        total = len(to_send)
         self._kill_flag = False
 
         await call.edit(
@@ -678,9 +691,8 @@ class Gift2Sticker(loader.Module):
         )
 
         sent = 0
-        sent_ids = set()
 
-        for gift in unique_gifts:
+        for gtype, gift in to_send:
             if self._kill_flag:
                 await call.edit(
                     self.strings["stopped"].format(sent=sent),
@@ -689,29 +701,29 @@ class Gift2Sticker(loader.Module):
                 self._kill_flag = False
                 return
 
-            gid = getattr(gift, 'id', None)
-            if gid in sent_ids:
-                continue
-            sent_ids.add(gid)
-
-            slug = getattr(gift, 'slug', None)
-            if not slug:
-                continue
-
-            try:
-                r = await self._client(GetUniqueStarGiftRequest(slug=slug))
-                g = r.gift if hasattr(r, 'gift') else r
-                attrs = getattr(g, 'attributes', None) or []
-                for attr in attrs:
-                    if type(attr).__name__ == "StarGiftAttributeModel":
-                        doc = getattr(attr, 'document', None)
-                        if doc:
-                            ok = await self._send_sticker_doc(self._chat_id, doc, self._reply_id)
-                            if ok:
-                                sent += 1
-                        break
-            except Exception:
-                pass
+            if gtype == "StarGiftUnique":
+                slug = getattr(gift, 'slug', None)
+                if not slug:
+                    continue
+                try:
+                    r = await self._client(GetUniqueStarGiftRequest(slug=slug))
+                    g = r.gift if hasattr(r, 'gift') else r
+                    for attr in (getattr(g, 'attributes', None) or []):
+                        if type(attr).__name__ == "StarGiftAttributeModel":
+                            doc = getattr(attr, 'document', None)
+                            if doc:
+                                ok = await self._send_sticker_doc(self._chat_id, doc, self._reply_id)
+                                if ok:
+                                    sent += 1
+                            break
+                except Exception:
+                    pass
+            else:
+                sticker = getattr(gift, 'sticker', None)
+                if sticker:
+                    ok = await self._send_sticker_doc(self._chat_id, sticker, self._reply_id)
+                    if ok:
+                        sent += 1
 
             await call.edit(
                 self.strings["sending_progress"].format(current=sent, total=total),
