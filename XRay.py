@@ -13,6 +13,7 @@ import json
 import subprocess
 import shutil
 import uuid
+import sys
 import ipaddress
 import tempfile
 import re
@@ -83,6 +84,7 @@ class XRay(loader.Module):
             "<b>Setup & Installation</b>\n"
             "<blockquote>"
             "XRay Core: {xray_status}\n"
+            "Cloudflared: {cloudflared_status}\n"
             "GitHub API: {gh_status}"
             "</blockquote>"
         ),
@@ -116,6 +118,7 @@ class XRay(loader.Module):
             "<blockquote>"
             "Status: {status}\n"
             "Transport: {transport}\n"
+            "TLS: {tls}\n"
             "Port: {port}\n"
             "Autostart: {autostart}\n"
             "Device limit: {limit}\n"
@@ -123,6 +126,8 @@ class XRay(loader.Module):
             "Uptime: {uptime}"
             "</blockquote>"
         ),
+        "btn_mask_site": "Mask Site",
+        "mask_site_menu": "<b>WebSocket Mask Site</b>\n<blockquote>Current: <code>{current}</code></blockquote>",
         
         "user_settings": (
             "<b>Settings: {name}</b>\n"
@@ -271,6 +276,8 @@ class XRay(loader.Module):
         "btn_safari": "Safari",
         "btn_install_xray": "Install XRay Core",
         "btn_reinstall_xray": "Reinstall XRay Core",
+        "btn_install_cloudflared": "Install Cloudflared",
+        "btn_reinstall_cloudflared": "Reinstall Cloudflared",
         
         "input_name": "Enter username:",
         "input_limit": "Enter device limit:",
@@ -457,6 +464,7 @@ class XRay(loader.Module):
             "<b>Установка и настройка</b>\n"
             "<blockquote>"
             "XRay Core: {xray_status}\n"
+            "Cloudflared: {cloudflared_status}\n"
             "GitHub API: {gh_status}"
             "</blockquote>"
         ),
@@ -490,6 +498,7 @@ class XRay(loader.Module):
             "<blockquote>"
             "Статус: {status}\n"
             "Транспорт: {transport}\n"
+            "TLS: {tls}\n"
             "Порт: {port}\n"
             "Автозапуск: {autostart}\n"
             "Лимит устройств: {limit}\n"
@@ -497,6 +506,8 @@ class XRay(loader.Module):
             "Аптайм: {uptime}"
             "</blockquote>"
         ),
+        "btn_mask_site": "Сайт-маска",
+        "mask_site_menu": "<b>Сайт-маска WebSocket</b>\n<blockquote>Текущий: <code>{current}</code></blockquote>",
         
         "user_settings": (
             "<b>Настройки: {name}</b>\n"
@@ -631,6 +642,8 @@ class XRay(loader.Module):
         "btn_safari": "Safari",
         "btn_install_xray": "Установить XRay Core",
         "btn_reinstall_xray": "Переустановить XRay Core",
+        "btn_install_cloudflared": "Установить Cloudflared",
+        "btn_reinstall_cloudflared": "Переустановить Cloudflared",
         
         "input_name": "Введите имя:",
         "input_limit": "Введите лимит:",
@@ -834,6 +847,9 @@ class XRay(loader.Module):
         self._link_cache: Dict[str, str] = {}
         self._tunnels: Dict[str, subprocess.Popen] = {}
         self._site_processes: Dict[str, subprocess.Popen] = {}
+        self._mask_sites = {
+            "Halloween": "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Halloween.jsx",
+        }
         self._logger_topic = None
         self._asset_channel = None
 
@@ -845,6 +861,7 @@ class XRay(loader.Module):
         tg_user_id = self._me.id
         self._root = os.path.join(os.path.expanduser("~"), ".xray_on_userbot", str(tg_user_id))
         self._xray_path = os.path.join(self._root, "xray")
+        self._cloudflared_path = os.path.join(self._root, "cloudflared")
         
         os.makedirs(self._root, mode=0o700, exist_ok=True)
         os.makedirs(os.path.join(self._root, "users"), mode=0o700, exist_ok=True)
@@ -874,9 +891,15 @@ class XRay(loader.Module):
             if user.get("transport") != "websocket" or name not in self._processes:
                 continue
             user_dir = os.path.join(self._root, "users", name)
+            # An existing Xray listener may be from before the userbot restart.
+            # Rebuild the helper first, then regenerate/restart Xray so its
+            # fallback targets the helper's new local port.
+            await self._stop_websocket_site(name)
+            await self._stop_websocket_tunnel(name)
             ok, error = await self._start_websocket_site(name, user_dir)
             if ok:
-                ok, error = await self._start_websocket_tunnel(name, user_dir)
+                await self._stop_user(name, reason="restart")
+                ok, error = await self._start_user(name)
             if not ok:
                 logger.error(f"[XR] WebSocket recovery failed for {name}: {error}")
         self._start_monitor()
@@ -913,66 +936,104 @@ class XRay(loader.Module):
         finally:
             sock.close()
 
-    def _websocket_site_script(self, path: str, backend_port: int, site_port: int) -> str:
-        animation = "https://raw.githubusercontent.com/i-execute/Media/main/Animation/Evil_Rat.json"
+    def _websocket_site_script(
+        self, path: str, backend_port: int, site_port: int, mask_url: str
+    ) -> str:
+        gate_jsx = mask_url
         return f'''import asyncio
+import json
+import os
+import urllib.request
 from aiohttp import web, ClientSession, WSMsgType
-
 PATH = {path!r}
 BACKEND = "ws://127.0.0.1:{backend_port}" + PATH
-HTML = """<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Loading</title><style>html,body{{height:100%;margin:0;background:#0d1017;overflow:hidden}}#animation{{width:min(512px,86vw);height:min(512px,86vw);margin:auto;position:absolute;inset:0}}</style></head><body><div id=\"animation\"></div><script src=\"https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js\"></script><script>lottie.loadAnimation({{container:document.getElementById('animation'),renderer:'svg',loop:true,autoplay:true,path:'{animation}'}});</script></body></html>"""
-
+GATE_JSX = {gate_jsx!r}
+HTML = """<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Secure channel</title><style>html,body,#root{{margin:0;width:100%;min-height:100%;background:#05070a;color:#d7e2ea}}body{{font-family:Inter,Arial,sans-serif}}.gate{{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:radial-gradient(circle at 50% 35%,rgba(56,189,248,.12),transparent 48%),#05070a}}.orb{{width:min(420px,76vw);height:min(420px,76vw);display:flex;align-items:center;justify-content:center;color:#38bdf8;font-size:72px}}.title,.subtitle{{font-family:monospace;letter-spacing:.12em;text-transform:uppercase}}.title{{font-size:14px;color:#7dd3fc}}.subtitle{{font-size:11px;color:#5f7982}}</style><script src=\"https://unpkg.com/react@18/umd/react.production.min.js\"></script><script src=\"https://unpkg.com/react-dom@18/umd/react-dom.production.min.js\"></script><script src=\"https://unpkg.com/@babel/standalone/babel.min.js\"></script></head><body><div id=\"root\"></div><script>window.addEventListener('error',function(){{document.getElementById('root').innerHTML='<main class=\\\"gate\\\"><div class=\\\"title\\\">secure channel</div><div class=\\\"subtitle\\\">online</div></main>'}})</script><script type=\"text/babel\" data-presets=\"react\" src=\"/gate.jsx\"></script><script>window.addEventListener('load',function(){{setTimeout(function(){{if(window.App&&window.ReactDOM){{try{{window.ReactDOM.createRoot(document.getElementById('root')).render(window.React.createElement(window.App))}}catch(e){{}}}}}},0)}})</script></body></html>"""
+async def gate_jsx(request):
+    try:
+        with urllib.request.urlopen(GATE_JSX, timeout=10) as response:
+            body = response.read()
+        return web.Response(body=body, content_type="application/javascript")
+    except Exception as error:
+        return web.Response(text="window.App=function(){{return React.createElement('main',null,'secure channel')}};", content_type="application/javascript")
 async def index(request):
     return web.Response(text=HTML, content_type="text/html")
-
 async def proxy(request):
-    client_ws = web.WebSocketResponse()
+    client_ws = web.WebSocketResponse(autoping=False, heartbeat=30)
     await client_ws.prepare(request)
-    async with ClientSession() as session:
-        async with session.ws_connect(BACKEND, autoping=False) as backend_ws:
-            async def forward(source, target):
-                async for message in source:
-                    if message.type == WSMsgType.BINARY:
-                        await target.send_bytes(message.data)
-                    elif message.type == WSMsgType.TEXT:
-                        await target.send_str(message.data)
-                    elif message.type == WSMsgType.PING:
-                        await target.ping()
-                    elif message.type == WSMsgType.PONG:
-                        await target.pong()
-                    elif message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
-                        break
-            await asyncio.gather(forward(client_ws, backend_ws), forward(backend_ws, client_ws))
+    try:
+        async with ClientSession() as session:
+            async with session.ws_connect(BACKEND, autoping=False, heartbeat=30) as backend_ws:
+                async def forward(source, target):
+                    async for message in source:
+                        if message.type == WSMsgType.BINARY:
+                            await target.send_bytes(message.data)
+                        elif message.type == WSMsgType.TEXT:
+                            await target.send_str(message.data)
+                        elif message.type == WSMsgType.PING:
+                            await target.ping()
+                        elif message.type == WSMsgType.PONG:
+                            await target.pong()
+                        elif message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
+                            break
+                await asyncio.gather(
+                    forward(client_ws, backend_ws),
+                    forward(backend_ws, client_ws),
+                    return_exceptions=True,
+                )
+    except Exception:
+        if not client_ws.closed:
+            await client_ws.close(code=1011, message=b"backend unavailable")
     return client_ws
-
 app = web.Application()
 app.router.add_get(PATH, proxy)
 app.router.add_get('/', index)
+app.router.add_get('/gate.jsx', gate_jsx)
 web.run_app(app, host='127.0.0.1', port={site_port})
 '''
 
     async def _start_websocket_site(self, name: str, user_dir: str) -> Tuple[bool, str]:
-        if name in self._site_processes:
+        existing = self._site_processes.get(name)
+        if existing and existing.poll() is None:
             return True, ""
+        self._site_processes.pop(name, None)
         user = self._users[name]
         site_port = self._find_free_loopback_port()
         path = user.get("path") or f"/ws-{secrets.token_urlsafe(12)}"
         user["path"] = path
         user["site_port"] = site_port
+        mask_name = user.get("mask_site", "Halloween")
+        mask_url = self._mask_sites.get(mask_name, self._mask_sites["Halloween"])
+        user["mask_site"] = mask_name if mask_name in self._mask_sites else "Halloween"
         script_path = os.path.join(user_dir, "websocket_site.py")
         with open(script_path, "w", encoding="utf-8") as f:
-            f.write(self._websocket_site_script(path, user["port"], site_port))
+            f.write(self._websocket_site_script(path, user["port"], site_port, mask_url))
+        log_path = os.path.join(user_dir, "site.log")
         try:
+            with open(log_path, "wb"):
+                pass
+            log_fd = open(log_path, "ab")
             proc = subprocess.Popen(
-                ["python3", script_path],
+                [sys.executable, script_path],
                 cwd=user_dir,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=log_fd,
+                stderr=log_fd,
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
             )
-            await asyncio.sleep(1)
-            if proc.poll() is not None:
-                return False, "site_start_failed"
+            deadline = time.time() + 8
+            while time.time() < deadline:
+                await asyncio.sleep(0.25)
+                if proc.poll() is not None:
+                    tail = open(log_path, "r", errors="replace").read()[-500:] if os.path.exists(log_path) else ""
+                    return False, tail or "site_start_failed"
+                try:
+                    with socket.create_connection(("127.0.0.1", site_port), timeout=0.5):
+                        break
+                except OSError:
+                    continue
+            else:
+                proc.terminate()
+                return False, "site_healthcheck_timeout"
             self._site_processes[name] = proc
             self._save_users()
             return True, ""
@@ -996,25 +1057,29 @@ web.run_app(app, host='127.0.0.1', port={site_port})
                 pass
 
     async def _start_websocket_tunnel(self, name: str, user_dir: str) -> Tuple[bool, str]:
-        if name in self._tunnels:
+        existing = self._tunnels.get(name)
+        if existing and existing.poll() is None:
             return True, ""
+        self._tunnels.pop(name, None)
         user = self._users[name]
         site_port = user.get("site_port")
         if not site_port:
             return False, "site_not_running"
-        cloudflared = shutil.which("cloudflared") or os.path.expanduser("~/.local/bin/cloudflared")
-        if not os.path.isfile(cloudflared):
-            return False, "cloudflared_not_found"
+        cloudflared = self._cloudflared_path
+        if not self._cloudflared_installed():
+            return False, "cloudflared_not_installed"
         log_path = os.path.join(user_dir, "cloudflared.log")
         try:
+            with open(log_path, "wb"):
+                pass
             log_fd = open(log_path, "ab")
             proc = subprocess.Popen(
-                [cloudflared, "tunnel", "--url", f"http://127.0.0.1:{site_port}", "--no-autoupdate"],
+                [cloudflared, "tunnel", "--protocol", "http2", "--url", f"http://127.0.0.1:{site_port}", "--no-autoupdate"],
                 stdout=log_fd,
                 stderr=log_fd,
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
             )
-            deadline = time.time() + 25
+            deadline = time.time() + 40
             hostname = ""
             while time.time() < deadline:
                 await asyncio.sleep(1)
@@ -1037,6 +1102,7 @@ web.run_app(app, host='127.0.0.1', port={site_port})
             self._tunnels[name] = proc
             user["tunnel_host"] = hostname
             self._save_users()
+            await self._send_ws_link_to_log_topic(user)
             return True, ""
         except Exception as e:
             return False, str(e)
@@ -1057,16 +1123,50 @@ web.run_app(app, host='127.0.0.1', port={site_port})
             except Exception:
                 pass
 
+    async def _send_ws_link_to_log_topic(self, user: Dict):
+        """Publish the regenerated ephemeral WebSocket URI as a clean file."""
+        if not self._logger_topic or not self._asset_channel:
+            return
+        link = self._build_vless_link(user)
+        if not link:
+            return
+        name = str(user.get("name", "user"))
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", name)
+        path = os.path.join(tempfile.gettempdir(), f"link_for_{safe_name}.txt")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(link + "\n")
+            await self._client.send_file(
+                int(f"-100{self._asset_channel}"),
+                path,
+                caption=(
+                    f"<b>WebSocket TLS link refreshed</b>\n"
+                    f"<blockquote>User: <code>{_escape(name)}</code>\n"
+                    f"TLS: <code>{_escape(user.get('tunnel_host', '?'))}</code></blockquote>"
+                ),
+                parse_mode="html",
+                force_document=True,
+                file_name=f"link_for_{safe_name}.txt",
+                reply_to=self._logger_topic.id,
+            )
+        except Exception as e:
+            logger.error(f"[XR] Failed to send WebSocket link file: {e}")
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
     async def _send_log(self, text: str):
         if not self._logger_topic or not self._asset_channel:
             return
         try:
-            await self._client.send_message(
+            await self.inline.bot.send_message(
                 int(f"-100{self._asset_channel}"),
                 text,
-                parse_mode="html",
-                reply_to=self._logger_topic.id,
-                link_preview=False,
+                disable_web_page_preview=True,
+                parse_mode="HTML",
+                message_thread_id=self._logger_topic.id,
             )
         except Exception as e:
             logger.error(f"[XR] Failed to send log: {e}")
@@ -1139,6 +1239,54 @@ web.run_app(app, host='127.0.0.1', port={site_port})
                 logger.info(f"[XR] Reattached {name} pid={pid} port={port}")
             except Exception as e:
                 logger.warning(f"[XR] Reattach failed for {name}: {e}")
+
+    def _cloudflared_installed(self) -> bool:
+        return (
+            getattr(self, "_cloudflared_path", None)
+            and os.path.isfile(self._cloudflared_path)
+            and os.access(self._cloudflared_path, os.X_OK)
+        )
+
+    async def _install_cloudflared(self) -> Tuple[bool, str]:
+        arch = platform.machine().lower()
+        asset = {
+            "x86_64": "cloudflared-linux-amd64",
+            "amd64": "cloudflared-linux-amd64",
+            "aarch64": "cloudflared-linux-arm64",
+            "arm64": "cloudflared-linux-arm64",
+        }.get(arch)
+        if not asset:
+            return False, f"Unsupported arch: {arch}"
+        tmp_path = f"{self._cloudflared_path}.tmp"
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "curl", "-fL", "--max-time", "120", "-o", tmp_path,
+                f"https://github.com/cloudflare/cloudflared/releases/latest/download/{asset}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, err = await process.communicate()
+            if process.returncode != 0 or not os.path.isfile(tmp_path):
+                return False, err.decode(errors="replace")[:200] or "Download failed"
+            os.chmod(tmp_path, 0o755)
+            check = await asyncio.create_subprocess_exec(
+                tmp_path, "--version",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await check.communicate()
+            if check.returncode != 0:
+                return False, "Cloudflared validation failed"
+            os.replace(tmp_path, self._cloudflared_path)
+            return True, out.decode(errors="replace").strip()[:80]
+        except Exception as e:
+            return False, str(e)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
     def _xray_installed(self) -> bool:
         return (
@@ -1437,6 +1585,31 @@ web.run_app(app, host='127.0.0.1', port={site_port})
         except:
             return "unknown"
 
+    async def _generate_vless_encryption(self) -> Tuple[Optional[str], Optional[str]]:
+        """Generate a matching post-quantum VLESS encryption pair.
+
+        `decryption` remains server-side; `encryption` is embedded only in the
+        newly generated client URI.  Existing users do not have these fields
+        and deliberately retain VLESS `none` compatibility.
+        """
+        if not self._xray_installed():
+            return None, None
+        try:
+            p = await asyncio.create_subprocess_exec(
+                self._xray_path, "vlessenc",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await p.communicate()
+            if p.returncode != 0:
+                return None, None
+            pairs = re.findall(r'"decryption":\s*"([^"]+)"\s*\n"encryption":\s*"([^"]+)"', out.decode(errors="replace"))
+            if len(pairs) >= 2:
+                return pairs[-1]
+            return pairs[0] if pairs else (None, None)
+        except Exception:
+            return None, None
+
     async def _generate_x25519(self) -> Tuple[Optional[str], Optional[str]]:
         if not self._xray_installed():
             return None, None
@@ -1549,8 +1722,7 @@ web.run_app(app, host='127.0.0.1', port={site_port})
                     "clients": [{
                         "id": user["uuid"],
                     }],
-                    "decryption": "none",
-                    "encryption": "none",
+                    "decryption": user.get("vless_decryption", "none"),
                 },
                 "sniffing": {
                     "enabled": False,
@@ -1565,6 +1737,7 @@ web.run_app(app, host='127.0.0.1', port={site_port})
         }
 
         if transport == "websocket":
+            config["inbounds"][0]["settings"]["decryption"] = "none"
             config["inbounds"][0]["settings"]["fallbacks"] = [{
                 "dest": user.get("site_port", 80),
                 "xver": 0,
@@ -1593,7 +1766,8 @@ web.run_app(app, host='127.0.0.1', port={site_port})
                 },
             }
         else:
-            config["inbounds"][0]["settings"]["clients"][0]["flow"] = "xtls-rprx-vision"
+            if user.get("vless_decryption", "none") == "none":
+                config["inbounds"][0]["settings"]["clients"][0]["flow"] = "xtls-rprx-vision"
             config["inbounds"][0]["streamSettings"] = {
                 "network": "tcp",
                 "security": "reality",
@@ -1648,7 +1822,7 @@ web.run_app(app, host='127.0.0.1', port={site_port})
 
             params = urllib.parse.urlencode({
                 "type": "xhttp",
-                "encryption": "none",
+                "encryption": user.get("vless_encryption", "none"),
                 "security": "reality",
                 "path": path,
                 "pbk": public_key,
@@ -1660,18 +1834,19 @@ web.run_app(app, host='127.0.0.1', port={site_port})
             return f"vless://{uuid_str}@{ip}:{port}?{params}#{urllib.parse.quote(name, safe='')}"
         else:
             sni = user.get("sni", "www.cloudflare.com")
-            params = urllib.parse.urlencode({
+            params = {
                 "type": "tcp",
-                "encryption": "none",
+                "encryption": user.get("vless_encryption", "none"),
                 "security": "reality",
-                "flow": "xtls-rprx-vision",
                 "pbk": public_key,
                 "fp": fp,
                 "sni": sni,
                 "sid": short_id,
                 "spx": "/",
-            })
-            return f"vless://{uuid_str}@{ip}:{port}?{params}#{urllib.parse.quote(name, safe='')}"
+            }
+            if user.get("vless_decryption", "none") == "none":
+                params["flow"] = "xtls-rprx-vision"
+            return f"vless://{uuid_str}@{ip}:{port}?{urllib.parse.urlencode(params)}#{urllib.parse.quote(name, safe='')}"
 
     async def _start_user(self, name: str) -> Tuple[bool, str]:
         if name in self._processes:
@@ -1811,19 +1986,30 @@ web.run_app(app, host='127.0.0.1', port={site_port})
         
         return True
 
-    def _get_active_connections(self, port: int) -> int:
+    def _get_active_connections(self, port: int, transport: str = "") -> int:
+        """Count currently established Xray client sockets.
+
+        WebSocket traffic is relayed by the local aiohttp helper, so every
+        actual WS client reaches Xray from 127.0.0.1.  Counting unique public
+        IPs (the legacy TCP/Reality method) therefore always returned zero.
+        For WebSocket count loopback socket pairs instead; for other transports
+        retain public-IP device deduplication.
+        """
         try:
-            p = subprocess.run(
+            proc = subprocess.run(
                 ["ss", "-Htn", "state", "established", f"sport = :{port}"],
                 capture_output=True,
                 text=True,
                 timeout=5,
             )
-            if p.returncode != 0:
+            if proc.returncode != 0:
                 return 0
-            
+
+            if transport == "websocket":
+                return sum(1 for line in proc.stdout.splitlines() if "127.0.0.1:" in line or "[::1]:" in line)
+
             unique_ips = set()
-            for line in p.stdout.strip().splitlines():
+            for line in proc.stdout.strip().splitlines():
                 parts = line.split()
                 if len(parts) < 2:
                     continue
@@ -1863,7 +2049,9 @@ web.run_app(app, host='127.0.0.1', port={site_port})
                     if limit == 0:
                         continue
                     
-                    active = self._get_active_connections(user["port"])
+                    active = self._get_active_connections(
+                        user["port"], user.get("transport", "")
+                    )
                     
                     if active > limit:
                         user["autostart"] = False
@@ -1937,12 +2125,14 @@ web.run_app(app, host='127.0.0.1', port={site_port})
     async def _cb_setup_menu(self, call: InlineCall):
         xray_version = await self._get_xray_version()
         xray_status = f"{xray_version}" if self._xray_installed() else "Not installed"
+        cloudflared_status = "Installed" if self._cloudflared_installed() else "Not installed"
         
         gh_token = self._gh_token()
         gh_status = "Authorized" if gh_token else "Not authorized"
         
         text = self.strings["setup_menu"].format(
             xray_status=xray_status,
+            cloudflared_status=cloudflared_status,
             gh_status=gh_status,
         )
         
@@ -1961,6 +2151,19 @@ web.run_app(app, host='127.0.0.1', port={site_port})
                 "style": "primary",
             }])
         
+        if self._cloudflared_installed():
+            markup.append([{
+                "text": self.strings["btn_reinstall_cloudflared"],
+                "callback": self._cb_install_cloudflared,
+                "style": "primary",
+            }])
+        else:
+            markup.append([{
+                "text": self.strings["btn_install_cloudflared"],
+                "callback": self._cb_install_cloudflared,
+                "style": "primary",
+            }])
+
         markup.append([{
             "text": self.strings["btn_gh_auth"],
             "callback": self._gh_device_flow,
@@ -1974,6 +2177,22 @@ web.run_app(app, host='127.0.0.1', port={site_port})
         }])
         
         await call.edit(text, reply_markup=markup)
+
+    async def _cb_install_cloudflared(self, call: InlineCall):
+        await call.edit(self.strings["loading"], reply_markup=[])
+        ok, result = await self._install_cloudflared()
+        if ok:
+            text = "<b>Cloudflared Installed</b>\n<blockquote>{}</blockquote>".format(_escape(result))
+        else:
+            text = self.strings["setup_fail"].format(error=_escape(result[:200]))
+        await call.edit(
+            text,
+            reply_markup=[[{
+                "text": self.strings["btn_back"],
+                "callback": self._cb_setup_menu,
+                "style": "primary",
+            }]],
+        )
 
     async def _cb_xray_install_menu(self, call: InlineCall):
         await call.edit(self.strings["collecting_versions"])
@@ -2120,7 +2339,10 @@ web.run_app(app, host='127.0.0.1', port={site_port})
         
         active = 0
         if is_running:
-            active = self._get_active_connections(user["port"])
+            active = self._get_active_connections(
+                user["port"], user.get("transport", "")
+            )
+        tls_host = user.get("tunnel_host", "n/a") if user.get("transport") == "websocket" else "n/a"
         
         uptime = self._get_user_uptime(name)
         autostart = user.get("autostart", False)
@@ -2130,6 +2352,7 @@ web.run_app(app, host='127.0.0.1', port={site_port})
             name=_escape(name),
             status=status,
             transport=transport,
+            tls=_escape(tls_host),
             port=user["port"],
             autostart=autostart_text,
             limit=limit_text,
@@ -2170,6 +2393,11 @@ web.run_app(app, host='127.0.0.1', port={site_port})
             {"text": self.strings["btn_settings"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"},
         ])
         
+        if user.get("transport") == "websocket":
+            markup.append([
+                {"text": self.strings["btn_mask_site"], "callback": self._cb_mask_site_menu, "args": (name,), "style": "primary"},
+            ])
+
         markup.append([
             {"text": self.strings["btn_delete"], "callback": self._cb_delete_user, "args": (name,), "style": "danger"},
         ])
@@ -2434,6 +2662,45 @@ web.run_app(app, host='127.0.0.1', port={site_port})
             reply_markup=markup,
         )
 
+    async def _cb_mask_site_menu(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if not user or user.get("transport") != "websocket":
+            await call.answer("WebSocket user not found", show_alert=True)
+            return
+        current = user.get("mask_site", "Halloween")
+        markup = []
+        for mask in self._mask_sites:
+            markup.append([{
+                "text": f"{mask} (current)" if mask == current else mask,
+                "callback": self._cb_set_mask_site,
+                "args": (name, mask),
+                "style": "success" if mask == current else "primary",
+            }])
+        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}])
+        await call.edit(
+            self.strings["mask_site_menu"].format(current=_escape(current)),
+            reply_markup=markup,
+        )
+
+    async def _cb_set_mask_site(self, call: InlineCall, name: str, mask: str):
+        user = self._users.get(name)
+        if not user or mask not in self._mask_sites:
+            await call.answer("Mask site not found", show_alert=True)
+            return
+        user["mask_site"] = mask
+        self._save_users()
+        if name in self._processes:
+            await call.edit(self.strings["loading"])
+            await self._stop_user(name, reason="restart")
+            ok, error = await self._start_user(name)
+            if not ok:
+                await call.edit(
+                    self.strings["setup_fail"].format(error=_escape(error[:400])),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]],
+                )
+                return
+        await self._cb_user_menu(call, name)
+
     async def _cb_user_settings(self, call: InlineCall, name: str):
         user = self._users.get(name)
         if not user:
@@ -2518,17 +2785,16 @@ web.run_app(app, host='127.0.0.1', port={site_port})
             user["socks_user"] = _gen_secret(8)
             user["socks_pass"] = _gen_secret(14)
         
+        if transport == "websocket":
+            user.pop("tunnel_host", None)
+            user.pop("site_port", None)
+            user["path"] = ""
+
         self._save_users()
         
         if name in self._processes and user.get("autostart"):
             await self._stop_user(name)
             await self._start_user(name)
-
-        if transport == "websocket":
-            user.pop("tunnel_host", None)
-            user.pop("site_port", None)
-            user["path"] = ""
-            self._save_users()
         
         await call.edit(
             self.strings["transport_set"].format(transport=transport.upper()),
@@ -2772,11 +3038,19 @@ web.run_app(app, host='127.0.0.1', port={site_port})
             return
         
         private_key, public_key = "", ""
+        vless_decryption, vless_encryption = "none", "none"
         if transport != "socks5":
             private_key, public_key = await self._generate_x25519()
             if not private_key or not public_key:
                 await call.edit(
                     self.strings["setup_fail"].format(error="Key generation failed"),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
+                )
+                return
+            vless_decryption, vless_encryption = await self._generate_vless_encryption()
+            if not vless_decryption or not vless_encryption:
+                await call.edit(
+                    self.strings["setup_fail"].format(error="ML-KEM-768 VLESS encryption generation failed"),
                     reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
                 )
                 return
@@ -2799,6 +3073,9 @@ web.run_app(app, host='127.0.0.1', port={site_port})
             "private_key": private_key,
             "public_key": public_key,
             "short_id": self._generate_short_id(),
+            "vless_decryption": vless_decryption,
+            "vless_encryption": vless_encryption,
+            "mask_site": "Halloween",
             "sni": default_sni,
             "dest": default_dest,
             "path": "/xhttps",
