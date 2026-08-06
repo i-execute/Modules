@@ -850,7 +850,7 @@ class XRay(loader.Module):
         self._tunnels: Dict[str, subprocess.Popen] = {}
         self._site_processes: Dict[str, subprocess.Popen] = {}
         self._mask_sites = {
-            "Halloween": "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Halloween.jsx",
+            "Halloween": "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Halloween.jsx?v=halloween-v2",
         }
         self._logger_topic = None
         self._asset_channel = None
