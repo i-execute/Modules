@@ -4,6 +4,7 @@ __version__ = (4, 2, 0)
 
 import os
 import asyncio
+import io
 import logging
 import signal
 import socket
@@ -20,6 +21,7 @@ import re
 import random
 import secrets
 import string
+import urllib.request
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
@@ -349,24 +351,24 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre><code class=\"language-xray\">"
-            "XRAY STARTED\n"
+            "<pre>Xray started</pre>"
+            "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
             "Port:      {port}\n"
             "Transport: {transport}\n"
             "Autostart: {autostart}"
-            "</code></pre>"
+            "</blockquote>"
         ),
         "log_user_stopped": (
-            "<pre><code class=\"language-xray\">"
-            "XRAY STOPPED\n"
+            "<pre>Xray stopped</pre>"
+            "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
             "Port:      {port}\n"
             "Transport: {transport}\n"
             "Reason:    {reason}"
-            "</code></pre>"
+            "</blockquote>"
         ),
         "log_device_limit": (
             "<pre><code class=\"language-xray\">"
@@ -715,24 +717,24 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre><code class=\"language-xray\">"
-            "XRAY STARTED\n"
+            "<pre>Xray started</pre>"
+            "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
             "Port:      {port}\n"
             "Transport: {transport}\n"
             "Autostart: {autostart}"
-            "</code></pre>"
+            "</blockquote>"
         ),
         "log_user_stopped": (
-            "<pre><code class=\"language-xray\">"
-            "XRAY STOPPED\n"
+            "<pre>Xray stopped</pre>"
+            "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
             "Port:      {port}\n"
             "Transport: {transport}\n"
             "Reason:    {reason}"
-            "</code></pre>"
+            "</blockquote>"
         ),
         "log_device_limit": (
             "<pre><code class=\"language-xray\">"
@@ -936,61 +938,19 @@ class XRay(loader.Module):
         finally:
             sock.close()
 
+    _WEBSOCKET_SITE_SCRIPT_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/websocket_site.py"
+
     def _websocket_site_script(
         self, path: str, backend_port: int, site_port: int, mask_url: str
     ) -> str:
-        gate_jsx = mask_url
-        return f'''import asyncio
-import json
-import os
-import urllib.request
-from aiohttp import web, ClientSession, WSMsgType
-PATH = {path!r}
-BACKEND = "ws://127.0.0.1:{backend_port}" + PATH
-GATE_JSX = {gate_jsx!r}
-HTML = """<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Secure channel</title><style>html,body,#root{{margin:0;width:100%;min-height:100%;background:#05070a;color:#d7e2ea}}body{{font-family:Inter,Arial,sans-serif}}.gate{{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:radial-gradient(circle at 50% 35%,rgba(56,189,248,.12),transparent 48%),#05070a}}.orb{{width:min(420px,76vw);height:min(420px,76vw);display:flex;align-items:center;justify-content:center;color:#38bdf8;font-size:72px}}.title,.subtitle{{font-family:monospace;letter-spacing:.12em;text-transform:uppercase}}.title{{font-size:14px;color:#7dd3fc}}.subtitle{{font-size:11px;color:#5f7982}}</style><script src=\"https://unpkg.com/react@18/umd/react.production.min.js\"></script><script src=\"https://unpkg.com/react-dom@18/umd/react-dom.production.min.js\"></script><script src=\"https://unpkg.com/@babel/standalone/babel.min.js\"></script></head><body><div id=\"root\"></div><script>window.addEventListener('error',function(){{document.getElementById('root').innerHTML='<main class=\\\"gate\\\"><div class=\\\"title\\\">secure channel</div><div class=\\\"subtitle\\\">online</div></main>'}})</script><script type=\"text/babel\" data-presets=\"react\" src=\"/gate.jsx\"></script><script>window.addEventListener('load',function(){{setTimeout(function(){{if(window.App&&window.ReactDOM){{try{{window.ReactDOM.createRoot(document.getElementById('root')).render(window.React.createElement(window.App))}}catch(e){{}}}}}},0)}})</script></body></html>"""
-async def gate_jsx(request):
-    try:
-        with urllib.request.urlopen(GATE_JSX, timeout=10) as response:
-            body = response.read()
-        return web.Response(body=body, content_type="application/javascript")
-    except Exception as error:
-        return web.Response(text="window.App=function(){{return React.createElement('main',null,'secure channel')}};", content_type="application/javascript")
-async def index(request):
-    return web.Response(text=HTML, content_type="text/html")
-async def proxy(request):
-    client_ws = web.WebSocketResponse(autoping=False, heartbeat=30)
-    await client_ws.prepare(request)
-    try:
-        async with ClientSession() as session:
-            async with session.ws_connect(BACKEND, autoping=False, heartbeat=30) as backend_ws:
-                async def forward(source, target):
-                    async for message in source:
-                        if message.type == WSMsgType.BINARY:
-                            await target.send_bytes(message.data)
-                        elif message.type == WSMsgType.TEXT:
-                            await target.send_str(message.data)
-                        elif message.type == WSMsgType.PING:
-                            await target.ping()
-                        elif message.type == WSMsgType.PONG:
-                            await target.pong()
-                        elif message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
-                            break
-                await asyncio.gather(
-                    forward(client_ws, backend_ws),
-                    forward(backend_ws, client_ws),
-                    return_exceptions=True,
-                )
-    except Exception:
-        if not client_ws.closed:
-            await client_ws.close(code=1011, message=b"backend unavailable")
-    return client_ws
-app = web.Application()
-app.router.add_get(PATH, proxy)
-app.router.add_get('/', index)
-app.router.add_get('/gate.jsx', gate_jsx)
-web.run_app(app, host='127.0.0.1', port={site_port})
-'''
+        with urllib.request.urlopen(self._WEBSOCKET_SITE_SCRIPT_URL, timeout=15) as response:
+            template = response.read().decode("utf-8")
+        return (
+            template.replace("__PATH__", path)
+            .replace("__BACKEND_PORT__", str(backend_port))
+            .replace("__SITE_PORT__", str(site_port))
+            .replace("__MASK_URL__", mask_url)
+        )
 
     async def _start_websocket_site(self, name: str, user_dir: str) -> Tuple[bool, str]:
         existing = self._site_processes.get(name)
@@ -1136,18 +1096,18 @@ web.run_app(app, host='127.0.0.1', port={site_port})
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(link + "\n")
-            await self._client.send_file(
+            link_file = io.BytesIO((link + "\n").encode("utf-8"))
+            link_file.name = f"link_for_{safe_name}.txt"
+            await self.inline.bot.send_document(
                 int(f"-100{self._asset_channel}"),
-                path,
+                link_file,
                 caption=(
                     f"<b>WebSocket TLS link refreshed</b>\n"
                     f"<blockquote>User: <code>{_escape(name)}</code>\n"
                     f"TLS: <code>{_escape(user.get('tunnel_host', '?'))}</code></blockquote>"
                 ),
                 parse_mode="html",
-                force_document=True,
-                file_name=f"link_for_{safe_name}.txt",
-                reply_to=self._logger_topic.id,
+                message_thread_id=self._logger_topic.id,
             )
         except Exception as e:
             logger.error(f"[XR] Failed to send WebSocket link file: {e}")
@@ -2578,7 +2538,7 @@ web.run_app(app, host='127.0.0.1', port={site_port})
         tmp.close()
 
         try:
-            await self._client.send_file(
+            await self.inline.bot.send_document(
                 call.form["chat"],
                 tmp.name,
                 attributes=[],
