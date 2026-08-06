@@ -71,4 +71,5 @@ def test_websocket_inbound_preserves_the_matching_mlkem_decryption():
     start = source.index('        if transport == "websocket":', source.index('    def _build_config'))
     end = source.index('        elif transport == "xhttp":', start)
     websocket_config_block = source[start:end]
+    assert '"fallbacks"' not in websocket_config_block
     assert 'config["inbounds"][0]["settings"]["decryption"] = user.get("vless_decryption", "none")' in websocket_config_block

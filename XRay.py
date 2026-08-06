@@ -1686,11 +1686,11 @@ class XRay(loader.Module):
         }
 
         if transport == "websocket":
+            # Xray forbids VLESS fallbacks together with an ML-KEM
+            # decryption value.  The cover remains on its separate optional
+            # cloudflared endpoint; it must not be attached to this encrypted
+            # direct WebSocket inbound.
             config["inbounds"][0]["settings"]["decryption"] = user.get("vless_decryption", "none")
-            config["inbounds"][0]["settings"]["fallbacks"] = [{
-                "dest": user.get("site_port", 80),
-                "xver": 0,
-            }]
             config["inbounds"][0]["streamSettings"] = {
                 "network": "ws",
                 "security": "none",
