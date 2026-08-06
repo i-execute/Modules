@@ -55,8 +55,20 @@ def test_websocket_count_uses_mask_site_public_peers():
     assert "sport = :48000" in run.call_args.args[0]
 
 
-def test_websocket_site_template_has_valid_python():
-    spec = importlib.util.spec_from_file_location("websocket_site", WEB / "websocket_site.py")
-    # Template placeholders intentionally prevent import, but must compile after expansion.
-    text = (WEB / "websocket_site.py").read_text()
-    compile(text.replace("__PATH__", "/ws").replace("__BACKEND_PORT__", "18080").replace("__SITE_PORT__", "18081").replace("__MASK_URL__", "https://example.invalid/gate.jsx"), "websocket_site.py", "exec")
+def test_websocket_direct_link_keeps_mlkem_and_has_no_domain_dependency():
+    source = XRAY.read_text(encoding="utf-8")
+    start = source.index('        if transport == "websocket":', source.index('    def _build_vless_link'))
+    end = source.index('        if transport == "xhttp":', start)
+    websocket_link_block = source[start:end]
+    assert 'user.get("vless_encryption", "none")' in websocket_link_block
+    assert '"security": "none"' in websocket_link_block
+    assert 'f"vless://{uuid_str}@{ip}:{port}?' in websocket_link_block
+    assert 'tunnel_host' not in websocket_link_block
+
+
+def test_websocket_inbound_preserves_the_matching_mlkem_decryption():
+    source = XRAY.read_text(encoding="utf-8")
+    start = source.index('        if transport == "websocket":', source.index('    def _build_config'))
+    end = source.index('        elif transport == "xhttp":', start)
+    websocket_config_block = source[start:end]
+    assert 'config["inbounds"][0]["settings"]["decryption"] = user.get("vless_decryption", "none")' in websocket_config_block

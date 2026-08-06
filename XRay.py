@@ -1686,7 +1686,7 @@ class XRay(loader.Module):
         }
 
         if transport == "websocket":
-            config["inbounds"][0]["settings"]["decryption"] = "none"
+            config["inbounds"][0]["settings"]["decryption"] = user.get("vless_decryption", "none")
             config["inbounds"][0]["settings"]["fallbacks"] = [{
                 "dest": user.get("site_port", 80),
                 "xver": 0,
@@ -1751,19 +1751,19 @@ class XRay(loader.Module):
         import json as _json
 
         if transport == "websocket":
-            host = user.get("tunnel_host", "")
-            if not host:
-                return ""
+            # A direct WS endpoint is required for clients such as Happ.  The
+            # public tunnel is only an optional web-cover fallback; routing the
+            # VLESS URI through it changes the transport to TLS and breaks the
+            # ML-KEM pairing.  Keep the exact same host/port/path as Xray.
             path = user.get("path", "/")
             params = urllib.parse.urlencode({
                 "type": "ws",
-                "encryption": "none",
+                "encryption": user.get("vless_encryption", "none"),
                 "path": path,
-                "host": host,
-                "security": "tls",
-                "sni": host,
+                "host": "",
+                "security": "none",
             })
-            return f"vless://{uuid_str}@{host}:443?{params}#{urllib.parse.quote(name, safe='')}"
+            return f"vless://{uuid_str}@{ip}:{port}?{params}#{urllib.parse.quote(name, safe='')}"
 
         if transport == "xhttp":
             sni = user.get("sni", "www.cloudflare.com")
