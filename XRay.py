@@ -174,15 +174,8 @@ class XRay(loader.Module):
             "<blockquote>{name} removed</blockquote>"
         ),
         
-        "user_started": (
-            "<b>Started</b>\n"
-            "<blockquote>{name} is now online</blockquote>"
-        ),
-        
-        "user_stopped": (
-            "<b>Stopped</b>\n"
-            "<blockquote>{name} is now offline</blockquote>"
-        ),
+        "user_started": "<b>Started</b>",
+        "user_stopped": "<b>Stoped</b>",
         
         "link_message": (
             "<b>VLESS Link: {name}</b>\n"
@@ -351,7 +344,7 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre><code class=\"language-Xray started\"></code></pre>"
+            "<pre><code class=\"language-Started\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -361,7 +354,7 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
         "log_user_stopped": (
-            "<pre><code class=\"language-Xray stoped\"></code></pre>"
+            "<pre><code class=\"language-Stoped\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -554,15 +547,8 @@ class XRay(loader.Module):
             "<blockquote>{name} удалён</blockquote>"
         ),
         
-        "user_started": (
-            "<b>Запущен</b>\n"
-            "<blockquote>{name} онлайн</blockquote>"
-        ),
-        
-        "user_stopped": (
-            "<b>Остановлен</b>\n"
-            "<blockquote>{name} офлайн</blockquote>"
-        ),
+        "user_started": "<b>Started</b>",
+        "user_stopped": "<b>Stoped</b>",
         
         "link_message": (
             "<b>VLESS ссылка: {name}</b>\n"
@@ -717,7 +703,7 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre><code class=\"language-Xray started\"></code></pre>"
+            "<pre><code class=\"language-Started\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -727,7 +713,7 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
         "log_user_stopped": (
-            "<pre><code class=\"language-Xray stoped\"></code></pre>"
+            "<pre><code class=\"language-Stoped\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -850,7 +836,7 @@ class XRay(loader.Module):
         self._tunnels: Dict[str, subprocess.Popen] = {}
         self._site_processes: Dict[str, subprocess.Popen] = {}
         self._mask_sites = {
-            "Halloween": "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Halloween.jsx?v=halloween-v2",
+            "Evil Cat": "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Evil_Cat.jsx?v=evil-cat-v4",
         }
         self._logger_topic = None
         self._asset_channel = None
@@ -962,9 +948,12 @@ class XRay(loader.Module):
         path = user.get("path") or f"/ws-{secrets.token_urlsafe(12)}"
         user["path"] = path
         user["site_port"] = site_port
-        mask_name = user.get("mask_site", "Halloween")
-        mask_url = self._mask_sites.get(mask_name, self._mask_sites["Halloween"])
-        user["mask_site"] = mask_name if mask_name in self._mask_sites else "Halloween"
+        # Migrate old saved profile names to the only supported cover.
+        mask_name = user.get("mask_site", "Evil Cat")
+        if mask_name not in self._mask_sites:
+            mask_name = "Evil Cat"
+        mask_url = self._mask_sites[mask_name]
+        user["mask_site"] = mask_name
         script_path = os.path.join(user_dir, "websocket_site.py")
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(self._websocket_site_script(path, user["port"], site_port, mask_url))
@@ -1946,7 +1935,9 @@ class XRay(loader.Module):
         
         return True
 
-    def _get_active_connections(self, port: int, transport: str = "") -> int:
+    def _get_active_connections(
+        self, port: int, transport: str = "", site_port: Optional[int] = None
+    ) -> int:
         """Count currently established Xray client sockets.
 
         WebSocket traffic is relayed by the local aiohttp helper, so every
@@ -1956,8 +1947,9 @@ class XRay(loader.Module):
         retain public-IP device deduplication.
         """
         try:
+            watch_port = site_port if transport == "websocket" and site_port else port
             proc = subprocess.run(
-                ["ss", "-Htn", "state", "established", f"sport = :{port}"],
+                ["ss", "-Htn", "state", "established", f"sport = :{watch_port}"],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -1966,7 +1958,23 @@ class XRay(loader.Module):
                 return 0
 
             if transport == "websocket":
-                return sum(1 for line in proc.stdout.splitlines() if "127.0.0.1:" in line or "[::1]:" in line)
+                # Public clients terminate at the local mask-site process.  The
+                # connection's peer is public there (unlike the subsequent
+                # localhost hop into Xray), so count established client sockets
+                # on the site port and exclude only the local backend hop.
+                active_peers = set()
+                for line in proc.stdout.splitlines():
+                    parts = line.split()
+                    if len(parts) < 2:
+                        continue
+                    peer = parts[-1]
+                    peer_ip = peer[1:].split("]", 1)[0] if peer.startswith("[") else peer.rsplit(":", 1)[0]
+                    try:
+                        if not ipaddress.ip_address(peer_ip).is_loopback:
+                            active_peers.add(peer)
+                    except ValueError:
+                        continue
+                return len(active_peers)
 
             unique_ips = set()
             for line in proc.stdout.strip().splitlines():
@@ -2010,7 +2018,7 @@ class XRay(loader.Module):
                         continue
                     
                     active = self._get_active_connections(
-                        user["port"], user.get("transport", "")
+                        user["port"], user.get("transport", ""), user.get("site_port")
                     )
                     
                     if active > limit:
@@ -2300,7 +2308,7 @@ class XRay(loader.Module):
         active = 0
         if is_running:
             active = self._get_active_connections(
-                user["port"], user.get("transport", "")
+                user["port"], user.get("transport", ""), user.get("site_port")
             )
         tls_host = user.get("tunnel_host", "n/a") if user.get("transport") == "websocket" else "n/a"
         
@@ -2627,7 +2635,9 @@ class XRay(loader.Module):
         if not user or user.get("transport") != "websocket":
             await call.answer("WebSocket user not found", show_alert=True)
             return
-        current = user.get("mask_site", "Halloween")
+        current = user.get("mask_site", "Evil Cat")
+        if current not in self._mask_sites:
+            current = "Evil Cat"
         markup = []
         for mask in self._mask_sites:
             markup.append([{
@@ -3035,7 +3045,7 @@ class XRay(loader.Module):
             "short_id": self._generate_short_id(),
             "vless_decryption": vless_decryption,
             "vless_encryption": vless_encryption,
-            "mask_site": "Halloween",
+            "mask_site": "Evil Cat",
             "sni": default_sni,
             "dest": default_dest,
             "path": "/xhttps",
