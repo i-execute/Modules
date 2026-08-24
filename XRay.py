@@ -70,7 +70,7 @@ def _in_docker():
 
 @loader.tds
 class XRay(loader.Module):
-    """Multi-user VPN with VLESS+Reality (XHTTP/TCP+Vision)"""
+    """Multi-user VPN with VLESS+Reality (XHTTP/TCP+Vision/WebSocket and post-quantum encryption)"""
 
     strings = {
         "name": "XRay",
@@ -879,9 +879,6 @@ class XRay(loader.Module):
             if user.get("transport") != "websocket" or name not in self._processes:
                 continue
             user_dir = os.path.join(self._root, "users", name)
-            # An existing Xray listener may be from before the userbot restart.
-            # Rebuild the helper first, then regenerate/restart Xray so its
-            # fallback targets the helper's new local port.
             await self._stop_websocket_site(name)
             await self._stop_websocket_tunnel(name)
             ok, error = await self._start_websocket_site(name, user_dir)
@@ -948,7 +945,6 @@ class XRay(loader.Module):
         path = user.get("path") or f"/ws-{secrets.token_urlsafe(12)}"
         user["path"] = path
         user["site_port"] = site_port
-        # Migrate old saved profile names to the only supported cover.
         mask_name = user.get("mask_site", "Evil Cat")
         if mask_name not in self._mask_sites:
             mask_name = "Evil Cat"
@@ -1073,7 +1069,6 @@ class XRay(loader.Module):
                 pass
 
     async def _send_ws_link_to_log_topic(self, user: Dict):
-        """Publish the regenerated ephemeral WebSocket URI as a clean file."""
         if not self._logger_topic or not self._asset_channel:
             return
         link = self._build_vless_link(user)
@@ -1535,12 +1530,6 @@ class XRay(loader.Module):
             return "unknown"
 
     async def _generate_vless_encryption(self) -> Tuple[Optional[str], Optional[str]]:
-        """Generate a matching post-quantum VLESS encryption pair.
-
-        `decryption` remains server-side; `encryption` is embedded only in the
-        newly generated client URI.  Existing users do not have these fields
-        and deliberately retain VLESS `none` compatibility.
-        """
         if not self._xray_installed():
             return None, None
         try:
@@ -1686,10 +1675,6 @@ class XRay(loader.Module):
         }
 
         if transport == "websocket":
-            # Xray forbids VLESS fallbacks together with an ML-KEM
-            # decryption value.  The cover remains on its separate optional
-            # cloudflared endpoint; it must not be attached to this encrypted
-            # direct WebSocket inbound.
             config["inbounds"][0]["settings"]["decryption"] = user.get("vless_decryption", "none")
             config["inbounds"][0]["streamSettings"] = {
                 "network": "ws",
@@ -1751,10 +1736,6 @@ class XRay(loader.Module):
         import json as _json
 
         if transport == "websocket":
-            # A direct WS endpoint is required for clients such as Happ.  The
-            # public tunnel is only an optional web-cover fallback; routing the
-            # VLESS URI through it changes the transport to TLS and breaks the
-            # ML-KEM pairing.  Keep the exact same host/port/path as Xray.
             path = user.get("path", "/")
             params = urllib.parse.urlencode({
                 "type": "ws",
@@ -1938,14 +1919,6 @@ class XRay(loader.Module):
     def _get_active_connections(
         self, port: int, transport: str = "", site_port: Optional[int] = None
     ) -> int:
-        """Count currently established Xray client sockets.
-
-        WebSocket traffic is relayed by the local aiohttp helper, so every
-        actual WS client reaches Xray from 127.0.0.1.  Counting unique public
-        IPs (the legacy TCP/Reality method) therefore always returned zero.
-        For WebSocket count loopback socket pairs instead; for other transports
-        retain public-IP device deduplication.
-        """
         try:
             watch_port = site_port if transport == "websocket" and site_port else port
             proc = subprocess.run(
@@ -1958,10 +1931,6 @@ class XRay(loader.Module):
                 return 0
 
             if transport == "websocket":
-                # Public clients terminate at the local mask-site process.  The
-                # connection's peer is public there (unlike the subsequent
-                # localhost hop into Xray), so count established client sockets
-                # on the site port and exclude only the local backend hop.
                 active_peers = set()
                 for line in proc.stdout.splitlines():
                     parts = line.split()

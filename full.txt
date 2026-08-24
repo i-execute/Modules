@@ -19,7 +19,6 @@ NetTester
 NewYear
 NFTChecker
 Note
-ODIRouter
 OnlineKeeper
 ProxyScanner
 QRAuthDumper
