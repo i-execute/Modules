@@ -30,8 +30,7 @@ from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
-LOG_MAX_SIZE = 30 * 1024 * 1024
-LOG_KEEP_SIZE = 10 * 1024 * 1024
+LOG_TRIM_SIZE = 10 * 1024 * 1024
 BASE_PORT = 8443
 AUTOSTART_INTERVAL = 10
 
@@ -140,6 +139,8 @@ class XRay(loader.Module):
             "Path: {path}\n"
             "Padding: {padding}\n"
             "Fingerprint: {fp}\n"
+            "Encryption: {encryption}\n"
+            "Restart: {restart}\n"
             "Device limit: {limit}"
             "</blockquote>"
         ),
@@ -261,6 +262,7 @@ class XRay(loader.Module):
         "btn_set_padding": "Padding",
         "btn_set_fp": "Fingerprint",
         "btn_set_limit": "Device Limit",
+        "btn_encryption": "Encryption",
         "btn_toggle_transport": "Switch Transport",
         "btn_socks5": "SOCKS5",
         "btn_transport": "Transport",
@@ -513,6 +515,8 @@ class XRay(loader.Module):
             "Путь: {path}\n"
             "Padding: {padding}\n"
             "Fingerprint: {fp}\n"
+            "Encryption: {encryption}\n"
+            "Restart: {restart}\n"
             "Лимит: {limit}"
             "</blockquote>"
         ),
@@ -624,6 +628,7 @@ class XRay(loader.Module):
         "btn_set_padding": "Padding",
         "btn_set_fp": "Fingerprint",
         "btn_set_limit": "Лимит",
+        "btn_encryption": "Шифрование",
         "btn_toggle_transport": "Сменить транспорт",
         "btn_chrome": "Chrome",
         "btn_firefox": "Firefox",
@@ -826,17 +831,26 @@ class XRay(loader.Module):
     }
 
     def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "MAX_LOG_FILE_SIZE", 50,
+                "Maximum size of each Xray/daemon log file in megabytes",
+                validator=loader.validators.Integer(minimum=11, maximum=2048),
+            ),
+        )
         self._root = None
         self._xray_path = None
         self._users: Dict[str, Dict] = {}
-        self._processes: Dict[str, subprocess.Popen] = {}
+        # Values are systemd unit names, not child processes.  This keeps VPNs
+        # alive while the userbot is restarted or the module is unloaded.
+        self._processes: Dict[str, str] = {}
         self._monitor_task = None
         self._external_ip = ""
         self._link_cache: Dict[str, str] = {}
-        self._tunnels: Dict[str, subprocess.Popen] = {}
-        self._site_processes: Dict[str, subprocess.Popen] = {}
+        self._tunnels: Dict[str, str] = {}
+        self._site_processes: Dict[str, str] = {}
         self._mask_sites = {
-            "Evil Cat": "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Evil_Cat.jsx?v=evil-cat-v4",
+            "Evil Cat": "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Evil_Cat.jsx",
         }
         self._logger_topic = None
         self._asset_channel = None
@@ -876,7 +890,11 @@ class XRay(loader.Module):
         
         await self._reattach_processes()
         for name, user in self._users.items():
-            if user.get("transport") != "websocket" or name not in self._processes:
+            if user.pop("resume_on_module_load", False) and not user.get("restart_required"):
+                await self._start_user(name)
+        for name, user in self._users.items():
+            if (user.get("transport") != "websocket" or user.get("websocket_mode") != "tls-fallback"
+                    or name not in self._processes):
                 continue
             user_dir = os.path.join(self._root, "users", name)
             # An existing Xray listener may be from before the userbot restart.
@@ -901,11 +919,14 @@ class XRay(loader.Module):
                 pass
         
         for name in list(self._processes.keys()):
+            if name in self._users:
+                self._users[name]["resume_on_module_load"] = True
             await self._stop_user(name)
         for name in list(self._tunnels.keys()):
             await self._stop_websocket_tunnel(name)
         for name in list(self._site_processes.keys()):
             await self._stop_websocket_site(name)
+        self._save_users()
 
     def _transport_label(self, transport: str) -> str:
         labels = {
@@ -924,6 +945,90 @@ class XRay(loader.Module):
         finally:
             sock.close()
 
+    def _unit_name(self, name: str, kind: str = "xray") -> str:
+        """Return a stable user-systemd unit name for a module user."""
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", name)
+        return f"{safe}{'-cf-tunnel' if kind == 'cf' else '-site' if kind == 'site' else ''}.service"
+
+    @property
+    def _systemd_user_dir(self) -> str:
+        return os.path.join(os.path.expanduser("~"), ".config", "systemd", "user")
+
+    async def _systemctl(self, *args: str) -> Tuple[bool, str]:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "systemctl", "--user", *args,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            out, err = await proc.communicate()
+            return proc.returncode == 0, (out + err).decode(errors="replace").strip()
+        except Exception as e:
+            return False, str(e)
+
+    def _log_limit_bytes(self) -> int:
+        return int(self.config["MAX_LOG_FILE_SIZE"]) * 1024 * 1024
+
+    def _trim_log(self, path: str):
+        """Drop exactly the oldest 10 MiB once a managed log reaches its cap."""
+        try:
+            if os.path.getsize(path) < self._log_limit_bytes():
+                return
+            with open(path, "rb") as source:
+                source.seek(LOG_TRIM_SIZE)
+                remaining = source.read()
+            with open(path, "wb") as target:
+                target.write(remaining)
+        except OSError:
+            pass
+
+    def _trim_user_logs(self, name: str):
+        base = os.path.join(self._root, "users", name)
+        for filename in ("start.log", "error.log", "access.log", "daemon.log"):
+            self._trim_log(os.path.join(base, filename))
+
+    def _write_unit(self, unit: str, description: str, command: List[str], log_path: str):
+        os.makedirs(self._systemd_user_dir, mode=0o700, exist_ok=True)
+        self._trim_log(log_path)
+        quoted = " ".join(subprocess.list2cmdline([part]) for part in command)
+        content = (
+            "[Unit]\n"
+            f"Description={description}\n"
+            "After=network-online.target\nWants=network-online.target\n\n"
+            "[Service]\nType=simple\n"
+            f"WorkingDirectory={os.path.dirname(log_path)}\n"
+            f"ExecStart={quoted}\n"
+            "Restart=on-failure\nRestartSec=3\n"
+            f"StandardOutput=append:{log_path}\nStandardError=append:{log_path}\n\n"
+            "[Install]\nWantedBy=default.target\n"
+        )
+        with open(os.path.join(self._systemd_user_dir, unit), "w", encoding="utf-8") as f:
+            f.write(content)
+
+    async def _unit_active(self, unit: str) -> bool:
+        ok, out = await self._systemctl("is-active", "--quiet", unit)
+        return ok and out == ""
+
+    async def _start_unit(self, unit: str) -> Tuple[bool, str]:
+        ok, output = await self._systemctl("daemon-reload")
+        if not ok:
+            return False, output
+        return await self._systemctl("start", unit)
+
+    async def _stop_unit(self, unit: str, disable: bool = False):
+        await self._systemctl("stop", unit)
+        if disable:
+            await self._systemctl("disable", unit)
+
+    async def _mark_restart_required(self, name: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        # Configuration changes must never be silently applied by autostart.
+        if name in self._processes or await self._unit_active(self._unit_name(name)):
+            await self._stop_user(name, reason="configuration changed")
+        user["restart_required"] = True
+        self._save_users()
+
     _WEBSOCKET_SITE_SCRIPT_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/websocket_site.py"
 
     def _websocket_site_script(
@@ -939,8 +1044,8 @@ class XRay(loader.Module):
         )
 
     async def _start_websocket_site(self, name: str, user_dir: str) -> Tuple[bool, str]:
-        existing = self._site_processes.get(name)
-        if existing and existing.poll() is None:
+        unit = self._unit_name(name, "site")
+        if await self._unit_active(unit):
             return True, ""
         self._site_processes.pop(name, None)
         user = self._users[name]
@@ -957,22 +1062,16 @@ class XRay(loader.Module):
         script_path = os.path.join(user_dir, "websocket_site.py")
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(self._websocket_site_script(path, user["port"], site_port, mask_url))
-        log_path = os.path.join(user_dir, "site.log")
+        log_path = os.path.join(user_dir, "daemon.log")
         try:
-            with open(log_path, "wb"):
-                pass
-            log_fd = open(log_path, "ab")
-            proc = subprocess.Popen(
-                [sys.executable, script_path],
-                cwd=user_dir,
-                stdout=log_fd,
-                stderr=log_fd,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
-            )
+            self._write_unit(unit, f"XRay WebSocket site for {name}", [sys.executable, script_path], log_path)
+            ok, output = await self._start_unit(unit)
+            if not ok:
+                return False, output
             deadline = time.time() + 8
             while time.time() < deadline:
                 await asyncio.sleep(0.25)
-                if proc.poll() is not None:
+                if not await self._unit_active(unit):
                     tail = open(log_path, "r", errors="replace").read()[-500:] if os.path.exists(log_path) else ""
                     return False, tail or "site_start_failed"
                 try:
@@ -981,33 +1080,21 @@ class XRay(loader.Module):
                 except OSError:
                     continue
             else:
-                proc.terminate()
+                await self._stop_unit(unit)
                 return False, "site_healthcheck_timeout"
-            self._site_processes[name] = proc
+            self._site_processes[name] = unit
             self._save_users()
             return True, ""
         except Exception as e:
             return False, str(e)
 
     async def _stop_websocket_site(self, name: str):
-        proc = self._site_processes.pop(name, None)
-        if not proc:
-            return
-        try:
-            if hasattr(os, "killpg"):
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            else:
-                proc.terminate()
-            proc.wait(timeout=3)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+        self._site_processes.pop(name, None)
+        await self._stop_unit(self._unit_name(name, "site"))
 
     async def _start_websocket_tunnel(self, name: str, user_dir: str) -> Tuple[bool, str]:
-        existing = self._tunnels.get(name)
-        if existing and existing.poll() is None:
+        unit = self._unit_name(name, "cf")
+        if await self._unit_active(unit):
             return True, ""
         self._tunnels.pop(name, None)
         user = self._users[name]
@@ -1017,17 +1104,12 @@ class XRay(loader.Module):
         cloudflared = self._cloudflared_path
         if not self._cloudflared_installed():
             return False, "cloudflared_not_installed"
-        log_path = os.path.join(user_dir, "cloudflared.log")
+        log_path = os.path.join(user_dir, "daemon.log")
         try:
-            with open(log_path, "wb"):
-                pass
-            log_fd = open(log_path, "ab")
-            proc = subprocess.Popen(
-                [cloudflared, "tunnel", "--protocol", "http2", "--url", f"http://127.0.0.1:{site_port}", "--no-autoupdate"],
-                stdout=log_fd,
-                stderr=log_fd,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
-            )
+            self._write_unit(unit, f"XRay CF Tunnel for {name}", [cloudflared, "tunnel", "--protocol", "http2", "--url", f"http://127.0.0.1:{site_port}", "--no-autoupdate"], log_path)
+            ok, output = await self._start_unit(unit)
+            if not ok:
+                return False, output
             deadline = time.time() + 40
             hostname = ""
             while time.time() < deadline:
@@ -1040,15 +1122,12 @@ class XRay(loader.Module):
                 if match:
                     hostname = match.group(1)
                     break
-                if proc.poll() is not None:
+                if not await self._unit_active(unit):
                     break
             if not hostname:
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
+                await self._stop_unit(unit)
                 return False, "cloudflared_tunnel_failed"
-            self._tunnels[name] = proc
+            self._tunnels[name] = unit
             user["tunnel_host"] = hostname
             self._save_users()
             await self._send_ws_link_to_log_topic(user)
@@ -1057,20 +1136,8 @@ class XRay(loader.Module):
             return False, str(e)
 
     async def _stop_websocket_tunnel(self, name: str):
-        proc = self._tunnels.pop(name, None)
-        if not proc:
-            return
-        try:
-            if hasattr(os, "killpg"):
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            else:
-                proc.terminate()
-            proc.wait(timeout=5)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+        self._tunnels.pop(name, None)
+        await self._stop_unit(self._unit_name(name, "cf"))
 
     async def _send_ws_link_to_log_topic(self, user: Dict):
         """Publish the regenerated ephemeral WebSocket URI as a clean file."""
@@ -1129,65 +1196,16 @@ class XRay(loader.Module):
         }
 
     async def _reattach_processes(self):
-        if not self._xray_installed():
-            return
-        import re as _re
-
-        try:
-            p = await asyncio.create_subprocess_exec(
-                "ss", "-tlnp",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            out, _ = await p.communicate()
-            ss_output = out.decode()
-        except Exception:
-            return
-
+        """Discover services after a module/userbot reload without owning PIDs."""
         for name, user in self._users.items():
-            if name in self._processes:
-                continue
-            port = user.get("port")
-            if not port:
-                continue
-            if f":{port}" not in ss_output:
-                continue
-            try:
-                p2 = await asyncio.create_subprocess_exec(
-                    "ss", "-tlnp", f"sport = :{port}",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                out2, _ = await p2.communicate()
-                line = out2.decode()
-                m = _re.search(r'pid=(\d+)', line)
-                if not m:
-                    continue
-                pid = int(m.group(1))
-                proc_path = f"/proc/{pid}/exe"
-                if not os.path.exists(proc_path):
-                    continue
-                exe = os.readlink(proc_path)
-                if "xray" not in exe.lower():
-                    continue
-                try:
-                    with open(f"/proc/{pid}/environ", "rb") as f:
-                        env = f.read()
-                    if b"XRAY_MODULE_MANAGED" not in env:
-                        continue
-                except OSError:
-                    continue
-                try:
-                    os.kill(pid, 0)
-                except OSError:
-                    continue
-                fake = subprocess.Popen.__new__(subprocess.Popen)
-                object.__setattr__(fake, 'pid', pid)
-                fake._child_created = False
-                self._processes[name] = fake
-                logger.info(f"[XR] Reattached {name} pid={pid} port={port}")
-            except Exception as e:
-                logger.warning(f"[XR] Reattach failed for {name}: {e}")
+            unit = self._unit_name(name)
+            if await self._unit_active(unit):
+                self._processes[name] = unit
+            if user.get("transport") == "websocket":
+                if await self._unit_active(self._unit_name(name, "site")):
+                    self._site_processes[name] = self._unit_name(name, "site")
+                if await self._unit_active(self._unit_name(name, "cf")):
+                    self._tunnels[name] = self._unit_name(name, "cf")
 
     def _cloudflared_installed(self) -> bool:
         return (
@@ -1698,6 +1716,15 @@ class XRay(loader.Module):
                     "path": user.get("path", "/"),
                 },
             }
+            if user.get("websocket_mode") == "tls-fallback":
+                # ML-KEM and VLESS fallbacks are mutually exclusive.  In this
+                # mode the public CF TLS endpoint forwards regular web traffic
+                # to the local cover site and VLESS uses `encryption=none`.
+                config["inbounds"][0]["settings"]["decryption"] = "none"
+                config["inbounds"][0]["settings"]["fallbacks"] = [{
+                    "dest": user.get("site_port", 0),
+                    "xver": 1,
+                }]
         elif transport == "xhttp":
             config["inbounds"][0]["streamSettings"] = {
                 "network": "xhttp",
@@ -1756,14 +1783,17 @@ class XRay(loader.Module):
             # VLESS URI through it changes the transport to TLS and breaks the
             # ML-KEM pairing.  Keep the exact same host/port/path as Xray.
             path = user.get("path", "/")
+            fallback = user.get("websocket_mode") == "tls-fallback"
             params = urllib.parse.urlencode({
                 "type": "ws",
-                "encryption": user.get("vless_encryption", "none"),
+                "encryption": "none" if fallback else user.get("vless_encryption", "none"),
                 "path": path,
-                "host": "",
-                "security": "none",
+                "host": user.get("tunnel_host", "") if fallback else "",
+                "security": "tls" if fallback else "none",
+                **({"sni": user.get("tunnel_host", "")} if fallback else {}),
             })
-            return f"vless://{uuid_str}@{ip}:{port}?{params}#{urllib.parse.quote(name, safe='')}"
+            host = user.get("tunnel_host") if fallback else ip
+            return f"vless://{uuid_str}@{host}:{443 if fallback else port}?{params}#{urllib.parse.quote(name, safe='')}"
 
         if transport == "xhttp":
             sni = user.get("sni", "www.cloudflare.com")
@@ -1798,7 +1828,8 @@ class XRay(loader.Module):
             return f"vless://{uuid_str}@{ip}:{port}?{urllib.parse.urlencode(params)}#{urllib.parse.quote(name, safe='')}"
 
     async def _start_user(self, name: str) -> Tuple[bool, str]:
-        if name in self._processes:
+        unit = self._unit_name(name)
+        if name in self._processes or await self._unit_active(unit):
             return False, "already_running"
         
         user = self._users.get(name)
@@ -1818,7 +1849,7 @@ class XRay(loader.Module):
         user_dir = os.path.join(self._root, "users", name)
         os.makedirs(user_dir, exist_ok=True)
 
-        if user["transport"] == "websocket":
+        if user["transport"] == "websocket" and user.get("websocket_mode") == "tls-fallback":
             ok, error = await self._start_websocket_site(name, user_dir)
             if not ok:
                 return False, error
@@ -1829,53 +1860,32 @@ class XRay(loader.Module):
         with open(config_path, "w") as f:
             json.dump(config, f, indent=2)
         
-        run_log_path = os.path.join(user_dir, "run.log")
-        error_log_path = os.path.join(user_dir, "error.log")
-
         try:
-            run_log_fd = open(run_log_path, "ab")
-        except Exception as e:
-            return False, str(e)
-
-        try:
-            proc = subprocess.Popen(
-                [self._xray_path, "run", "-config", config_path],
-                stdout=run_log_fd,
-                stderr=run_log_fd,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
-                env={**os.environ, "XRAY_MODULE_MANAGED": self._root},
-            )
-
-            await asyncio.sleep(2)
-
-            if proc.poll() is not None:
-                run_log_fd.flush()
-                run_log_fd.close()
+            start_log = os.path.join(user_dir, "start.log")
+            self._write_unit(unit, f"XRay VPN user {name}", [self._xray_path, "run", "-config", config_path], start_log)
+            ok, output = await self._start_unit(unit)
+            if not ok:
+                return False, output
+            await asyncio.sleep(1)
+            if not await self._unit_active(unit):
                 tail = ""
-                for path in (error_log_path, run_log_path):
+                for path in (os.path.join(user_dir, "error.log"), start_log):
                     if os.path.exists(path):
-                        size = os.path.getsize(path)
-                        if size > 0:
-                            with open(path, "rb") as f:
-                                f.seek(max(0, size - 2048))
-                                tail = f.read().decode(errors="replace").strip()
-                            if tail:
-                                break
-                return False, tail or "startup_failed (no output)"
+                        with open(path, "rb") as f:
+                            f.seek(max(0, os.path.getsize(path) - 2048))
+                            tail = f.read().decode(errors="replace").strip()
+                        if tail:
+                            break
+                return False, tail or "startup_failed"
 
-            self._processes[name] = proc
+            self._processes[name] = unit
             user["start_time"] = time.time()
+            user["restart_required"] = False
 
-            if user["transport"] == "websocket":
+            if user["transport"] == "websocket" and user.get("websocket_mode") == "tls-fallback":
                 ok, error = await self._start_websocket_tunnel(name, user_dir)
                 if not ok:
-                    try:
-                        if hasattr(os, "killpg"):
-                            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                        else:
-                            proc.terminate()
-                    except Exception:
-                        pass
+                    await self._stop_unit(unit)
                     self._processes.pop(name, None)
                     await self._stop_websocket_site(name)
                     return False, error
@@ -1888,35 +1898,14 @@ class XRay(loader.Module):
             return True, ""
 
         except Exception as e:
-            try:
-                run_log_fd.close()
-            except Exception:
-                pass
             return False, str(e)
 
     async def _stop_user(self, name: str, reason: str = "manual") -> bool:
-        proc = self._processes.get(name)
-        if not proc:
+        unit = self._unit_name(name)
+        if name not in self._processes and not await self._unit_active(unit):
             return False
-        
-        try:
-            if hasattr(os, "killpg"):
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            else:
-                proc.terminate()
-            
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                if hasattr(os, "killpg"):
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                else:
-                    proc.kill()
-                proc.wait(timeout=3)
-        except:
-            pass
-        
-        del self._processes[name]
+        await self._stop_unit(unit)
+        self._processes.pop(name, None)
 
         if self._users.get(name, {}).get("transport") == "websocket":
             await self._stop_websocket_tunnel(name)
@@ -2007,6 +1996,8 @@ class XRay(loader.Module):
         async def monitor_loop():
             while True:
                 await asyncio.sleep(AUTOSTART_INTERVAL)
+                for name in self._users:
+                    self._trim_user_logs(name)
                 
                 for name, proc in list(self._processes.items()):
                     user = self._users.get(name)
@@ -2300,7 +2291,7 @@ class XRay(loader.Module):
             return
         
         is_running = name in self._processes
-        status = self.strings["status_online"] if is_running else self.strings["status_offline"]
+        status = "STOPPED AND WAITING FOR RESTART" if user.get("restart_required") else (self.strings["status_online"] if is_running else self.strings["status_offline"])
         transport = user["transport"].upper()
         limit = user.get("device_limit", 0)
         limit_text = "Unlimited" if limit == 0 else str(limit)
@@ -2354,7 +2345,8 @@ class XRay(loader.Module):
         ])
         
         markup.append([
-            {"text": self.strings["btn_get_logs"], "callback": self._cb_get_user_logs, "args": (name,), "style": "primary"},
+            {"text": "Xray-core logs", "callback": self._cb_logs_menu, "args": (name, "xray"), "style": "primary"},
+            {"text": "Daemon logs", "callback": self._cb_logs_menu, "args": (name, "daemon"), "style": "primary"},
         ])
         
         markup.append([
@@ -2448,6 +2440,14 @@ class XRay(loader.Module):
             return
 
         await self._stop_user(name, self.strings["log_reason_manual"])
+        for kind in ("xray", "site", "cf"):
+            unit = self._unit_name(name, kind)
+            await self._stop_unit(unit, disable=True)
+            try:
+                os.unlink(os.path.join(self._systemd_user_dir, unit))
+            except OSError:
+                pass
+        await self._systemctl("daemon-reload")
         await self._send_log(
             self.strings["log_user_deleted"].format(**self._log_user_data(user))
         )
@@ -2571,20 +2571,36 @@ class XRay(loader.Module):
             reply_markup=markup,
         )
 
-    async def _cb_get_user_logs(self, call: InlineCall, name: str):
+    async def _cb_logs_menu(self, call: InlineCall, name: str, kind: str):
+        title = "Xray-core logs" if kind == "xray" else "Daemon logs"
+        await call.edit(
+            f"<b>{title}: {_escape(name)}</b>\n<blockquote>Select an action.</blockquote>",
+            reply_markup=[
+                [{"text": "Send logs", "callback": self._cb_get_user_logs, "args": (name, kind), "style": "primary"}],
+                [{"text": "Clear logs", "callback": self._cb_clear_user_logs, "args": (name, kind), "style": "danger"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}],
+            ],
+        )
+
+    async def _cb_clear_user_logs(self, call: InlineCall, name: str, kind: str):
+        user_dir = os.path.join(self._root, "users", name)
+        paths = (["start.log", "error.log", "access.log"] if kind == "xray" else ["daemon.log"])
+        for filename in paths:
+            path = os.path.join(user_dir, filename)
+            try:
+                with open(path, "wb"):
+                    pass
+            except OSError:
+                pass
+        await self._cb_logs_menu(call, name, kind)
+
+    async def _cb_get_user_logs(self, call: InlineCall, name: str, kind: str = "xray"):
         await call.edit(self.strings["loading"])
 
         user_dir = os.path.join(self._root, "users", name)
-        error_log = os.path.join(user_dir, "error.log")
-        run_log = os.path.join(user_dir, "run.log")
-
-        chosen = None
-        label = None
-        for path, lbl in ((error_log, "error.log"), (run_log, "run.log")):
-            if os.path.exists(path) and os.path.getsize(path) > 0:
-                chosen = path
-                label = lbl
-                break
+        names = ["start.log", "error.log", "access.log"] if kind == "xray" else ["daemon.log"]
+        chosen = [(os.path.join(user_dir, filename), filename) for filename in names]
+        chosen = [(path, label) for path, label in chosen if os.path.exists(path) and os.path.getsize(path) > 0]
 
         if not chosen:
             await call.edit(
@@ -2593,34 +2609,15 @@ class XRay(loader.Module):
             )
             return
 
-        size = os.path.getsize(chosen)
-
-        import tempfile as _tf
-        with open(chosen, "rb") as f:
-            f.seek(max(0, size - 50 * 1024))
-            tail = f.read()
-
-        tmp = _tf.NamedTemporaryFile(
-            mode="wb",
-            suffix=".txt",
-            prefix=f"xray_{name}_",
-            delete=False,
-        )
-        tmp.write(tail)
-        tmp.close()
-
-        try:
-            await utils.answer_file(
-                call,
-                tmp.name,
-                force_document=True,
-                file_name=f"xray_{name}_{label}.txt",
-                caption=f"<b>XRay {label}:</b> <code>{name}</code>",
-            )
-        except Exception as e:
-            logger.exception("[XR] send_file failed: %s", e)
-        finally:
-            os.unlink(tmp.name)
+        # The inline upload-progress callback is added separately; retain full
+        # per-stream files here rather than silently truncating large logs.
+        for path, label in chosen:
+            try:
+                await utils.answer_file(call, path, force_document=True,
+                                        file_name=f"xray_{name}_{label}",
+                                        caption=f"<b>{kind.title()} {label}:</b> <code>{name}</code>")
+            except Exception as e:
+                logger.exception("[XR] send_file failed: %s", e)
 
         markup = [
             [{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}],
@@ -2658,17 +2655,7 @@ class XRay(loader.Module):
             await call.answer("Mask site not found", show_alert=True)
             return
         user["mask_site"] = mask
-        self._save_users()
-        if name in self._processes:
-            await call.edit(self.strings["loading"])
-            await self._stop_user(name, reason="restart")
-            ok, error = await self._start_user(name)
-            if not ok:
-                await call.edit(
-                    self.strings["setup_fail"].format(error=_escape(error[:400])),
-                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]],
-                )
-                return
+        await self._mark_restart_required(name)
         await self._cb_user_menu(call, name)
 
     async def _cb_user_settings(self, call: InlineCall, name: str):
@@ -2685,6 +2672,8 @@ class XRay(loader.Module):
         path = user.get("path", "/xhttps") if user["transport"] in {"xhttp", "websocket"} else "n/a"
         padding = user.get("padding", "100-1000") if user["transport"] == "xhttp" else "n/a"
         fp = user.get("fingerprint", "firefox") if not is_socks5 and not is_websocket else "n/a"
+        encryption = user.get("encryption_mode", "none")
+        restart = "Need restart for updating changes" if user.get("restart_required") else "Not required"
         limit = user.get("device_limit", 0)
         limit_text = "Unlimited" if limit == 0 else str(limit)
         
@@ -2696,6 +2685,8 @@ class XRay(loader.Module):
             path=_escape(path),
             padding=padding,
             fp=fp,
+            encryption=_escape(encryption),
+            restart=restart,
             limit=limit_text,
         )
         
@@ -2704,6 +2695,7 @@ class XRay(loader.Module):
         ]
         
         if not is_socks5:
+            markup.append([{"text": self.strings["btn_encryption"], "callback": self._cb_encryption_menu, "args": (name,), "style": "primary"}])
             markup.append([{"text": self.strings["btn_set_sni"], "input": self.strings["input_sni"], "handler": self._cb_set_sni, "args": (name,), "style": "primary"}])
             markup.append([{"text": self.strings["btn_set_dest"], "input": self.strings["input_dest"], "handler": self._cb_set_dest, "args": (name,), "style": "primary"}])
             
@@ -2717,6 +2709,39 @@ class XRay(loader.Module):
         markup.append([{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}])
         
         await call.edit(text, reply_markup=markup)
+
+    async def _cb_encryption_menu(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        await call.edit(
+            f"<b>VLESS encryption: {_escape(user.get('encryption_mode', 'none'))}</b>\n"
+            "<blockquote>ML-KEM-768 is generated by the installed Xray core. "
+            "Fallback mode is available only for WebSocket.</blockquote>",
+            reply_markup=[
+                [{"text": "ML-KEM-768", "callback": self._cb_set_encryption, "args": (name, "ml-kem-768"), "style": "primary"}],
+                [{"text": "None", "callback": self._cb_set_encryption, "args": (name, "none"), "style": "primary"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}],
+            ],
+        )
+
+    async def _cb_set_encryption(self, call: InlineCall, name: str, mode: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        if mode == "ml-kem-768":
+            dec, enc = await self._generate_vless_encryption()
+            if not dec or not enc:
+                await call.answer("ML-KEM-768 is not supported by the installed Xray core", show_alert=True)
+                return
+            user["vless_decryption"], user["vless_encryption"] = dec, enc
+        else:
+            user["vless_decryption"], user["vless_encryption"] = "none", "none"
+        user["encryption_mode"] = mode
+        if user.get("transport") == "websocket":
+            user["websocket_mode"] = "ml-kem-768" if mode == "ml-kem-768" else "tls-fallback"
+        await self._mark_restart_required(name)
+        await self._cb_user_settings(call, name)
 
     async def _cb_transport_menu(self, call: InlineCall, name: str):
         user = self._users.get(name)
@@ -2748,7 +2773,10 @@ class XRay(loader.Module):
             return
         
         await call.edit(self.strings["loading"])
-        
+        # Stop helpers while the old transport is still known, otherwise a
+        # WebSocket CF/site unit could be orphaned after switching transport.
+        if name in self._processes:
+            await self._stop_user(name, reason="configuration changed")
         user["transport"] = transport
         
         if transport == "socks5" and not user.get("socks_user"):
@@ -2760,11 +2788,8 @@ class XRay(loader.Module):
             user.pop("site_port", None)
             user["path"] = ""
 
+        user["restart_required"] = True
         self._save_users()
-        
-        if name in self._processes and user.get("autostart"):
-            await self._stop_user(name)
-            await self._start_user(name)
         
         await call.edit(
             self.strings["transport_set"].format(transport=transport.upper()),
@@ -2777,7 +2802,7 @@ class XRay(loader.Module):
             return
         
         user["sni"] = _strip_md(sni).strip().lower()
-        self._save_users()
+        await self._mark_restart_required(name)
         
         await call.edit(
             self.strings["sni_set"].format(sni=_escape(sni)),
@@ -2794,7 +2819,7 @@ class XRay(loader.Module):
             dest += ":443"
         
         user["dest"] = dest
-        self._save_users()
+        await self._mark_restart_required(name)
         
         await call.edit(
             self.strings["dest_set"].format(dest=_escape(dest)),
@@ -2811,7 +2836,7 @@ class XRay(loader.Module):
             path = "/" + path
         
         user["path"] = path
-        self._save_users()
+        await self._mark_restart_required(name)
         
         await call.edit(
             self.strings["path_set"].format(path=_escape(path)),
@@ -2907,7 +2932,7 @@ class XRay(loader.Module):
             return
         
         user["fingerprint"] = fp
-        self._save_users()
+        await self._mark_restart_required(name)
         
         await call.edit(
             self.strings["fp_set"].format(fp=fp),
@@ -2960,6 +2985,9 @@ class XRay(loader.Module):
         if name in self._users:
             await call.answer(self.strings["err_name_exists"], show_alert=True)
             return
+        if os.path.exists(os.path.join(self._systemd_user_dir, self._unit_name(name))):
+            await call.answer("A systemd service with this username already exists", show_alert=True)
+            return
         
         text = self.strings["add_user_transport"].format(name=_escape(name))
         
@@ -2982,14 +3010,34 @@ class XRay(loader.Module):
                 {
                     "text": self.strings["input_limit"],
                     "input": self.strings["input_limit"],
-                    "handler": self._cb_create_user_final,
+                    "handler": self._cb_add_user_encryption_choice,
                     "args": (name, transport),
                     "style": "primary",
                 }
             ]]
         )
 
-    async def _cb_create_user_final(self, call: InlineCall, limit_str: str, name: str, transport: str):
+    async def _cb_add_user_encryption_choice(self, call: InlineCall, limit_str: str, name: str, transport: str):
+        try:
+            limit = int(limit_str.strip())
+            if limit < 0:
+                raise ValueError
+        except Exception:
+            await call.answer(self.strings["err_invalid_limit"], show_alert=True)
+            return
+        if transport != "websocket":
+            await self._cb_create_user_final(call, str(limit), name, transport, "ml-kem-768")
+            return
+        await call.edit(
+            "<b>WebSocket security</b>\n<blockquote>Select an endpoint mode:</blockquote>",
+            reply_markup=[
+                [{"text": "Use TLS with fallback", "callback": self._cb_create_user_final, "args": (str(limit), name, transport, "tls-fallback"), "style": "primary"}],
+                [{"text": "Use post-quantum encryption", "callback": self._cb_create_user_final, "args": (str(limit), name, transport, "ml-kem-768"), "style": "primary"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_add_user_transport_choice, "args": (name,), "style": "primary"}],
+            ],
+        )
+
+    async def _cb_create_user_final(self, call: InlineCall, limit_str: str, name: str, transport: str, encryption_mode: str = "ml-kem-768"):
         try:
             limit = int(limit_str.strip())
             if limit < 0:
@@ -3017,8 +3065,9 @@ class XRay(loader.Module):
                     reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
                 )
                 return
-            vless_decryption, vless_encryption = await self._generate_vless_encryption()
-            if not vless_decryption or not vless_encryption:
+            if encryption_mode == "ml-kem-768":
+                vless_decryption, vless_encryption = await self._generate_vless_encryption()
+            if encryption_mode == "ml-kem-768" and (not vless_decryption or not vless_encryption):
                 await call.edit(
                     self.strings["setup_fail"].format(error="ML-KEM-768 VLESS encryption generation failed"),
                     reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
@@ -3045,6 +3094,8 @@ class XRay(loader.Module):
             "short_id": self._generate_short_id(),
             "vless_decryption": vless_decryption,
             "vless_encryption": vless_encryption,
+            "encryption_mode": "none" if transport == "socks5" else encryption_mode,
+            "websocket_mode": encryption_mode if transport == "websocket" else "",
             "mask_site": "Evil Cat",
             "sni": default_sni,
             "dest": default_dest,
@@ -3055,6 +3106,11 @@ class XRay(loader.Module):
             "socks_pass": _gen_secret(14),
             "autostart": False,
             "start_time": 0,
+            "services": {
+                "xray": self._unit_name(name),
+                "site": self._unit_name(name, "site"),
+                "cf_tunnel": self._unit_name(name, "cf"),
+            },
         }
         
         self._users[name] = user

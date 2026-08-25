@@ -55,21 +55,31 @@ def test_websocket_count_uses_mask_site_public_peers():
     assert "sport = :48000" in run.call_args.args[0]
 
 
-def test_websocket_direct_link_keeps_mlkem_and_has_no_domain_dependency():
+def test_websocket_link_keeps_mlkem_by_default_and_supports_tls_fallback():
     source = XRAY.read_text(encoding="utf-8")
     start = source.index('        if transport == "websocket":', source.index('    def _build_vless_link'))
     end = source.index('        if transport == "xhttp":', start)
     websocket_link_block = source[start:end]
     assert 'user.get("vless_encryption", "none")' in websocket_link_block
-    assert '"security": "none"' in websocket_link_block
-    assert 'f"vless://{uuid_str}@{ip}:{port}?' in websocket_link_block
-    assert 'tunnel_host' not in websocket_link_block
+    assert '"security": "tls" if fallback else "none"' in websocket_link_block
+    assert 'host = user.get("tunnel_host") if fallback else ip' in websocket_link_block
 
 
-def test_websocket_inbound_preserves_the_matching_mlkem_decryption():
+def test_websocket_inbound_keeps_mlkem_and_limits_fallback_to_tls_mode():
     source = XRAY.read_text(encoding="utf-8")
     start = source.index('        if transport == "websocket":', source.index('    def _build_config'))
     end = source.index('        elif transport == "xhttp":', start)
     websocket_config_block = source[start:end]
-    assert '"fallbacks"' not in websocket_config_block
     assert 'config["inbounds"][0]["settings"]["decryption"] = user.get("vless_decryption", "none")' in websocket_config_block
+    assert 'user.get("websocket_mode") == "tls-fallback"' in websocket_config_block
+    assert 'config["inbounds"][0]["settings"]["fallbacks"]' in websocket_config_block
+
+
+def test_websocket_has_an_explicit_security_choice_and_systemd_units():
+    source = XRAY.read_text(encoding="utf-8")
+    assert 'Use TLS with fallback' in source
+    assert 'Use post-quantum encryption' in source
+    assert 'MAX_LOG_FILE_SIZE' in source
+    assert 'systemctl", "--user"' in source
+    assert 'STOPPED AND WAITING FOR RESTART' in source
+    assert 'evil-cat-v4' not in source
