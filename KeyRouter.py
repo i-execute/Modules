@@ -1,4 +1,4 @@
-__version__ = (2, 1, 0)
+__version__ = (2, 2, 0)
 # meta developer: I_execute.t.me
 
 import logging
@@ -15,6 +15,8 @@ from .. import loader, utils
 from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
+
+KEYS_PER_PAGE = 5
 
 
 def _escape(text):
@@ -128,7 +130,8 @@ class KeyRouter(loader.Module):
 
         "add_provider_url": (
             "<b>Add Provider</b>\n"
-            "<blockquote>Enter base URL</blockquote>"
+            "<blockquote>Enter base URL\n"
+            "<i>e.g. https://your.provider.domain/v1</i></blockquote>"
         ),
 
         "add_provider_name": (
@@ -272,6 +275,11 @@ class KeyRouter(loader.Module):
             "<blockquote>Removed {count} invalid key(s)</blockquote>"
         ),
 
+        "key_duplicate": (
+            "<b>Duplicate Key</b>\n"
+            "<blockquote>This key is already in the database</blockquote>"
+        ),
+
         "fetching_models": "<b>Fetching models...</b>",
 
         "models_list": (
@@ -303,8 +311,10 @@ class KeyRouter(loader.Module):
         "btn_settings": "Provider Settings",
         "btn_delete_provider": "Delete Provider",
         "btn_change_model": "Change Test Model",
+        "btn_left": "<",
+        "btn_right": ">",
 
-        "input_url": "Enter base URL (e.g. https://your.provider.domain/v1):",
+        "input_url": "Enter base URL:",
         "input_name": "Enter provider display name:",
         "input_model": "Enter test model name:",
         "input_key": "Enter API key:",
@@ -330,7 +340,8 @@ class KeyRouter(loader.Module):
 
         "add_provider_url": (
             "<b>Добавить провайдера</b>\n"
-            "<blockquote>Введите base URL</blockquote>"
+            "<blockquote>Введите base URL\n"
+            "<i>например https://your.provider.domain/v1</i></blockquote>"
         ),
 
         "add_provider_name": (
@@ -474,6 +485,11 @@ class KeyRouter(loader.Module):
             "<blockquote>Удалено {count} невалидных ключей</blockquote>"
         ),
 
+        "key_duplicate": (
+            "<b>Дубликат ключа</b>\n"
+            "<blockquote>Этот ключ уже есть в базе</blockquote>"
+        ),
+
         "fetching_models": "<b>Получение списка моделей...</b>",
 
         "models_list": (
@@ -505,8 +521,10 @@ class KeyRouter(loader.Module):
         "btn_settings": "Настройки провайдера",
         "btn_delete_provider": "Удалить провайдера",
         "btn_change_model": "Сменить модель",
+        "btn_left": "<",
+        "btn_right": ">",
 
-        "input_url": "Введите base URL (например https://your.provider.domain/v1):",
+        "input_url": "Введите base URL:",
         "input_name": "Введите отображаемое имя провайдера:",
         "input_model": "Введите название тестовой модели:",
         "input_key": "Введите API ключ:",
@@ -556,9 +574,14 @@ class KeyRouter(loader.Module):
                 if "provider_id" not in entry:
                     entry["provider_id"] = 0
                 normalized.append(entry)
-        for i, entry in enumerate(normalized, start=1):
-            entry["key"] = i
         return normalized
+
+    def _next_key_num(self) -> int:
+        used = {e.get("key") for e in self._keys}
+        num = 1
+        while num in used:
+            num += 1
+        return num
 
     def _save_all(self):
         self._db.set("KeyRouter", "providers", self._providers)
@@ -709,6 +732,14 @@ class KeyRouter(loader.Module):
             await call.answer("Provider not found", show_alert=True)
             return
 
+        all_values = [e.get("value") for e in self._keys]
+        if key in all_values:
+            await call.edit(
+                self.strings["key_duplicate"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
+            )
+            return
+
         await call.edit(self.strings["validating"], reply_markup=[])
 
         result = await _validate_key(key, provider["url"], provider["model"], self.config["timeout"])
@@ -749,7 +780,7 @@ class KeyRouter(loader.Module):
             return
 
         if key not in existing_values:
-            num = (max((e.get("key", 0) for e in self._keys), default=0)) + 1
+            num = self._next_key_num()
             self._keys.append({
                 "key": num,
                 "value": key,
@@ -886,9 +917,6 @@ class KeyRouter(loader.Module):
         self._providers = [p for p in self._providers if p.get("id") != pid]
         self._keys = [e for e in self._keys if e.get("provider_id") != pid]
 
-        for i, entry in enumerate(self._keys, start=1):
-            entry["key"] = i
-
         self._save_all()
 
         await call.edit(
@@ -896,7 +924,13 @@ class KeyRouter(loader.Module):
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
         )
 
-    async def _cb_list_keys(self, call: InlineCall, pid: int):
+    async def _cb_noop(self, call: InlineCall):
+        await call.answer()
+
+    async def _cb_keys_page(self, call: InlineCall, pid: int, page: int):
+        await self._render_keys_page(call, pid, page)
+
+    async def _render_keys_page(self, call: InlineCall, pid: int, page: int):
         provider = self._find_provider(pid)
         if not provider:
             await call.answer("Provider not found", show_alert=True)
@@ -910,23 +944,42 @@ class KeyRouter(loader.Module):
             )
             return
 
-        rows = []
-        for entry in pkeys:
+        total_pages = max(1, (len(pkeys) + KEYS_PER_PAGE - 1) // KEYS_PER_PAGE)
+        page = max(0, min(page, total_pages - 1))
+        start = page * KEYS_PER_PAGE
+        page_keys = pkeys[start:start + KEYS_PER_PAGE]
+
+        markup = []
+        for entry in page_keys:
             num = entry.get("key")
             masked = _mask(entry.get("value", ""))
-            rows.append([{
+            markup.append([{
                 "text": f"{num}. {masked}",
                 "callback": self._cb_key_detail,
                 "args": (num, pid),
                 "style": "primary",
             }])
 
-        rows.append([{"text": self.strings["btn_back"], "callback": self._cb_manage_provider, "args": (pid,), "style": "danger"}])
+        left_btn = {"text": self.strings["btn_left"], "callback": self._cb_keys_page, "args": (pid, page - 1)}
+        right_btn = {"text": self.strings["btn_right"], "callback": self._cb_keys_page, "args": (pid, page + 1)}
+        if page > 0:
+            left_btn["style"] = "primary"
+        if page < total_pages - 1:
+            right_btn["style"] = "primary"
+
+        if total_pages > 1:
+            markup.append([{"text": f"{page + 1}/{total_pages}", "callback": self._cb_noop, "style": "primary"}])
+            markup.append([left_btn, right_btn])
+
+        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_manage_provider, "args": (pid,), "style": "danger"}])
 
         await call.edit(
             self.strings["keys_list"].format(provider=_escape(provider["name"])),
-            reply_markup=rows,
+            reply_markup=markup,
         )
+
+    async def _cb_list_keys(self, call: InlineCall, pid: int):
+        await self._render_keys_page(call, pid, 0)
 
     async def _cb_key_detail(self, call: InlineCall, num: int, pid: int):
         idx = self._find_key_index(num)
@@ -1061,8 +1114,6 @@ class KeyRouter(loader.Module):
             return
 
         self._keys.pop(idx)
-        for i, entry in enumerate(self._keys, start=1):
-            entry["key"] = i
         self._save_all()
 
         await call.edit(
@@ -1127,8 +1178,6 @@ class KeyRouter(loader.Module):
             e for e in self._keys
             if not (e.get("provider_id") == pid and e.get("status") == "invalid")
         ]
-        for i, entry in enumerate(self._keys, start=1):
-            entry["key"] = i
         self._save_all()
 
         after = len(self._keys_for_provider(pid))
