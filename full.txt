@@ -13,6 +13,7 @@ GRAMScanner
 Info
 InlineDL
 IPScanner
+KeyRouter
 Logger
 MessageEditor
 NetTester
