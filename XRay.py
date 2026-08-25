@@ -2563,13 +2563,52 @@ class XRay(loader.Module):
                 pass
         await self._cb_logs_menu(call, name, kind)
 
+    # ── upload-progress helpers ──────────────────────────────────────────────
+
+    def _make_upload_progress_cb(self, state: dict, label: str):
+        """Returns a synchronous Telethon progress_callback for one file."""
+        def _cb(current: int, total: int):
+            total_safe = total if total else current or 1
+            state[label] = (current, total_safe)
+        return _cb
+
+    async def _upload_progress_render_loop(
+        self,
+        call: InlineCall,
+        state: dict,
+        labels: list,
+        done_event: asyncio.Event,
+        header: str,
+    ):
+        """Periodically edits the inline message with per-file upload progress."""
+        while not done_event.is_set():
+            try:
+                await asyncio.sleep(2)
+                if done_event.is_set():
+                    break
+                lines = [f"<b>{header}</b>"]
+                for label in labels:
+                    cur, tot = state.get(label, (0, 0))
+                    cur_mb = cur / 1024 / 1024
+                    tot_mb = tot / 1024 / 1024
+                    pct = cur_mb / tot_mb * 100 if tot_mb > 0 else 0.0
+                    lines.append(f"  {label}: {pct:.0f}% ({cur_mb:.1f}/{tot_mb:.1f} MB)")
+                await call.edit("\n".join(lines))
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
+    # ────────────────────────────────────────────────────────────────────────
+
     async def _cb_get_user_logs(self, call: InlineCall, name: str, kind: str = "xray"):
         await call.edit(self.strings["loading"])
 
         user_dir = os.path.join(self._root, "users", name)
         names = ["start.log", "error.log", "access.log"] if kind == "xray" else ["daemon.log"]
-        chosen = [(os.path.join(user_dir, filename), filename) for filename in names]
-        chosen = [(path, label) for path, label in chosen if os.path.exists(path) and os.path.getsize(path) > 0]
+        chosen = [(os.path.join(user_dir, fn), fn) for fn in names
+                  if os.path.exists(os.path.join(user_dir, fn))
+                  and os.path.getsize(os.path.join(user_dir, fn)) > 0]
 
         if not chosen:
             await call.edit(
@@ -2578,22 +2617,75 @@ class XRay(loader.Module):
             )
             return
 
-        # The inline upload-progress callback is added separately; retain full
-        # per-stream files here rather than silently truncating large logs.
-        for path, label in chosen:
+        back_markup = [[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
+
+        if kind == "xray" and len(chosen) > 1:
+            # ── send all 3 xray-core logs as a single album with progress ──
+            labels = [label for _, label in chosen]
+            paths  = [path  for path,  _ in chosen]
+            state: dict = {}
+
+            done_event = asyncio.Event()
+            render_task = asyncio.create_task(
+                self._upload_progress_render_loop(
+                    call, state, labels, done_event,
+                    header=f"Uploading Xray-core logs for {_escape(name)}…",
+                )
+            )
             try:
-                await utils.answer_file(call, path, force_document=True,
-                                        file_name=f"xray_{name}_{label}",
-                                        caption=f"<b>{kind.title()} {label}:</b> <code>{name}</code>")
+                # Build list of InputFile-compatible objects with individual callbacks
+                import telethon.tl.types as _tlt  # noqa: F401 – just confirming telethon is here
+
+                # send_file accepts a list of paths as an album; one caption on
+                # the first file, progress_callback fires per-chunk for the whole
+                # upload session — we track by hooking one shared state dict,
+                # updated from a single callback (Telethon sends list as one
+                # multipart upload session, so current/total span all files).
+                shared_label = " + ".join(labels)
+                state[shared_label] = (0, 0)
+
+                await self._client.send_file(
+                    call.chat_id,
+                    paths,
+                    caption=f"<b>Xray-core logs:</b> <code>{_escape(name)}</code>",
+                    parse_mode="html",
+                    force_document=True,
+                    progress_callback=self._make_upload_progress_cb(state, shared_label),
+                )
+            except Exception as e:
+                logger.exception("[XR] album send_file failed: %s", e)
+            finally:
+                done_event.set()
+                render_task.cancel()
+        else:
+            # ── single file (daemon.log or only one xray log exists) ──
+            path, label = chosen[0]
+            state = {label: (0, 0)}
+            done_event = asyncio.Event()
+            render_task = asyncio.create_task(
+                self._upload_progress_render_loop(
+                    call, state, [label], done_event,
+                    header=f"Uploading {label} for {_escape(name)}…",
+                )
+            )
+            try:
+                await self._client.send_file(
+                    call.chat_id,
+                    path,
+                    caption=f"<b>{kind.title()} {label}:</b> <code>{_escape(name)}</code>",
+                    parse_mode="html",
+                    force_document=True,
+                    progress_callback=self._make_upload_progress_cb(state, label),
+                )
             except Exception as e:
                 logger.exception("[XR] send_file failed: %s", e)
+            finally:
+                done_event.set()
+                render_task.cancel()
 
-        markup = [
-            [{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}],
-        ]
         await call.edit(
             f"<b>Logs sent for {_escape(name)}</b>",
-            reply_markup=markup,
+            reply_markup=back_markup,
         )
 
     async def _cb_mask_site_menu(self, call: InlineCall, name: str):
