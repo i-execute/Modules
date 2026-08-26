@@ -1,14 +1,15 @@
-__version__ = (1, 3, 0)
+__version__ = (1, 1, 2)
 # meta developer: I_execute.t.me froked from @elisartix
 
 import asyncio
 import io
-import logging
 import os
-import random
 import re
-import sys
+import random
+import string
+import logging
 import tempfile
+import sys
 
 from .. import loader, utils
 from ..inline.types import InlineCall
@@ -122,10 +123,18 @@ class StickerClone(loader.Module):
             "<b>No Pack Name</b>\n"
             "<blockquote>Set the pack name first</blockquote>"
         ),
+        "fetching": (
+            "<b>Fetching Pack</b>\n"
+            "<blockquote>Getting sticker pack info...</blockquote>"
+        ),
+        "pack_empty": (
+            "<b>Empty Pack</b>\n"
+            "<blockquote>This sticker pack has no stickers</blockquote>"
+        ),
         "copying": (
             "<b>Copying</b>\n"
             "<blockquote>Progress: {current}/{total}\n"
-            "Pack: {name}{flood}</blockquote>"
+            "Pack: {name}</blockquote>"
         ),
         "done": (
             "<b>Done</b>\n"
@@ -149,6 +158,7 @@ class StickerClone(loader.Module):
             "<b>Error</b>\n"
             "<blockquote>{error}</blockquote>"
         ),
+        "status_set": "Set",
         "status_not_set": "Not set",
         "checking": "Checking...",
     }
@@ -217,10 +227,18 @@ class StickerClone(loader.Module):
             "<b>Нет названия</b>\n"
             "<blockquote>Сначала укажите название пака</blockquote>"
         ),
+        "fetching": (
+            "<b>Получаем пак</b>\n"
+            "<blockquote>Запрашиваем информацию о стикерпаке...</blockquote>"
+        ),
+        "pack_empty": (
+            "<b>Пустой пак</b>\n"
+            "<blockquote>В этом стикерпаке нет стикеров</blockquote>"
+        ),
         "copying": (
             "<b>Копирование</b>\n"
             "<blockquote>Прогресс: {current}/{total}\n"
-            "Пак: {name}{flood}</blockquote>"
+            "Пак: {name}</blockquote>"
         ),
         "done": (
             "<b>Готово</b>\n"
@@ -244,6 +262,7 @@ class StickerClone(loader.Module):
             "<b>Ошибка</b>\n"
             "<blockquote>{error}</blockquote>"
         ),
+        "status_set": "Задано",
         "status_not_set": "Не задано",
         "checking": "Проверяем...",
     }
@@ -255,6 +274,7 @@ class StickerClone(loader.Module):
             "source_documents": None,
             "new_short": None,
             "name": None,
+            "is_emoji": False,
         }
 
     async def client_ready(self, client, db):
@@ -267,9 +287,9 @@ class StickerClone(loader.Module):
 
     def _get_sticker_emoji(self, doc) -> str:
         try:
-            from telethon.tl.types import DocumentAttributeSticker
+            from telethon.tl.types import DocumentAttributeSticker, DocumentAttributeCustomEmoji
             for attr in doc.attributes:
-                if isinstance(attr, DocumentAttributeSticker):
+                if isinstance(attr, (DocumentAttributeSticker, DocumentAttributeCustomEmoji)):
                     return attr.alt or "⭐"
         except Exception:
             pass
@@ -325,7 +345,7 @@ class StickerClone(loader.Module):
                 timeout=60,
             )
             if r.returncode != 0:
-                logger.warning(f"[Stickerclone] ffmpeg rc={r.returncode}: {r.stderr.decode()[:200]}")
+                logger.warning(f"[Stickerclone] ffmpeg returned {r.returncode}: {r.stderr.decode()[:200]}")
                 return None
             with open(fout, "rb") as f:
                 data = f.read()
@@ -341,71 +361,7 @@ class StickerClone(loader.Module):
                     except Exception:
                         pass
 
-    async def _upload_with_floodwait(self, coro, call, current, total, name):
-        """
-        Выполняет корутину с обработкой FloodWait.
-        При флудвейте обновляет сообщение и ждет, затем повторяет.
-        """
-        from telethon.errors import FloodWaitError
-        while True:
-            try:
-                return await coro
-            except FloodWaitError as e:
-                wait = e.seconds
-                extra = random.randint(1, 10)
-                flood_line = f"\nGot floodwait, waiting {wait} + {extra} seconds"
-                try:
-                    await call.edit(
-                        self.strings["copying"].format(
-                            current=current,
-                            total=total,
-                            name=name,
-                            flood=flood_line,
-                        )
-                    )
-                except Exception:
-                    pass
-                await asyncio.sleep(wait + extra)
-
-    async def _upload_tgs(self, raw: bytes, emoji: str, call=None, current=0, total=0, name=""):
-        from telethon.tl.functions.messages import UploadMediaRequest
-        from telethon.tl.types import (
-            InputPeerSelf,
-            InputMediaUploadedDocument,
-            DocumentAttributeFilename,
-            DocumentAttributeSticker,
-            InputStickerSetEmpty,
-            InputDocument,
-        )
-        try:
-            buf = io.BytesIO(raw)
-            buf.name = "sticker.tgs"
-            uploaded = await self._client.upload_file(buf)
-            media = InputMediaUploadedDocument(
-                file=uploaded,
-                mime_type="application/x-tgsticker",
-                attributes=[
-                    DocumentAttributeFilename(file_name="sticker.tgs"),
-                    DocumentAttributeSticker(
-                        alt=emoji,
-                        stickerset=InputStickerSetEmpty(),
-                    ),
-                ],
-            )
-            if call is not None:
-                result = await self._upload_with_floodwait(
-                    self._client(UploadMediaRequest(peer=InputPeerSelf(), media=media)),
-                    call, current, total, name,
-                )
-            else:
-                result = await self._client(UploadMediaRequest(peer=InputPeerSelf(), media=media))
-            doc = result.document
-            return InputDocument(doc.id, doc.access_hash, doc.file_reference)
-        except Exception as e:
-            logger.error(f"[Stickerclone] _upload_tgs: {e}")
-            return None
-
-    async def _upload_doc(self, data: bytes, fname: str, animated: bool, size: int, call=None, current=0, total=0, name=""):
+    async def _upload_doc(self, data: bytes, fname: str, sticker_type: str, size: int, is_emoji: bool = False):
         from telethon.tl.functions.messages import UploadMediaRequest
         from telethon.tl.types import (
             InputPeerSelf,
@@ -413,90 +369,102 @@ class StickerClone(loader.Module):
             DocumentAttributeFilename,
             DocumentAttributeVideo,
             DocumentAttributeSticker,
+            DocumentAttributeCustomEmoji,
             DocumentAttributeImageSize,
             InputStickerSetEmpty,
             InputDocument,
         )
-        try:
-            buf = io.BytesIO(data)
-            buf.name = fname
-            uploaded = await self._client.upload_file(buf)
-            if animated:
-                media = InputMediaUploadedDocument(
-                    file=uploaded,
-                    mime_type="video/webm",
-                    attributes=[
-                        DocumentAttributeFilename(file_name=fname),
-                        DocumentAttributeVideo(
-                            duration=3, w=size, h=size,
-                            round_message=False, supports_streaming=True,
-                        ),
-                        DocumentAttributeSticker(alt="", stickerset=InputStickerSetEmpty()),
-                    ],
-                    nosound_video=True,
-                )
-            else:
-                media = InputMediaUploadedDocument(
-                    file=uploaded,
-                    mime_type="image/png",
-                    attributes=[
-                        DocumentAttributeFilename(file_name=fname),
-                        DocumentAttributeImageSize(w=size, h=size),
-                        DocumentAttributeSticker(alt="", stickerset=InputStickerSetEmpty()),
-                    ],
-                )
-            if call is not None:
-                result = await self._upload_with_floodwait(
-                    self._client(UploadMediaRequest(peer=InputPeerSelf(), media=media)),
-                    call, current, total, name,
-                )
-            else:
-                result = await self._client(UploadMediaRequest(peer=InputPeerSelf(), media=media))
-            doc = result.document
-            return InputDocument(doc.id, doc.access_hash, doc.file_reference)
-        except Exception as e:
-            logger.error(f"[Stickerclone] _upload_doc: {e}")
-            return None
+        buf = io.BytesIO(data)
+        buf.name = fname
+        uploaded = await self._client.upload_file(buf)
 
-    async def _process_sticker(self, doc, call=None, current=0, total=0, name=""):
+        if sticker_type == "tgs":
+            if is_emoji:
+                attr = DocumentAttributeCustomEmoji(alt="", stickerset=InputStickerSetEmpty(), free=True)
+            else:
+                attr = DocumentAttributeSticker(alt="", stickerset=InputStickerSetEmpty())
+            media = InputMediaUploadedDocument(
+                file=uploaded,
+                mime_type="application/x-tgsticker",
+                attributes=[
+                    DocumentAttributeFilename(file_name=fname),
+                    attr,
+                ],
+            )
+        elif sticker_type == "webm":
+            media = InputMediaUploadedDocument(
+                file=uploaded,
+                mime_type="video/webm",
+                attributes=[
+                    DocumentAttributeFilename(file_name=fname),
+                    DocumentAttributeVideo(
+                        duration=3, w=size, h=size,
+                        round_message=False, supports_streaming=True,
+                    ),
+                    DocumentAttributeSticker(alt="", stickerset=InputStickerSetEmpty()),
+                ],
+                nosound_video=True,
+            )
+        else:
+            media = InputMediaUploadedDocument(
+                file=uploaded,
+                mime_type="image/png",
+                attributes=[
+                    DocumentAttributeFilename(file_name=fname),
+                    DocumentAttributeImageSize(w=size, h=size),
+                    DocumentAttributeSticker(alt="", stickerset=InputStickerSetEmpty()),
+                ],
+            )
+        result = await self._client(UploadMediaRequest(peer=InputPeerSelf(), media=media))
+        doc = result.document
+        return InputDocument(doc.id, doc.access_hash, doc.file_reference)
+
+    async def _process_sticker(self, doc, is_emoji: bool):
+        from telethon.errors import FloodWaitError
         try:
             mime = doc.mime_type or ""
             buf = io.BytesIO()
             await self._client.download_file(doc, buf)
             raw = buf.getvalue()
+            logger.debug(f"[Stickerclone] Processing sticker mime={mime} size={len(raw)}")
 
             if mime == "application/x-tgsticker":
-                emoji = self._get_sticker_emoji(doc)
-                uploaded = await self._upload_tgs(raw, emoji, call, current, total, name)
+                if len(raw) > 512 * 1024:
+                    logger.warning(f"[Stickerclone] TGS too large: {len(raw)} bytes")
+                    return None, None
+                uploaded = await self._upload_doc(raw, "s.tgs", "tgs", 512, is_emoji)
                 return uploaded, "tgs"
 
             if mime == "video/webm":
                 if len(raw) <= 256 * 1024:
-                    uploaded = await self._upload_doc(raw, "s.webm", True, 512, call, current, total, name)
+                    uploaded = await self._upload_doc(raw, "s.webm", "webm", 512, is_emoji)
                     return uploaded, "webm"
                 data = await self._to_webm(raw, mime, 512)
                 if data:
-                    uploaded = await self._upload_doc(data, "s.webm", True, 512, call, current, total, name)
+                    uploaded = await self._upload_doc(data, "s.webm", "webm", 512, is_emoji)
                     return uploaded, "webm"
                 return None, None
 
             if mime in ("image/gif", "video/mp4"):
                 data = await self._to_webm(raw, mime, 512)
                 if data:
-                    uploaded = await self._upload_doc(data, "s.webm", True, 512, call, current, total, name)
+                    uploaded = await self._upload_doc(data, "s.webm", "webm", 512, is_emoji)
                     return uploaded, "webm"
                 data = await self._resize_static(raw, 512)
                 if data:
-                    uploaded = await self._upload_doc(data, "s.png", False, 512, call, current, total, name)
-                    return uploaded, "static"
+                    uploaded = await self._upload_doc(data, "s.png", "png", 512, is_emoji)
+                    return uploaded, "png"
                 return None, None
 
             data = await self._resize_static(raw, 512)
             if not data:
+                logger.warning(f"[Stickerclone] _resize_static returned None for mime={mime}")
                 return None, None
-            uploaded = await self._upload_doc(data, "s.png", False, 512, call, current, total, name)
-            return uploaded, "static"
+            uploaded = await self._upload_doc(data, "s.png", "png", 512, is_emoji)
+            return uploaded, "png"
 
+        except FloodWaitError:
+            raise
         except Exception as e:
             logger.error(f"[Stickerclone] _process_sticker error: {e}")
             return None, None
@@ -551,35 +519,41 @@ class StickerClone(loader.Module):
         await call.delete()
 
     async def _cb_set_source(self, call: InlineCall, query: str):
+        from telethon.tl.types import DocumentAttributeCustomEmoji
         link = query.strip()
         short_name = self._extract_short_name(link)
 
         if not short_name:
             await call.edit(
                 self.strings["source_invalid_format"],
-                reply_markup=[
-                    [{"text": self.strings["btn_retry"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"}],
-                    [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}],
-                ],
+                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"}],
+                              [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
             )
             return
 
         await call.edit(self.strings["checking"])
+        logger.info(f"[Stickerclone] Checking source pack: {short_name}")
         result = await self._try_resolve_pack(short_name)
 
         if not result or not result.documents:
             await call.edit(
                 self.strings["source_invalid_resolve"],
-                reply_markup=[
-                    [{"text": self.strings["btn_retry"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"}],
-                    [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}],
-                ],
+                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"}],
+                              [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
             )
             return
+
+        is_emoji = any(
+            isinstance(attr, DocumentAttributeCustomEmoji)
+            for doc in result.documents
+            for attr in doc.attributes
+        )
 
         self._state["source_link"] = link
         self._state["source_short"] = short_name
         self._state["source_documents"] = result.documents
+        self._state["is_emoji"] = is_emoji
+        logger.info(f"[Stickerclone] Source set: {short_name}, {len(result.documents)} stickers, is_emoji={is_emoji}")
 
         await call.edit(
             self.strings["source_set"].format(link=link, count=len(result.documents)),
@@ -593,27 +567,25 @@ class StickerClone(loader.Module):
         if not short_name:
             await call.edit(
                 self.strings["short_invalid_format"],
-                reply_markup=[
-                    [{"text": self.strings["btn_retry"], "input": self.strings["input_short"], "handler": self._cb_set_short, "style": "primary"}],
-                    [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}],
-                ],
+                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_short"], "handler": self._cb_set_short, "style": "primary"}],
+                              [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
             )
             return
 
         await call.edit(self.strings["checking"])
+        logger.info(f"[Stickerclone] Checking if short name is free: {short_name}")
         result = await self._try_resolve_pack(short_name)
 
         if result is not None:
             await call.edit(
                 self.strings["short_occupied"],
-                reply_markup=[
-                    [{"text": self.strings["btn_retry"], "input": self.strings["input_short"], "handler": self._cb_set_short, "style": "primary"}],
-                    [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}],
-                ],
+                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_short"], "handler": self._cb_set_short, "style": "primary"}],
+                              [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
             )
             return
 
         self._state["new_short"] = short_name
+        logger.info(f"[Stickerclone] New short name set: {short_name}")
 
         await call.edit(
             self.strings["short_set"].format(link=link),
@@ -623,32 +595,11 @@ class StickerClone(loader.Module):
     async def _cb_set_name(self, call: InlineCall, query: str):
         name = query.strip()
         self._state["name"] = name if name else None
+        logger.info(f"[Stickerclone] Name set: {name}")
         await call.edit(
             self.strings["name_set"].format(name=name),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
         )
-
-    async def _add_sticker_with_floodwait(self, coro, call, current, total, name):
-        from telethon.errors import FloodWaitError
-        while True:
-            try:
-                return await coro
-            except FloodWaitError as e:
-                wait = e.seconds
-                extra = random.randint(1, 10)
-                flood_line = f"\nGot floodwait, waiting {wait} + {extra} seconds"
-                try:
-                    await call.edit(
-                        self.strings["copying"].format(
-                            current=current,
-                            total=total,
-                            name=name,
-                            flood=flood_line,
-                        )
-                    )
-                except Exception:
-                    pass
-                await asyncio.sleep(wait + extra)
 
     async def _cb_start(self, call: InlineCall):
         if not self._state["source_documents"]:
@@ -675,74 +626,86 @@ class StickerClone(loader.Module):
         from telethon.tl.functions.stickers import CreateStickerSetRequest, AddStickerToSetRequest
         from telethon.tl.functions.messages import UninstallStickerSetRequest
         from telethon.tl.types import InputStickerSetShortName, InputStickerSetItem, InputUserSelf
-        from telethon.errors.rpcerrorlist import PackShortNameOccupiedError
+        from telethon.errors import FloodWaitError, PackShortNameOccupiedError
 
         documents = self._state["source_documents"]
         pack_title = self._state["name"]
         short_name = self._state["new_short"]
+        is_emoji = self._state.get("is_emoji", False)
         total = len(documents)
+
+        logger.info(f"[Stickerclone] Starting copy: title='{pack_title}' short='{short_name}' total={total} emojis={is_emoji}")
 
         pack_created = False
         copied = 0
         failed = 0
 
         for i, doc in enumerate(documents, 1):
-            try:
-                await call.edit(
-                    self.strings["copying"].format(
-                        current=i,
-                        total=total,
-                        name=pack_title,
-                        flood="",
-                    )
-                )
-            except Exception:
-                pass
+            while True:
+                try:
+                    await call.edit(self.strings["copying"].format(current=i, total=total, name=pack_title))
+                except Exception:
+                    pass
 
-            emoji = self._get_sticker_emoji(doc)
+                emoji = self._get_sticker_emoji(doc)
+                logger.debug(f"[Stickerclone] Sticker {i}/{total} emoji={emoji} mime={doc.mime_type}")
 
-            input_doc, stype = await self._process_sticker(doc, call, i, total, pack_title)
-            if input_doc is None:
-                failed += 1
-                continue
+                try:
+                    input_doc, sticker_type = await self._process_sticker(doc, is_emoji)
+                    if input_doc is None:
+                        failed += 1
+                        logger.warning(f"[Stickerclone] Sticker {i}/{total} process failed")
+                        break
 
-            try:
-                if not pack_created:
-                    kwargs = dict(
-                        user_id=InputUserSelf(),
-                        title=pack_title,
-                        short_name=short_name,
-                        stickers=[InputStickerSetItem(document=input_doc, emoji=emoji)],
-                    )
-                    if stype == "tgs":
-                        kwargs["animated"] = True
-                    elif stype == "webm":
-                        kwargs["videos"] = True
-
-                    await self._add_sticker_with_floodwait(
-                        self._client(CreateStickerSetRequest(**kwargs)),
-                        call, i, total, pack_title,
-                    )
-                    pack_created = True
-                    copied += 1
-                else:
-                    await self._add_sticker_with_floodwait(
-                        self._client(AddStickerToSetRequest(
+                    if not pack_created:
+                        await self._client(CreateStickerSetRequest(
+                            user_id=InputUserSelf(),
+                            title=pack_title,
+                            short_name=short_name,
+                            stickers=[InputStickerSetItem(document=input_doc, emoji=emoji)],
+                            emojis=is_emoji,
+                        ))
+                        pack_created = True
+                        copied += 1
+                        logger.info(f"[Stickerclone] Pack created: {short_name}")
+                    else:
+                        await self._client(AddStickerToSetRequest(
                             stickerset=InputStickerSetShortName(short_name=short_name),
                             sticker=InputStickerSetItem(document=input_doc, emoji=emoji),
-                        )),
-                        call, i, total, pack_title,
+                        ))
+                        copied += 1
+                    
+                    break
+
+                except FloodWaitError as e:
+                    wait_secs = e.seconds
+                    rand_secs = random.randint(1, 10)
+                    total_wait = wait_secs + rand_secs
+                    
+                    try:
+                        await call.edit(
+                            self.strings["copying"].format(current=i, total=total, name=pack_title) + 
+                            f"\n<blockquote>Got floodwait, waiting {wait_secs} + {rand_secs} seconds</blockquote>"
+                        )
+                    except Exception:
+                        pass
+                    
+                    logger.info(f"[Stickerclone] FloodWait {wait_secs}s, sleeping {total_wait}s")
+                    await asyncio.sleep(total_wait)
+                    continue
+
+                except PackShortNameOccupiedError:
+                    logger.warning(f"[Stickerclone] Short name occupied on creation: {short_name}")
+                    await call.edit(
+                        self.strings["short_occupied"],
+                        reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
                     )
-                    copied += 1
-            except PackShortNameOccupiedError:
-                await call.edit(
-                    self.strings["short_occupied"],
-                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
-                )
-                return
-            except Exception as e:
-                logger.error(f"[Stickerclone] Sticker {i}/{total} add error: {e}")
-                failed += 1
+                    return
+
+                except Exception as e:
+                    logger.error(f"[Stickerclone] Sticker {i}/{total} add error: {e}")
+                    failed += 1
+                    break
 
         if not pack_created:
             await call.edit(
@@ -764,7 +727,10 @@ class StickerClone(loader.Module):
             "source_documents": None,
             "new_short": None,
             "name": None,
+            "is_emoji": False,
         }
+
+        logger.info(f"[Stickerclone] Done. copied={copied} failed={failed} total={total}")
 
         if failed == 0:
             await call.edit(
