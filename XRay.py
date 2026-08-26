@@ -1297,6 +1297,15 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 pass
 
     async def _send_log(self, text: str):
+        log_dir = os.path.join(self._root, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"xray_{int(time.time())}.log")
+        try:
+            with open(log_file, "w") as f:
+                f.write(text)
+        except Exception as e:
+            logger.error(f"[XR] Failed to write log file: {e}")
+        
         if not self._logger_topic or not self._asset_channel:
             return
         try:
@@ -1308,7 +1317,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 message_thread_id=self._logger_topic.id,
             )
         except Exception as e:
-            logger.error(f"[XR] Failed to send log: {e}")
+            logger.error(f"[XR] Failed to send log to Telegram: {e}")
 
     def _log_user_data(self, user: Dict) -> Dict:
         return {
@@ -2109,21 +2118,6 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             if proc.returncode != 0:
                 return 0
 
-            if transport == "websocket":
-                active_peers = set()
-                for line in proc.stdout.splitlines():
-                    parts = line.split()
-                    if len(parts) < 2:
-                        continue
-                    peer = parts[-1]
-                    peer_ip = peer[1:].split("]", 1)[0] if peer.startswith("[") else peer.rsplit(":", 1)[0]
-                    try:
-                        if not ipaddress.ip_address(peer_ip).is_loopback:
-                            active_peers.add(peer)
-                    except ValueError:
-                        continue
-                return len(active_peers)
-
             unique_ips = set()
             for line in proc.stdout.strip().splitlines():
                 parts = line.split()
@@ -2136,13 +2130,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                     ip = peer.rsplit(":", 1)[0]
                 try:
                     addr = ipaddress.ip_address(ip)
-                    if not (
-                        addr.is_private
-                        or addr.is_loopback
-                        or addr.is_link_local
-                        or addr.is_multicast
-                        or addr.is_unspecified
-                    ):
+                    if not addr.is_loopback and not addr.is_link_local:
                         unique_ips.add(addr.compressed)
                 except ValueError:
                     continue
