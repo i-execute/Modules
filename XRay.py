@@ -353,7 +353,7 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre><code class=\"language-started\"></code></pre>"
+            "<pre><code class=\"language-xray started\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -363,7 +363,7 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
         "log_user_stopped": (
-            "<pre><code class=\"language-stoped\"></code></pre>"
+            "<pre><code class=\"language-xray stoped\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -715,7 +715,7 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre><code class=\"language-started\"></code></pre>"
+            "<pre><code class=\"language-xray started\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -725,7 +725,7 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
         "log_user_stopped": (
-            "<pre><code class=\"language-stoped\"></code></pre>"
+            "<pre><code class=\"language-xray stoped\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -994,13 +994,20 @@ class XRay(loader.Module):
         return f"{safe}{'-cf-tunnel' if kind == 'cf' else '-site' if kind == 'site' else ''}.service"
 
     @property
+    def _is_root(self) -> bool:
+        return os.name == "posix" and os.geteuid() == 0
+
+    @property
     def _systemd_user_dir(self) -> str:
+        if self._is_root:
+            return "/etc/systemd/system"
         return os.path.join(os.path.expanduser("~"), ".config", "systemd", "user")
 
     async def _systemctl(self, *args: str) -> Tuple[bool, str]:
         try:
+            cmd = ["systemctl"] if self._is_root else ["systemctl", "--user"]
             proc = await asyncio.create_subprocess_exec(
-                "systemctl", "--user", *args,
+                *cmd, *args,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             out, err = await proc.communicate()
@@ -1041,7 +1048,7 @@ class XRay(loader.Module):
             f"ExecStart={quoted}\n"
             "Restart=on-failure\nRestartSec=3\n"
             f"StandardOutput=append:{log_path}\nStandardError=append:{log_path}\n\n"
-            "[Install]\nWantedBy=default.target\n"
+            f"[Install]\nWantedBy={'multi-user.target' if self._is_root else 'default.target'}\n"
         )
         with open(os.path.join(self._systemd_user_dir, unit), "w", encoding="utf-8") as f:
             f.write(content)
@@ -1087,7 +1094,7 @@ from aiohttp import web, ClientSession, WSMsgType
 PATH = "__PATH__"
 BACKEND = "ws://127.0.0.1:__BACKEND_PORT__" + PATH
 GATE_JSX = "__MASK_URL__"
-LOADING_HTML = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Loading.html?v=loading-v4"
+LOADING_HTML = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Loading.html"
 
 async def fetch_text(url, timeout=10):
     def read():
