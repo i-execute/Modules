@@ -257,12 +257,13 @@ class Chunker(loader.Module):
         self._client = client
         self._db = db
         self._me = await client.get_me()
-        self._root = os.path.join(tempfile.gettempdir(), f"MCWorld_{self._me.id}")
+        tg_user_id = self._me.id
+        self._root = os.path.join(os.path.expanduser("~"), ".chunker_on_userbot", str(tg_user_id))
         self._chunker_path = os.path.join(self._root, "chunker-cli.jar")
-        os.makedirs(self._root, exist_ok=True)
+        os.makedirs(self._root, mode=0o700, exist_ok=True)
 
     def _chunker_installed(self):
-        return bool(self._chunker_path and os.path.isfile(self._chunker_path))
+        return bool(self._chunker_path and os.path.isfile(self._chunker_path) and os.access(self._chunker_path, os.X_OK))
 
     def _get_xmx_mb(self):
         try:
@@ -394,16 +395,25 @@ class Chunker(loader.Module):
             names = [a.get("name", "") for a in data.get("assets", [])]
             return False, f"No CLI jar in assets: {names}"
 
-        dl_path = os.path.join(self._root, "chunker-cli.jar")
-        p2 = await asyncio.create_subprocess_exec(
-            "wget", "-q", "--max-redirect=15", "-O", dl_path, download_url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, err2 = await asyncio.wait_for(p2.communicate(), timeout=300)
-        size = os.path.getsize(dl_path) if os.path.isfile(dl_path) else 0
-        if p2.returncode != 0 or size < 100_000:
-            return False, f"Download failed (size={size}): {err2.decode()[:200]}"
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".jar", prefix="chunker_", dir=self._root)
+        os.close(tmp_fd)
+        try:
+            p2 = await asyncio.create_subprocess_exec(
+                "wget", "-q", "--max-redirect=15", "-O", tmp_path, download_url,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, err2 = await asyncio.wait_for(p2.communicate(), timeout=300)
+            size = os.path.getsize(tmp_path) if os.path.isfile(tmp_path) else 0
+            if p2.returncode != 0 or size < 100_000:
+                return False, f"Download failed (size={size}): {err2.decode()[:200]}"
+            shutil.copy2(tmp_path, self._chunker_path)
+            os.chmod(self._chunker_path, 0o755)
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
         self._db.set("MCW", "chunker_version", tag)
         self._versions_cache = None

@@ -279,9 +279,10 @@ class WebDeployer(loader.Module):
         self._client = client
         self._db = db
         me = await client.get_me()
-        self._root = os.path.join(tempfile.gettempdir(), f"webdeploy_{me.id}")
+        tg_user_id = me.id
+        self._root = os.path.join(os.path.expanduser("~"), ".cloudflared_on_userbot", str(tg_user_id))
         self._cf_bin = os.path.join(self._root, "cloudflared")
-        os.makedirs(self._root, exist_ok=True)
+        os.makedirs(self._root, mode=0o700, exist_ok=True)
         for site_id in list(self._get_sites().keys()):
             site = self._get_sites()[site_id]
             pid = site.get("pid")
@@ -296,7 +297,7 @@ class WebDeployer(loader.Module):
             self._kill_site(site_id)
 
     def _cf_installed(self):
-        return bool(self._cf_bin and os.path.isfile(self._cf_bin))
+        return bool(self._cf_bin and os.path.isfile(self._cf_bin) and os.access(self._cf_bin, os.X_OK))
 
     def _cf_version(self):
         if not self._cf_installed():
@@ -408,17 +409,25 @@ class WebDeployer(loader.Module):
             names = [a.get("name", "") for a in data.get("assets", [])]
             return False, f"No binary '{asset_name}' in assets: {names}"
 
-        p = await asyncio.create_subprocess_exec(
-            "wget", "-q", "--max-redirect=15", "-O", self._cf_bin, download_url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, err = await asyncio.wait_for(p.communicate(), timeout=300)
-        size = os.path.getsize(self._cf_bin) if os.path.isfile(self._cf_bin) else 0
-        if p.returncode != 0 or size < 100_000:
-            return False, f"Download failed (size={size}): {err.decode()[:200]}"
-
-        os.chmod(self._cf_bin, os.stat(self._cf_bin).st_mode | stat.S_IEXEC)
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix="cloudflared_", dir=self._root)
+        os.close(tmp_fd)
+        try:
+            p = await asyncio.create_subprocess_exec(
+                "wget", "-q", "--max-redirect=15", "-O", tmp_path, download_url,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, err = await asyncio.wait_for(p.communicate(), timeout=300)
+            size = os.path.getsize(tmp_path) if os.path.isfile(tmp_path) else 0
+            if p.returncode != 0 or size < 100_000:
+                return False, f"Download failed (size={size}): {err.decode()[:200]}"
+            shutil.copy2(tmp_path, self._cf_bin)
+            os.chmod(self._cf_bin, 0o755)
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
         self._db.set("WebDeployer", "cf_version", tag)
         self._releases_cache = None
         return True, tag
