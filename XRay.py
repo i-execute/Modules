@@ -1319,7 +1319,6 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         }
 
     async def _reattach_processes(self):
-        """Discover services after a module/userbot reload without owning PIDs."""
         for name, user in self._users.items():
             unit = self._unit_name(name)
             if await self._unit_active(unit):
@@ -1329,6 +1328,42 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                     self._site_processes[name] = self._unit_name(name, "site")
                 if await self._unit_active(self._unit_name(name, "cf")):
                     self._tunnels[name] = self._unit_name(name, "cf")
+
+    async def _is_user_running(self, name: str) -> bool:
+        if name in self._processes:
+            return True
+        unit = self._unit_name(name)
+        return await self._unit_active(unit)
+
+    async def _get_active_count(self) -> int:
+        count = 0
+        for name in self._users:
+            if await self._is_user_running(name):
+                count += 1
+        return count
+
+    async def _get_user_uptime_async(self, name: str) -> str:
+        user = self._users.get(name)
+        if not user:
+            return "offline"
+        if not await self._is_user_running(name):
+            return "offline"
+        start = user.get("start_time", 0)
+        if start == 0:
+            return "n/a"
+        elapsed = int(time.time() - start)
+        d, rem = divmod(elapsed, 86400)
+        h, rem = divmod(rem, 3600)
+        m, s = divmod(rem, 60)
+        parts = []
+        if d:
+            parts.append(f"{d}d")
+        if h:
+            parts.append(f"{h}h")
+        if m:
+            parts.append(f"{m}m")
+        parts.append(f"{s}s")
+        return " ".join(parts)
 
     def _cloudflared_installed(self) -> bool:
         return (
@@ -2338,8 +2373,9 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         )
 
     async def _cb_users_menu(self, call: InlineCall):
+        await self._reattach_processes()
         total = len(self._users)
-        active = len(self._processes)
+        active = await self._get_active_count()
         
         text = self.strings["users_menu"].format(
             total=total,
@@ -2349,7 +2385,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         markup = []
         
         for name, user in self._users.items():
-            status = self.strings["status_online"] if name in self._processes else self.strings["status_offline"]
+            is_run = await self._is_user_running(name)
+            status = self.strings["status_online"] if is_run else self.strings["status_offline"]
             markup.append([{
                 "text": self.strings["user_item"].format(
                     status=status,
@@ -2376,8 +2413,9 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         await call.edit(text, reply_markup=markup)
 
     async def _cb_main_menu(self, call: InlineCall):
+        await self._reattach_processes()
         total = len(self._users)
-        active = len(self._processes)
+        active = await self._get_active_count()
         version = await self._get_xray_version()
         cf_version = await self._get_cloudflared_version()
         
@@ -2416,7 +2454,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             await call.answer("User not found", show_alert=True)
             return
         
-        is_running = name in self._processes
+        await self._reattach_processes()
+        is_running = await self._is_user_running(name)
         status = "STOPPED AND WAITING FOR RESTART" if user.get("restart_required") else (self.strings["status_online"] if is_running else self.strings["status_offline"])
         transport = user["transport"].upper()
         limit = user.get("device_limit", 0)
@@ -2429,7 +2468,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             )
         tls_host = user.get("tunnel_host", "n/a") if user.get("transport") == "websocket" else "n/a"
         
-        uptime = self._get_user_uptime(name)
+        uptime = await self._get_user_uptime_async(name)
         autostart = user.get("autostart", False)
         autostart_text = self.strings["btn_autostart_on"].split(":")[1].strip() if autostart else self.strings["btn_autostart_off"].split(":")[1].strip()
         
@@ -2743,10 +2782,13 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 for label in labels:
                     cur, tot = state.get(label, (0, 0))
                     cur_mb = cur / 1024 / 1024
-                    tot_mb = tot / 1024 / 1024
-                    pct = cur_mb / tot_mb * 100 if tot_mb > 0 else 0.0
+                    tot_mb = tot / 1024 / 1024 if tot else cur_mb
+                    pct = (cur_mb / tot_mb * 100) if tot_mb > 0 else 0.0
                     lines.append(f"  {label}: {pct:.0f}% ({cur_mb:.1f}/{tot_mb:.1f} MB)")
-                await call.edit("\n".join(lines))
+                try:
+                    await call.edit("\n".join(lines))
+                except Exception:
+                    pass
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -2770,30 +2812,64 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
 
         back_markup = [[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
 
+        labels = [label for _, label in chosen]
+        paths = [p for p, _ in chosen]
+
+        state = {}
+        done_event = asyncio.Event()
+
+        if len(chosen) > 1:
+            shared_label = " + ".join(labels)
+            state[shared_label] = (0, 0)
+            header = f"Uploading Xray-core logs for {_escape(name)}"
+            render_labels = [shared_label]
+            cb_label = shared_label
+            send_paths = paths
+            caption = f"<b>Xray-core logs:</b> <code>{_escape(name)}</code>"
+        else:
+            label = labels[0]
+            state[label] = (0, 0)
+            header = f"Uploading {label} for {_escape(name)}"
+            render_labels = [label]
+            cb_label = label
+            send_paths = paths[0]
+            caption = f"<b>{kind.title()} {label}:</b> <code>{_escape(name)}</code>"
+
+        render_task = asyncio.create_task(
+            self._upload_progress_render_loop(call, state, render_labels, done_event, header)
+        )
+
         try:
-            for fpath, label in chosen:
-                try:
-                    await utils.answer_file(
-                        call,
+            cb = self._make_upload_progress_cb(state, cb_label)
+            await self._client.send_file(
+                call.chat_id,
+                send_paths,
+                caption=caption,
+                parse_mode="html",
+                force_document=True,
+                progress_callback=cb,
+            )
+        except Exception as e:
+            logger.exception(f"[XR] album send_file failed: {e}")
+            try:
+                for fpath, label in chosen:
+                    await self._client.send_file(
+                        call.chat_id,
                         fpath,
                         caption=f"<b>{kind.title()} {label}:</b> <code>{_escape(name)}</code>",
+                        parse_mode="html",
                         force_document=True,
                     )
-                    await asyncio.sleep(0.5)
-                except Exception as e:
-                    logger.exception(f"[XR] send_file failed for {label}: %s", e)
-                    try:
-                        await self._client.send_file(
-                            call.chat_id,
-                            fpath,
-                            caption=f"<b>{kind.title()} {label}:</b> <code>{_escape(name)}</code>",
-                            parse_mode="html",
-                            force_document=True,
-                        )
-                    except Exception as e2:
-                        logger.exception(f"[XR] fallback send_file failed for {label}: %s", e2)
-        except Exception as e:
-            logger.exception(f"[XR] logs sending failed: %s", e)
+                    await asyncio.sleep(0.3)
+            except Exception as e2:
+                logger.exception(f"[XR] fallback single send failed: {e2}")
+        finally:
+            done_event.set()
+            render_task.cancel()
+            try:
+                await render_task
+            except asyncio.CancelledError:
+                pass
 
         await call.edit(
             f"<b>Logs sent for {_escape(name)}</b>",
@@ -3306,10 +3382,12 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
     @loader.command()
     async def xr(self, message):
         """XRay multi-user VPN manager"""
+        await self._reattach_processes()
+        active_cnt = await self._get_active_count()
         await self.inline.form(
             text=self.strings["main_menu"].format(
                 total=len(self._users),
-                active=len(self._processes),
+                active=active_cnt,
                 version=await self._get_xray_version(),
                 cloudflared_version=await self._get_cloudflared_version(),
             ),

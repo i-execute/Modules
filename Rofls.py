@@ -1,6 +1,6 @@
 __version__ = (1, 0, 1)
 # meta developer: I_execute.t.me
-# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Rofls/Down.jpeg
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Rofls/MetaBanner.jpeg
 
 import io
 import os
