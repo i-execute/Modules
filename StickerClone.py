@@ -1,14 +1,15 @@
-__version__ = (1, 1, 0)
+__version__ = (1, 2, 0)
 # meta developer: I_execute.t.me froked from @elisartix
 
+import gzip
 import io
-import os
-import re
-import random
-import string
+import json
 import logging
-import tempfile
+import os
+import random
+import re
 import sys
+import tempfile
 
 from .. import loader, utils
 from ..inline.types import InlineCall
@@ -157,11 +158,6 @@ class StickerClone(loader.Module):
             "<b>Error</b>\n"
             "<blockquote>{error}</blockquote>"
         ),
-        "tgs_unsupported": (
-            "<b>Unsupported Pack</b>\n"
-            "<blockquote>This pack contains .tgs stickers.\n"
-            "This module does not support .tgs sticker packs.</blockquote>"
-        ),
         "status_set": "Set",
         "status_not_set": "Not set",
         "checking": "Checking...",
@@ -266,11 +262,6 @@ class StickerClone(loader.Module):
             "<b>Ошибка</b>\n"
             "<blockquote>{error}</blockquote>"
         ),
-        "tgs_unsupported": (
-            "<b>Пак не поддерживается</b>\n"
-            "<blockquote>Этот пак содержит .tgs стикеры.\n"
-            "Модуль не работает с такими наборами стикеров.</blockquote>"
-        ),
         "status_set": "Задано",
         "status_not_set": "Не задано",
         "checking": "Проверяем...",
@@ -369,6 +360,38 @@ class StickerClone(loader.Module):
                     except Exception:
                         pass
 
+    async def _upload_tgs(self, raw: bytes, emoji: str):
+        from telethon.tl.functions.messages import UploadMediaRequest
+        from telethon.tl.types import (
+            InputPeerSelf,
+            InputMediaUploadedDocument,
+            DocumentAttributeFilename,
+            DocumentAttributeSticker,
+            InputStickerSetEmpty,
+            InputDocument,
+        )
+        try:
+            buf = io.BytesIO(raw)
+            buf.name = "sticker.tgs"
+            uploaded = await self._client.upload_file(buf)
+            media = InputMediaUploadedDocument(
+                file=uploaded,
+                mime_type="application/x-tgsticker",
+                attributes=[
+                    DocumentAttributeFilename(file_name="sticker.tgs"),
+                    DocumentAttributeSticker(
+                        alt=emoji,
+                        stickerset=InputStickerSetEmpty(),
+                    ),
+                ],
+            )
+            result = await self._client(UploadMediaRequest(peer=InputPeerSelf(), media=media))
+            doc = result.document
+            return InputDocument(doc.id, doc.access_hash, doc.file_reference)
+        except Exception as e:
+            logger.error(f"[Stickerclone] _upload_tgs: {e}")
+            return None
+
     async def _upload_doc(self, data: bytes, fname: str, animated: bool, size: int):
         from telethon.tl.functions.messages import UploadMediaRequest
         from telethon.tl.types import (
@@ -420,37 +443,42 @@ class StickerClone(loader.Module):
             raw = buf.getvalue()
             logger.debug(f"[Stickerclone] Processing sticker mime={mime} size={len(raw)}")
 
+            if mime == "application/x-tgsticker":
+                emoji = self._get_sticker_emoji(doc)
+                uploaded = await self._upload_tgs(raw, emoji)
+                return uploaded, "tgs"
+
             if mime == "video/webm":
                 if len(raw) <= 256 * 1024:
                     uploaded = await self._upload_doc(raw, "s.webm", True, 512)
-                    return uploaded, True
+                    return uploaded, "webm"
                 data = await self._to_webm(raw, mime, 512)
                 if data:
                     uploaded = await self._upload_doc(data, "s.webm", True, 512)
-                    return uploaded, True
-                return None, False
+                    return uploaded, "webm"
+                return None, None
 
             if mime in ("image/gif", "video/mp4"):
                 data = await self._to_webm(raw, mime, 512)
                 if data:
                     uploaded = await self._upload_doc(data, "s.webm", True, 512)
-                    return uploaded, True
+                    return uploaded, "webm"
                 data = await self._resize_static(raw, 512)
                 if data:
                     uploaded = await self._upload_doc(data, "s.png", False, 512)
-                    return uploaded, False
-                return None, False
+                    return uploaded, "static"
+                return None, None
 
             data = await self._resize_static(raw, 512)
             if not data:
                 logger.warning(f"[Stickerclone] _resize_static returned None for mime={mime}")
-                return None, False
+                return None, None
             uploaded = await self._upload_doc(data, "s.png", False, 512)
-            return uploaded, False
+            return uploaded, "static"
 
         except Exception as e:
             logger.error(f"[Stickerclone] _process_sticker error: {e}")
-            return None, False
+            return None, None
 
     async def _try_resolve_pack(self, short_name: str):
         from telethon.tl.functions.messages import GetStickerSetRequest
@@ -508,34 +536,29 @@ class StickerClone(loader.Module):
         if not short_name:
             await call.edit(
                 self.strings["source_invalid_format"],
-                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"}],
-                              [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
+                reply_markup=[
+                    [{"text": self.strings["btn_retry"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"}],
+                    [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}],
+                ],
             )
             return
 
         await call.edit(self.strings["checking"])
-        logger.info(f"[Stickerclone] Checking source pack: {short_name}")
         result = await self._try_resolve_pack(short_name)
 
         if not result or not result.documents:
             await call.edit(
                 self.strings["source_invalid_resolve"],
-                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"}],
-                              [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
-            )
-            return
-
-        if any(doc.mime_type == "application/x-tgsticker" for doc in result.documents):
-            await call.edit(
-                self.strings["tgs_unsupported"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
+                reply_markup=[
+                    [{"text": self.strings["btn_retry"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"}],
+                    [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}],
+                ],
             )
             return
 
         self._state["source_link"] = link
         self._state["source_short"] = short_name
         self._state["source_documents"] = result.documents
-        logger.info(f"[Stickerclone] Source set: {short_name}, {len(result.documents)} stickers")
 
         await call.edit(
             self.strings["source_set"].format(link=link, count=len(result.documents)),
@@ -549,25 +572,27 @@ class StickerClone(loader.Module):
         if not short_name:
             await call.edit(
                 self.strings["short_invalid_format"],
-                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_short"], "handler": self._cb_set_short, "style": "primary"}],
-                              [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
+                reply_markup=[
+                    [{"text": self.strings["btn_retry"], "input": self.strings["input_short"], "handler": self._cb_set_short, "style": "primary"}],
+                    [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}],
+                ],
             )
             return
 
         await call.edit(self.strings["checking"])
-        logger.info(f"[Stickerclone] Checking if short name is free: {short_name}")
         result = await self._try_resolve_pack(short_name)
 
         if result is not None:
             await call.edit(
                 self.strings["short_occupied"],
-                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_short"], "handler": self._cb_set_short, "style": "primary"}],
-                              [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
+                reply_markup=[
+                    [{"text": self.strings["btn_retry"], "input": self.strings["input_short"], "handler": self._cb_set_short, "style": "primary"}],
+                    [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}],
+                ],
             )
             return
 
         self._state["new_short"] = short_name
-        logger.info(f"[Stickerclone] New short name set: {short_name}")
 
         await call.edit(
             self.strings["short_set"].format(link=link),
@@ -577,7 +602,6 @@ class StickerClone(loader.Module):
     async def _cb_set_name(self, call: InlineCall, query: str):
         name = query.strip()
         self._state["name"] = name if name else None
-        logger.info(f"[Stickerclone] Name set: {name}")
         await call.edit(
             self.strings["name_set"].format(name=name),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
@@ -615,8 +639,6 @@ class StickerClone(loader.Module):
         short_name = self._state["new_short"]
         total = len(documents)
 
-        logger.info(f"[Stickerclone] Starting copy: title='{pack_title}' short='{short_name}' total={total}")
-
         pack_created = False
         copied = 0
         failed = 0
@@ -628,9 +650,8 @@ class StickerClone(loader.Module):
                 pass
 
             emoji = self._get_sticker_emoji(doc)
-            logger.debug(f"[Stickerclone] Sticker {i}/{total} emoji={emoji} mime={doc.mime_type}")
 
-            input_doc, animated = await self._process_sticker(doc)
+            input_doc, stype = await self._process_sticker(doc)
             if input_doc is None:
                 failed += 1
                 logger.warning(f"[Stickerclone] Sticker {i}/{total} process failed")
@@ -638,15 +659,19 @@ class StickerClone(loader.Module):
 
             try:
                 if not pack_created:
-                    await self._client(CreateStickerSetRequest(
+                    kwargs = dict(
                         user_id=InputUserSelf(),
                         title=pack_title,
                         short_name=short_name,
                         stickers=[InputStickerSetItem(document=input_doc, emoji=emoji)],
-                    ))
+                    )
+                    if stype == "tgs":
+                        kwargs["animated"] = True
+                    elif stype == "webm":
+                        kwargs["videos"] = True
+                    await self._client(CreateStickerSetRequest(**kwargs))
                     pack_created = True
                     copied += 1
-                    logger.info(f"[Stickerclone] Pack created: {short_name}")
                 else:
                     await self._client(AddStickerToSetRequest(
                         stickerset=InputStickerSetShortName(short_name=short_name),
@@ -654,7 +679,6 @@ class StickerClone(loader.Module):
                     ))
                     copied += 1
             except PackShortNameOccupiedError:
-                logger.warning(f"[Stickerclone] Short name occupied on creation: {short_name}")
                 await call.edit(
                     self.strings["short_occupied"],
                     reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}]],
@@ -685,8 +709,6 @@ class StickerClone(loader.Module):
             "new_short": None,
             "name": None,
         }
-
-        logger.info(f"[Stickerclone] Done. copied={copied} failed={failed} total={total}")
 
         if failed == 0:
             await call.edit(
