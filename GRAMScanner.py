@@ -1,9 +1,8 @@
-__version__ = (1, 2, 0)
+__version__ = (1, 3, 0)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/GRAMScanner/MetaBanner.jpeg
 
 import re
-import time
 import logging
 import asyncio
 import datetime
@@ -27,8 +26,6 @@ BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/GRAMS
 TONAPI_BASE = "https://tonapi.io/v2"
 
 GRAM_ADDR_RE = re.compile(r"^[UEk0-9A-Za-z_-]{48}$")
-
-CACHE_TTL = 120
 
 
 def escape_html(t):
@@ -339,48 +336,20 @@ class GRAMScanner(loader.Module):
     }
 
     def __init__(self):
-        self.config = loader.ModuleConfig(
-            loader.ConfigValue(
-                "USE_CACHE",
-                True,
-                "If True uses cache for wallet data, if False fetches fresh data every time",
-                validator=loader.validators.Boolean(),
-            ),
-        )
         self._pending = {}
-        self._cache = {}
 
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
 
-    def _cache_get(self, key):
-        if not self.config["USE_CACHE"]:
-            return None
-        entry = self._cache.get(key)
-        if not entry:
-            return None
-        if time.time() - entry.get("ts", 0) > CACHE_TTL:
-            self._cache.pop(key, None)
-            return None
-        return entry.get("data")
-
-    def _cache_set(self, key, data):
-        self._cache[key] = {"data": data, "ts": time.time()}
-
-    async def _scan_task(self, addr, cache_key):
+    async def _scan_task(self, addr):
         try:
             result = await scan_wallet(addr)
             if not result:
-                data = {"error": self.strings["err_not_found"]}
-            else:
-                data = {"message": build_message(result), "addr": addr}
-            self._cache_set(cache_key, data)
-            return data
+                return {"error": self.strings["err_not_found"]}
+            return {"message": build_message(result), "addr": addr}
         except Exception as e:
-            data = {"error": str(e)[:80]}
-            self._cache_set(cache_key, data)
-            return data
+            return {"error": str(e)[:80]}
 
     def _make_web_document(self, url, mime_type="image/png"):
         return InputWebDocument(
@@ -418,7 +387,7 @@ class GRAMScanner(loader.Module):
         if not text:
             await query.answer(
                 results=[self._make_article(
-                    f"h_{int(time.time())}",
+                    "hint",
                     self.strings["hint_title"],
                     self.strings["hint_desc"],
                     self.strings["hint_msg"],
@@ -432,7 +401,7 @@ class GRAMScanner(loader.Module):
         if not GRAM_ADDR_RE.match(addr):
             await query.answer(
                 results=[self._make_article(
-                    f"inv_{int(time.time())}",
+                    "inv",
                     self.strings["invalid_title"],
                     self.strings["invalid_desc"],
                     self.strings["invalid_msg"],
@@ -442,50 +411,21 @@ class GRAMScanner(loader.Module):
             )
             return
 
-        cache_key = f"gram_{addr}"
+        task_key = f"gram_{addr}"
 
-        cached = self._cache_get(cache_key)
-        if cached:
-            if "error" in cached:
-                await query.answer(
-                    results=[self._make_article(
-                        f"e_{int(time.time())}",
-                        self.strings["err_title"],
-                        str(cached["error"])[:100],
-                        f"<b>GRAMScanner:</b> {escape_html(str(cached['error']))}",
-                    )],
-                    cache_time=0,
-                    private=True,
-                )
-                return
-            if "message" in cached:
-                await query.answer(
-                    results=[self._make_article(
-                        f"r_{int(time.time())}",
-                        "GRAMScanner",
-                        f"Wallet: {cached.get('addr', '?')[:20]}...",
-                        cached["message"],
-                    )],
-                    cache_time=0,
-                    private=True,
-                )
-                return
-
-        if not self.config["USE_CACHE"]:
-            self._pending.pop(cache_key, None)
-
-        if cache_key in self._pending:
-            fut = self._pending[cache_key]
+        if task_key in self._pending:
+            fut = self._pending[task_key]
             if fut.done():
-                self._pending.pop(cache_key, None)
+                self._pending.pop(task_key, None)
                 try:
                     res = fut.result()
                 except Exception:
                     res = {"error": "Internal error"}
+
                 if "error" in res:
                     await query.answer(
                         results=[self._make_article(
-                            f"e_{int(time.time())}",
+                            "err",
                             self.strings["err_title"],
                             str(res["error"])[:100],
                             f"<b>GRAMScanner:</b> {escape_html(str(res['error']))}",
@@ -496,7 +436,7 @@ class GRAMScanner(loader.Module):
                 elif "message" in res:
                     await query.answer(
                         results=[self._make_article(
-                            f"r_{int(time.time())}",
+                            "res",
                             "GRAMScanner",
                             f"Wallet: {res.get('addr', '?')[:20]}...",
                             res["message"],
@@ -507,7 +447,7 @@ class GRAMScanner(loader.Module):
                 else:
                     await query.answer(
                         results=[self._make_article(
-                            f"e_{int(time.time())}",
+                            "unk",
                             self.strings["err_title"],
                             "Unknown error",
                             "<b>GRAMScanner:</b> Unknown error",
@@ -516,9 +456,10 @@ class GRAMScanner(loader.Module):
                         private=True,
                     )
                 return
+
             await query.answer(
                 results=[self._make_article(
-                    f"ld_{int(time.time())}",
+                    "ld",
                     self.strings["loading_title"],
                     self.strings["loading_desc"],
                     self.strings["loading_msg"],
@@ -528,12 +469,11 @@ class GRAMScanner(loader.Module):
             )
             return
 
-        self._pending[cache_key] = asyncio.ensure_future(
-            self._scan_task(addr, cache_key)
-        )
+        self._pending[task_key] = asyncio.ensure_future(self._scan_task(addr))
+
         await query.answer(
             results=[self._make_article(
-                f"ld_{int(time.time())}",
+                "ld",
                 self.strings["loading_title"],
                 self.strings["loading_desc"],
                 self.strings["loading_msg"],
@@ -546,4 +486,3 @@ class GRAMScanner(loader.Module):
         for fut in self._pending.values():
             fut.cancel()
         self._pending.clear()
-        self._cache.clear()
