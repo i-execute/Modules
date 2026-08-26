@@ -1,4 +1,4 @@
-__version__ = (4, 2, 0)
+__version__ = (4, 2, 1)
 # meta developer: I_execute.t.me 
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
