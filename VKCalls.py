@@ -328,18 +328,6 @@ class VKCalls(loader.Module):
                 "VK user access_token",
                 validator=loader.validators.Hidden(),
             ),
-            loader.ConfigValue(
-                "VK_APP_ID",
-                VK_DEFAULT_APP_ID,
-                "VK OAuth app_id",
-                validator=loader.validators.Integer(minimum=1),
-            ),
-            loader.ConfigValue(
-                "VK_SCOPE",
-                VK_DEFAULT_SCOPE,
-                "OAuth scope string",
-                validator=loader.validators.String(),
-            ),
         )
         self._vk = VKCallsAPIClient()
         self._db = None

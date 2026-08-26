@@ -1,5 +1,5 @@
 __version__ = (1, 1, 0)
-# meta developer: I_execute.t.me
+# meta developer: I_execute.t.me forked from @zetmodules
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Rofls/MetaBanner.jpeg
 
 import io
