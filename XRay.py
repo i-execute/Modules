@@ -1296,15 +1296,17 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             except OSError:
                 pass
 
-    async def _send_log(self, text: str):
-        log_dir = os.path.join(self._root, "logs")
-        os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, f"xray_{int(time.time())}.log")
-        try:
-            with open(log_file, "w") as f:
-                f.write(text)
-        except Exception as e:
-            logger.error(f"[XR] Failed to write log file: {e}")
+    async def _send_log(self, text: str, name: str = None):
+        """Send log to Telegram forum topic and save to file."""
+        if name:
+            user_dir = os.path.join(self._root, "users", name)
+            os.makedirs(user_dir, exist_ok=True)
+            log_file = os.path.join(user_dir, f"daemon.log")
+            try:
+                with open(log_file, "a") as f:
+                    f.write(f"[{int(time.time())}] {text}\n")
+            except Exception as e:
+                logger.error(f"[XR] Failed to write daemon log for {name}: {e}")
         
         if not self._logger_topic or not self._asset_channel:
             return
@@ -2072,7 +2074,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
 
             self._save_users()
             await self._send_log(
-                self.strings["log_user_started"].format(**self._log_user_data(user))
+                self.strings["log_user_started"].format(**self._log_user_data(user)),
+                name=name
             )
 
             return True, ""
@@ -2099,7 +2102,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 self.strings["log_user_stopped"].format(
                     **self._log_user_data(user),
                     reason=_escape(reason),
-                )
+                ),
+                name=name
             )
         
         return True
@@ -2168,7 +2172,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                                 **self._log_user_data(user),
                                 limit=limit,
                                 active=active,
-                            )
+                            ),
+                            name=name
                         )
                         
                         try:
@@ -2602,7 +2607,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 pass
         await self._systemctl("daemon-reload")
         await self._send_log(
-            self.strings["log_user_deleted"].format(**self._log_user_data(user))
+            self.strings["log_user_deleted"].format(**self._log_user_data(user)),
+            name=name
         )
         
         user_dir = os.path.join(self._root, "users", name)
