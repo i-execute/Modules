@@ -146,7 +146,21 @@ def _resolve_avatar(data):
         return src
 
 
-def _make_petpet_webm(src_buf):
+def _apply_circle_mask(src_buf):
+    img = Image.open(src_buf).convert("RGBA").resize((512, 512))
+    mask = Image.new("L", (512, 512), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((0, 0, 512, 512), fill=255)
+    img.putalpha(mask)
+    result = io.BytesIO()
+    img.save(result, format="PNG")
+    result.seek(0)
+    return result
+
+
+def _make_petpet_webm(src_buf, circle=False):
+    if circle:
+        src_buf = _apply_circle_mask(src_buf)
     g = io.BytesIO()
     ppg.make(src_buf, g)
     g.seek(0)
@@ -279,37 +293,19 @@ class RoflsMod(loader.Module):
         "btn_close": "Закрыть",
     }
 
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "MAKE_CIRCLE_IN_PETPET",
+                False,
+                "If True, avatar will be cropped into a circle in petpet sticker",
+                validator=loader.validators.Boolean(),
+            ),
+        )
+
     async def _get_sn(self, client):
         me = await client.get_me()
         return f"petpetpackby_{me.id}"
-
-    async def _cb_pack_info(self, call):
-        client = self._client
-        sn = await self._get_sn(client)
-        sticker_ids = self.get("sticker_ids", [])
-        try:
-            ss = InputStickerSetShortName(sn)
-            sticker_set = await client(GetStickerSetRequest(ss, 0))
-            count = len(sticker_set.documents)
-            link = f"https://t.me/addstickers/{sn}"
-            text = self.strings["pack_info"].format(
-                count=count,
-                tracked=len(sticker_ids),
-                link=link,
-            )
-        except StickersetInvalidError:
-            text = self.strings["pack_none"]
-        except Exception:
-            text = self.strings["pack_err"]
-
-        await call.edit(
-            text,
-            reply_markup=[
-                [{"text": self.strings["btn_delete_pack"], "callback": self._cb_delete_pack, "style": "danger"}],
-                [{"text": self.strings["btn_delete_last"], "callback": self._cb_delete_last, "style": "primary"}],
-                [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "primary"}],
-            ],
-        )
 
     @loader.command(
         ru_doc="Ответьте на пользователя для petpet стикера, или без реплая для управления паком",
@@ -378,8 +374,9 @@ class RoflsMod(loader.Module):
                 )
                 return
 
+            circle = self.config["MAKE_CIRCLE_IN_PETPET"]
             loop = asyncio.get_event_loop()
-            w = await loop.run_in_executor(None, _make_petpet_webm, src)
+            w = await loop.run_in_executor(None, _make_petpet_webm, src, circle)
             if not w:
                 await message.client.send_message(
                     message.chat_id,
