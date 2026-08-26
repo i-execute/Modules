@@ -218,46 +218,98 @@ class RoflsMod(loader.Module):
 
     strings = {
         "name": "Rofls",
-        "no_reply": "Reply to a user",
-        "no_uid": "Cannot get user ID",
-        "making": "Making petpet...",
-        "no_avatar": "No avatar",
-        "avatar_err": "Cannot process avatar",
-        "ffmpeg_err": "FFmpeg error",
-        "error": "Error: <code>{}</code>",
-        "pack_none": "<b>PetPet Pack</b>\nPack does not exist yet.",
-        "pack_info": "<b>PetPet Pack</b>\nStickers: <code>{count}</code>\nTracked: <code>{tracked}</code>\n<a href=\"{link}\">Open pack</a>",
-        "pack_err": "<b>PetPet Pack</b>\nNo pack info available.",
+        "no_reply": "<b>Error:</b> Reply to a user",
+        "no_uid": "<b>Error:</b> Cannot get user ID",
+        "no_avatar": "<b>Error:</b> No avatar",
+        "avatar_err": "<b>Error:</b> Cannot process avatar",
+        "ffmpeg_err": "<b>Error:</b> FFmpeg error",
+        "error": "<b>Error:</b>\n<blockquote>{}</blockquote>",
+        "pack_info": (
+            "<b>PetPet Pack</b>\n"
+            "<blockquote>"
+            "Stickers: <code>{count}</code>\n"
+            "Tracked: <code>{tracked}</code>\n"
+            "<a href=\"{link}\">Open pack</a>"
+            "</blockquote>"
+        ),
+        "pack_none": (
+            "<b>PetPet Pack</b>\n"
+            "<blockquote>Pack does not exist yet.</blockquote>"
+        ),
+        "pack_err": (
+            "<b>PetPet Pack</b>\n"
+            "<blockquote>No pack info available.</blockquote>"
+        ),
+        "pack_cleared": "<b>Pack cleared:</b>\n<blockquote><code>{}</code></blockquote>",
+        "no_stickers": "<b>Error:</b> No stickers to remove",
+        "last_removed": "<b>Last sticker removed</b>",
         "btn_delete_pack": "Delete Pack",
         "btn_delete_last": "Delete Last Sticker",
         "btn_close": "Close",
-        "pack_cleared": "<b>Pack cleared:</b> <code>{}</code>",
-        "no_stickers": "No stickers to remove",
-        "last_removed": "Last sticker removed",
     }
 
     strings_ru = {
-        "no_reply": "Ответьте на сообщение пользователя",
-        "no_uid": "Не удалось получить ID пользователя",
-        "making": "Создаю petpet...",
-        "no_avatar": "Нет аватара",
-        "avatar_err": "Не удалось обработать аватар",
-        "ffmpeg_err": "Ошибка FFmpeg",
-        "error": "Ошибка: <code>{}</code>",
-        "pack_none": "<b>PetPet Pack</b>\nПак ещё не создан.",
-        "pack_info": "<b>PetPet Pack</b>\nСтикеров: <code>{count}</code>\nОтслеживается: <code>{tracked}</code>\n<a href=\"{link}\">Открыть пак</a>",
-        "pack_err": "<b>PetPet Pack</b>\nНет данных о паке.",
+        "no_reply": "<b>Ошибка:</b> Ответьте на сообщение пользователя",
+        "no_uid": "<b>Ошибка:</b> Не удалось получить ID пользователя",
+        "no_avatar": "<b>Ошибка:</b> Нет аватара",
+        "avatar_err": "<b>Ошибка:</b> Не удалось обработать аватар",
+        "ffmpeg_err": "<b>Ошибка:</b> Ошибка FFmpeg",
+        "error": "<b>Ошибка:</b>\n<blockquote>{}</blockquote>",
+        "pack_info": (
+            "<b>PetPet Pack</b>\n"
+            "<blockquote>"
+            "Стикеров: <code>{count}</code>\n"
+            "Отслеживается: <code>{tracked}</code>\n"
+            "<a href=\"{link}\">Открыть пак</a>"
+            "</blockquote>"
+        ),
+        "pack_none": (
+            "<b>PetPet Pack</b>\n"
+            "<blockquote>Пак ещё не создан.</blockquote>"
+        ),
+        "pack_err": (
+            "<b>PetPet Pack</b>\n"
+            "<blockquote>Нет данных о паке.</blockquote>"
+        ),
+        "pack_cleared": "<b>Пак очищен:</b>\n<blockquote><code>{}</code></blockquote>",
+        "no_stickers": "<b>Ошибка:</b> Нет стикеров для удаления",
+        "last_removed": "<b>Последний стикер удалён</b>",
         "btn_delete_pack": "Удалить пак",
         "btn_delete_last": "Удалить последний",
         "btn_close": "Закрыть",
-        "pack_cleared": "<b>Пак очищен:</b> <code>{}</code>",
-        "no_stickers": "Нет стикеров для удаления",
-        "last_removed": "Последний стикер удалён",
     }
 
     async def _get_sn(self, client):
         me = await client.get_me()
         return f"petpetpackby_{me.id}"
+
+    async def _cb_pack_info(self, call):
+        client = self._client
+        sn = await self._get_sn(client)
+        sticker_ids = self.get("sticker_ids", [])
+        try:
+            ss = InputStickerSetShortName(sn)
+            sticker_set = await client(GetStickerSetRequest(ss, 0))
+            count = len(sticker_set.documents)
+            link = f"https://t.me/addstickers/{sn}"
+            text = self.strings["pack_info"].format(
+                count=count,
+                tracked=len(sticker_ids),
+                link=link,
+            )
+        except StickersetInvalidError:
+            text = self.strings["pack_none"]
+        except Exception:
+            text = self.strings["pack_err"]
+
+        await call.edit(
+            text,
+            reply_markup=[
+                [{"text": self.strings["btn_delete_pack"], "callback": self._cb_delete_pack, "style": "danger"}],
+                [{"text": self.strings["btn_delete_last"], "callback": self._cb_delete_last, "style": "primary"}],
+                [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "primary"}],
+            ],
+        )
 
     @loader.command(
         ru_doc="Ответьте на пользователя для petpet стикера, или без реплая для управления паком",
@@ -289,9 +341,9 @@ class RoflsMod(loader.Module):
                 text=text,
                 message=message,
                 reply_markup=[
-                    [{"text": self.strings["btn_delete_pack"], "callback": self._cb_delete_pack}],
-                    [{"text": self.strings["btn_delete_last"], "callback": self._cb_delete_last}],
-                    [{"text": self.strings["btn_close"], "callback": self._cb_close}],
+                    [{"text": self.strings["btn_delete_pack"], "callback": self._cb_delete_pack, "style": "danger"}],
+                    [{"text": self.strings["btn_delete_last"], "callback": self._cb_delete_last, "style": "primary"}],
+                    [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "primary"}],
                 ],
             )
             return
@@ -302,26 +354,38 @@ class RoflsMod(loader.Module):
             await utils.answer(message, self.strings["no_uid"])
             return
 
-        await utils.answer(message, self.strings["making"])
-
         try:
+            await message.delete()
+
             a = io.BytesIO()
             r = await message.client.download_profile_photo(uid, file=a)
             if not r:
-                await utils.answer(message, self.strings["no_avatar"])
+                await message.client.send_message(
+                    message.chat_id,
+                    self.strings["no_avatar"],
+                    parse_mode="html",
+                )
                 return
 
             a.seek(0)
             data = a.read()
             src = _resolve_avatar(data)
             if not src:
-                await utils.answer(message, self.strings["avatar_err"])
+                await message.client.send_message(
+                    message.chat_id,
+                    self.strings["avatar_err"],
+                    parse_mode="html",
+                )
                 return
 
             loop = asyncio.get_event_loop()
             w = await loop.run_in_executor(None, _make_petpet_webm, src)
             if not w:
-                await utils.answer(message, self.strings["ffmpeg_err"])
+                await message.client.send_message(
+                    message.chat_id,
+                    self.strings["ffmpeg_err"],
+                    parse_mode="html",
+                )
                 return
 
             me = await message.client.get_me()
@@ -362,8 +426,6 @@ class RoflsMod(loader.Module):
                 sticker_ids.append(new_doc_id.id)
                 self.set("sticker_ids", sticker_ids)
 
-            await message.delete()
-
             if new_doc_id:
                 await message.client.send_file(
                     message.chat_id,
@@ -378,7 +440,11 @@ class RoflsMod(loader.Module):
                 )
 
         except Exception as e:
-            await utils.answer(message, self.strings["error"].format(e))
+            await message.client.send_message(
+                message.chat_id,
+                self.strings["error"].format(e),
+                parse_mode="html",
+            )
 
     @loader.command(
         ru_doc="Ответьте на пользователя для down мема",
@@ -450,13 +516,23 @@ class RoflsMod(loader.Module):
             return
 
         self.set("sticker_ids", [])
-        await call.edit(self.strings["pack_cleared"].format(sn))
+        await call.edit(
+            self.strings["pack_cleared"].format(sn),
+            reply_markup=[
+                [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "primary"}],
+            ],
+        )
 
     async def _cb_delete_last(self, call):
         client = self._client
         sticker_ids = self.get("sticker_ids", [])
         if not sticker_ids:
-            await call.edit(self.strings["no_stickers"])
+            await call.edit(
+                self.strings["no_stickers"],
+                reply_markup=[
+                    [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "primary"}],
+                ],
+            )
             return
 
         sn = await self._get_sn(client)
@@ -477,7 +553,12 @@ class RoflsMod(loader.Module):
             await client(RemoveStickerFromSetRequest(inp))
             sticker_ids.pop()
             self.set("sticker_ids", sticker_ids)
-            await call.edit(self.strings["last_removed"])
+            await call.edit(
+                self.strings["last_removed"],
+                reply_markup=[
+                    [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "primary"}],
+                ],
+            )
         except Exception as e:
             await call.edit(self.strings["error"].format(e))
 
