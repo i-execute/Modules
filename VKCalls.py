@@ -56,9 +56,7 @@ except Exception:
 
 VK_API_VERSION = "5.199"
 VK_API_BASE = "https://api.vk.ru/method"
-VK_DEFAULT_APP_ID = 2685278
-VK_REDIRECT = "https://oauth.vk.com/blank.html"
-VK_DEFAULT_SCOPE = "offline"
+VK_HOST_URL = "https://vkhost.github.io/"
 VK_TOKEN_RE = re.compile(r"access_token=([A-Za-z0-9._-]+)")
 
 
@@ -67,19 +65,6 @@ def extract_vk_token(text: str) -> typing.Optional[str]:
         return None
     m = VK_TOKEN_RE.search(text)
     return m.group(1) if m else None
-
-
-def build_vk_auth_url(app_id: int, scope: str, v: str) -> str:
-    scope = (scope or "").strip()
-    return (
-        "https://oauth.vk.com/authorize"
-        f"?client_id={int(app_id)}"
-        f"&display=page"
-        f"&redirect_uri={VK_REDIRECT}"
-        f"&scope={scope}"
-        f"&response_type=token"
-        f"&v={v}"
-    )
 
 
 class VKAPIError(Exception):
@@ -194,12 +179,14 @@ class VKCalls(loader.Module):
         "auth_menu": (
             "<b>VK Authorization</b>\n"
             "<blockquote>"
-            "1) Open the link below\n"
-            "2) Allow access\n"
-            "3) Copy full URL from address bar\n"
-            "4) Paste it in input field"
+            "1) Open vkhost.github.io\n"
+            "2) Choose Kate Mobile\n"
+            "3) Allow access on oauth.vk.com\n"
+            "4) Copy full URL from address bar\n"
+            "5) Paste it in input field"
             "</blockquote>"
         ),
+        "auth_open": "Open vkhost.github.io",
         "auth_input": "Paste authorization URL:",
         "auth_success": (
             "<b>Authorization successful</b>\n"
@@ -269,12 +256,14 @@ class VKCalls(loader.Module):
         "auth_menu": (
             "<b>Авторизация VK</b>\n"
             "<blockquote>"
-            "1) Откройте ссылку ниже\n"
-            "2) Разрешите доступ\n"
-            "3) Скопируйте полный URL из адресной строки\n"
-            "4) Вставьте его в поле ввода"
+            "1) Откройте vkhost.github.io\n"
+            "2) Выберите Kate Mobile\n"
+            "3) Разрешите доступ на oauth.vk.com\n"
+            "4) Скопируйте полный URL из адресной строки\n"
+            "5) Вставьте его в поле ввода"
             "</blockquote>"
         ),
+        "auth_open": "Открыть vkhost.github.io",
         "auth_input": "Вставьте URL авторизации:",
         "auth_success": (
             "<b>Авторизация успешна</b>\n"
@@ -399,15 +388,10 @@ class VKCalls(loader.Module):
         )
 
     async def _cb_auth_menu(self, call: InlineCall):
-        url = build_vk_auth_url(
-            app_id=int(self.config["VK_APP_ID"]),
-            scope=str(self.config["VK_SCOPE"]),
-            v=VK_API_VERSION,
-        )
         await call.edit(
             self.strings["auth_menu"],
             reply_markup=[
-                [{"text": "Open VK Auth", "url": url}],
+                [{"text": self.strings["auth_open"], "url": VK_HOST_URL}],
                 [{"text": self.strings["auth_input"], "input": self.strings["auth_input"], "handler": self._input_auth, "style": "success"}],
                 [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
             ],
