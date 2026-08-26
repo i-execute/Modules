@@ -1,4 +1,4 @@
-__version__ = (1, 0, 1)
+__version__ = (1, 1, 0)
 # meta developer: I_execute.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Rofls/MetaBanner.jpeg
 
@@ -216,14 +216,55 @@ def _make_down_mp4(base_bytes, avatar_bytes):
 class RoflsMod(loader.Module):
     """PetPet stickers and Down meme"""
 
-    strings = {"name": "Rofls"}
+    strings = {
+        "name": "Rofls",
+        "no_reply": "Reply to a user",
+        "no_uid": "Cannot get user ID",
+        "making": "Making petpet...",
+        "no_avatar": "No avatar",
+        "avatar_err": "Cannot process avatar",
+        "ffmpeg_err": "FFmpeg error",
+        "error": "Error: <code>{}</code>",
+        "pack_none": "<b>PetPet Pack</b>\nPack does not exist yet.",
+        "pack_info": "<b>PetPet Pack</b>\nStickers: <code>{count}</code>\nTracked: <code>{tracked}</code>\n<a href=\"{link}\">Open pack</a>",
+        "pack_err": "<b>PetPet Pack</b>\nNo pack info available.",
+        "btn_delete_pack": "Delete Pack",
+        "btn_delete_last": "Delete Last Sticker",
+        "btn_close": "Close",
+        "pack_cleared": "<b>Pack cleared:</b> <code>{}</code>",
+        "no_stickers": "No stickers to remove",
+        "last_removed": "Last sticker removed",
+    }
+
+    strings_ru = {
+        "no_reply": "Ответьте на сообщение пользователя",
+        "no_uid": "Не удалось получить ID пользователя",
+        "making": "Создаю petpet...",
+        "no_avatar": "Нет аватара",
+        "avatar_err": "Не удалось обработать аватар",
+        "ffmpeg_err": "Ошибка FFmpeg",
+        "error": "Ошибка: <code>{}</code>",
+        "pack_none": "<b>PetPet Pack</b>\nПак ещё не создан.",
+        "pack_info": "<b>PetPet Pack</b>\nСтикеров: <code>{count}</code>\nОтслеживается: <code>{tracked}</code>\n<a href=\"{link}\">Открыть пак</a>",
+        "pack_err": "<b>PetPet Pack</b>\nНет данных о паке.",
+        "btn_delete_pack": "Удалить пак",
+        "btn_delete_last": "Удалить последний",
+        "btn_close": "Закрыть",
+        "pack_cleared": "<b>Пак очищен:</b> <code>{}</code>",
+        "no_stickers": "Нет стикеров для удаления",
+        "last_removed": "Последний стикер удалён",
+    }
 
     async def _get_sn(self, client):
         me = await client.get_me()
         return f"petpetpackby_{me.id}"
 
+    @loader.command(
+        ru_doc="Ответьте на пользователя для petpet стикера, или без реплая для управления паком",
+        en_doc="Reply to user for petpet sticker, or send without reply for management",
+    )
     async def petcmd(self, message):
-        """reply to user for petpet sticker, or send without reply for management"""
+        """Reply to user for petpet sticker, or send without reply for management"""
         reply = await message.get_reply_message()
 
         if not reply:
@@ -234,39 +275,23 @@ class RoflsMod(loader.Module):
                 sticker_set = await message.client(GetStickerSetRequest(ss, 0))
                 count = len(sticker_set.documents)
                 link = f"https://t.me/addstickers/{sn}"
-                text = (
-                    f"<b>PetPet Pack</b>\n\n"
-                    f"Stickers: <code>{count}</code>\n"
-                    f"Tracked: <code>{len(sticker_ids)}</code>\n"
-                    f"<a href=\"{link}\">Open pack</a>"
+                text = self.strings["pack_info"].format(
+                    count=count,
+                    tracked=len(sticker_ids),
+                    link=link,
                 )
             except StickersetInvalidError:
-                text = "<b>PetPet Pack</b>\n\nPack does not exist yet."
+                text = self.strings["pack_none"]
             except Exception:
-                text = "<b>PetPet Pack</b>\n\nNo pack info available."
+                text = self.strings["pack_err"]
 
             await self.inline.form(
                 text=text,
                 message=message,
                 reply_markup=[
-                    [
-                        {
-                            "text": "Delete Pack",
-                            "callback": self._cb_delete_pack,
-                        }
-                    ],
-                    [
-                        {
-                            "text": "Delete Last Sticker",
-                            "callback": self._cb_delete_last,
-                        }
-                    ],
-                    [
-                        {
-                            "text": "Close",
-                            "callback": self._cb_close,
-                        }
-                    ],
+                    [{"text": self.strings["btn_delete_pack"], "callback": self._cb_delete_pack}],
+                    [{"text": self.strings["btn_delete_last"], "callback": self._cb_delete_last}],
+                    [{"text": self.strings["btn_close"], "callback": self._cb_close}],
                 ],
             )
             return
@@ -274,29 +299,29 @@ class RoflsMod(loader.Module):
         sender = await reply.get_sender()
         uid = getattr(sender, "id", None)
         if not uid:
-            await utils.answer(message, "<b>Cannot get user ID</b>")
+            await utils.answer(message, self.strings["no_uid"])
             return
 
-        await utils.answer(message, "<b>Making petpet...</b>")
+        await utils.answer(message, self.strings["making"])
 
         try:
             a = io.BytesIO()
             r = await message.client.download_profile_photo(uid, file=a)
             if not r:
-                await utils.answer(message, "<b>No avatar</b>")
+                await utils.answer(message, self.strings["no_avatar"])
                 return
 
             a.seek(0)
             data = a.read()
             src = _resolve_avatar(data)
             if not src:
-                await utils.answer(message, "<b>Cannot process avatar</b>")
+                await utils.answer(message, self.strings["avatar_err"])
                 return
 
             loop = asyncio.get_event_loop()
             w = await loop.run_in_executor(None, _make_petpet_webm, src)
             if not w:
-                await utils.answer(message, "<b>FFmpeg error</b>")
+                await utils.answer(message, self.strings["ffmpeg_err"])
                 return
 
             me = await message.client.get_me()
@@ -348,18 +373,22 @@ class RoflsMod(loader.Module):
             else:
                 await message.client.send_message(
                     message.chat_id,
-                    f"<b>Done:</b> https://t.me/addstickers/{sn}",
+                    f"Done: https://t.me/addstickers/{sn}",
                     reply_to=reply.id,
                 )
 
         except Exception as e:
-            await utils.answer(message, f"<b>Error:</b> <code>{e}</code>")
+            await utils.answer(message, self.strings["error"].format(e))
 
+    @loader.command(
+        ru_doc="Ответьте на пользователя для down мема",
+        en_doc="Reply to user for down meme",
+    )
     async def dncmd(self, message):
-        """reply to user for down meme"""
+        """Reply to user for down meme"""
         reply = await message.get_reply_message()
         if not reply:
-            await utils.answer(message, "<b>Reply to a user</b>")
+            await utils.answer(message, self.strings["no_reply"])
             return
 
         sender = await reply.get_sender()
@@ -397,42 +426,44 @@ class RoflsMod(loader.Module):
         except Exception as e:
             await message.client.send_message(
                 message.chat_id,
-                f"<b>Error:</b> <code>{e}</code>",
+                self.strings["error"].format(e),
                 parse_mode="html",
             )
 
     async def _cb_delete_pack(self, call):
-        sn = await self._get_sn(call.client)
+        client = self._client
+        sn = await self._get_sn(client)
         ss = InputStickerSetShortName(sn)
 
         try:
-            sticker_set = await call.client(GetStickerSetRequest(ss, 0))
+            sticker_set = await client(GetStickerSetRequest(ss, 0))
             for doc in sticker_set.documents:
                 try:
                     inp = get_input_document(doc)
-                    await call.client(RemoveStickerFromSetRequest(inp))
+                    await client(RemoveStickerFromSetRequest(inp))
                 except Exception:
                     pass
         except StickersetInvalidError:
             pass
         except Exception as e:
-            await call.edit(f"<b>Error:</b> <code>{e}</code>")
+            await call.edit(self.strings["error"].format(e))
             return
 
         self.set("sticker_ids", [])
-        await call.edit(f"<b>Pack cleared:</b> <code>{sn}</code>")
+        await call.edit(self.strings["pack_cleared"].format(sn))
 
     async def _cb_delete_last(self, call):
+        client = self._client
         sticker_ids = self.get("sticker_ids", [])
         if not sticker_ids:
-            await call.edit("<b>No stickers to remove</b>")
+            await call.edit(self.strings["no_stickers"])
             return
 
-        sn = await self._get_sn(call.client)
+        sn = await self._get_sn(client)
         ss = InputStickerSetShortName(sn)
 
         try:
-            sticker_set = await call.client(GetStickerSetRequest(ss, 0))
+            sticker_set = await client(GetStickerSetRequest(ss, 0))
             last_id = sticker_ids[-1]
             target_doc = None
             for doc in sticker_set.documents:
@@ -443,12 +474,12 @@ class RoflsMod(loader.Module):
                 target_doc = sticker_set.documents[-1]
 
             inp = get_input_document(target_doc)
-            await call.client(RemoveStickerFromSetRequest(inp))
+            await client(RemoveStickerFromSetRequest(inp))
             sticker_ids.pop()
             self.set("sticker_ids", sticker_ids)
-            await call.edit("<b>Last sticker removed</b>")
+            await call.edit(self.strings["last_removed"])
         except Exception as e:
-            await call.edit(f"<b>Error:</b> <code>{e}</code>")
+            await call.edit(self.strings["error"].format(e))
 
     async def _cb_close(self, call):
         await call.delete()
