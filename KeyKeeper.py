@@ -112,14 +112,14 @@ async def _fetch_models(api_key: str, base_url: str, timeout: int) -> dict:
 
 
 @loader.tds
-class KeyRouter(loader.Module):
+class KeyKeeper(loader.Module):
     """OpenAI-compatible API key manager for multiple providers"""
 
     strings = {
-        "name": "KeyRouter",
+        "name": "KeyKeeper",
 
         "main_menu": (
-            "<b>KeyRouter</b>\n"
+            "<b>KeyKeeper</b>\n"
             "<blockquote>Providers: {providers} | Keys: {keys}</blockquote>"
         ),
 
@@ -329,7 +329,7 @@ class KeyRouter(loader.Module):
 
     strings_ru = {
         "main_menu": (
-            "<b>KeyRouter</b>\n"
+            "<b>KeyKeeper</b>\n"
             "<blockquote>Провайдеры: {providers} | Ключи: {keys}</blockquote>"
         ),
 
@@ -559,10 +559,10 @@ class KeyRouter(loader.Module):
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
-        self._providers = self._db.get("KeyRouter", "providers", [])
-        raw_keys = self._db.get("KeyRouter", "keys", [])
+        self._providers = self._db.get("KeyKeeper", "providers", [])
+        raw_keys = self._db.get("KeyKeeper", "keys", [])
         self._keys = self._migrate_keys(raw_keys)
-        self._logs = self._db.get("KeyRouter", "logs", {})
+        self._logs = self._db.get("KeyKeeper", "logs", {})
         self._save_all()
 
     def _migrate_keys(self, raw: list) -> list:
@@ -584,9 +584,9 @@ class KeyRouter(loader.Module):
         return num
 
     def _save_all(self):
-        self._db.set("KeyRouter", "providers", self._providers)
-        self._db.set("KeyRouter", "keys", self._keys)
-        self._db.set("KeyRouter", "logs", self._logs)
+        self._db.set("KeyKeeper", "providers", self._providers)
+        self._db.set("KeyKeeper", "keys", self._keys)
+        self._db.set("KeyKeeper", "logs", self._logs)
 
     def _status_label(self, status: str) -> str:
         mapping = {
@@ -1300,7 +1300,7 @@ class KeyRouter(loader.Module):
         ru_doc="Менеджер API ключей для OpenAI-совместимых провайдеров",
         en_doc="API key manager for OpenAI-compatible providers",
     )
-    async def kr(self, message: Message):
+    async def kk(self, message: Message):
         """API key manager for OpenAI-compatible providers"""
         await self.inline.form(
             text=self.strings["main_menu"].format(
