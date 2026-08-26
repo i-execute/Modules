@@ -1,6 +1,6 @@
 __version__ = (1, 0, 1)
 # meta developer: I_execute.t.me
-# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Rofls/MetaBanner.jpeg
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Rofls/Down.jpeg
 
 import io
 import os
@@ -223,6 +223,7 @@ class RoflsMod(loader.Module):
         return f"petpetpackby_{me.id}"
 
     async def petcmd(self, message):
+        """reply to user for petpet sticker, or send without reply for management"""
         reply = await message.get_reply_message()
 
         if not reply:
@@ -245,8 +246,8 @@ class RoflsMod(loader.Module):
                 text = "<b>PetPet Pack</b>\n\nNo pack info available."
 
             await self.inline.form(
-                message,
                 text=text,
+                message=message,
                 reply_markup=[
                     [
                         {
