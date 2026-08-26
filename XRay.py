@@ -1675,6 +1675,24 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         except:
             return "unknown"
 
+    async def _get_cloudflared_version(self) -> str:
+        if not self._cloudflared_installed():
+            return "not installed"
+        try:
+            p = await asyncio.create_subprocess_exec(
+                self._cloudflared_path, "--version",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await p.communicate()
+            txt = out.decode().strip()
+            if not txt:
+                return "unknown"
+            line = txt.split("\n")[0]
+            return line[:80]
+        except:
+            return "unknown"
+
     async def _generate_vless_encryption(self) -> Tuple[Optional[str], Optional[str]]:
         if not self._xray_installed():
             return None, None

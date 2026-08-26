@@ -1,6 +1,6 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 # meta developer: I_execute.t.me
-# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Rofls/Down.jpeg
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Rofls/MetaBanner.jpeg
 
 import io
 import os
@@ -218,22 +218,31 @@ class RoflsMod(loader.Module):
 
     strings = {"name": "Rofls"}
 
+    async def _get_sn(self, client):
+        me = await client.get_me()
+        return f"petpetpackby_{me.id}"
+
     async def petcmd(self, message):
-        """reply to user for petpet sticker, or send without reply for management"""
         reply = await message.get_reply_message()
 
         if not reply:
-            packs = self.get("packs", [])
-            if packs:
-                last = packs[-1]
+            sn = await self._get_sn(message.client)
+            sticker_ids = self.get("sticker_ids", [])
+            try:
+                ss = InputStickerSetShortName(sn)
+                sticker_set = await message.client(GetStickerSetRequest(ss, 0))
+                count = len(sticker_set.documents)
+                link = f"https://t.me/addstickers/{sn}"
                 text = (
-                    f"<b>PetPet Management</b>\n\n"
-                    f"Tracked packs: <code>{len(packs)}</code>\n"
-                    f"Last: <code>{last['short_name']}</code> "
-                    f"({len(last['stickers'])} stickers)"
+                    f"<b>PetPet Pack</b>\n\n"
+                    f"Stickers: <code>{count}</code>\n"
+                    f"Tracked: <code>{len(sticker_ids)}</code>\n"
+                    f"<a href=\"{link}\">Open pack</a>"
                 )
-            else:
-                text = "<b>PetPet Management</b>\n\nNo tracked packs."
+            except StickersetInvalidError:
+                text = "<b>PetPet Pack</b>\n\nPack does not exist yet."
+            except Exception:
+                text = "<b>PetPet Pack</b>\n\nNo pack info available."
 
             await self.inline.form(
                 message,
@@ -241,7 +250,7 @@ class RoflsMod(loader.Module):
                 reply_markup=[
                     [
                         {
-                            "text": "Delete Saved Pack",
+                            "text": "Delete Pack",
                             "callback": self._cb_delete_pack,
                         }
                     ],
@@ -290,7 +299,7 @@ class RoflsMod(loader.Module):
                 return
 
             me = await message.client.get_me()
-            sn = f"petpet_{uid}_by_{me.username}"
+            sn = f"petpetpackby_{me.id}"
 
             u = await message.client.upload_file(w, file_name="sticker.webm")
             d = get_input_document(
@@ -312,7 +321,7 @@ class RoflsMod(loader.Module):
                 res = await message.client(
                     CreateStickerSetRequest(
                         user_id=me,
-                        title="PetPet Pack",
+                        title="PetPet by @Hotaru_modules",
                         short_name=sn,
                         stickers=[sticker],
                     )
@@ -322,19 +331,10 @@ class RoflsMod(loader.Module):
 
             os.unlink(w)
 
-            packs = self.get("packs", [])
-            existing = None
-            for p in packs:
-                if p["short_name"] == sn:
-                    existing = p
-                    break
-            if existing:
-                if new_doc_id and new_doc_id.id not in existing["stickers"]:
-                    existing["stickers"].append(new_doc_id.id)
-            else:
-                sticker_ids = [new_doc_id.id] if new_doc_id else []
-                packs.append({"short_name": sn, "stickers": sticker_ids})
-            self.set("packs", packs)
+            sticker_ids = self.get("sticker_ids", [])
+            if new_doc_id:
+                sticker_ids.append(new_doc_id.id)
+                self.set("sticker_ids", sticker_ids)
 
             await message.delete()
 
@@ -401,13 +401,7 @@ class RoflsMod(loader.Module):
             )
 
     async def _cb_delete_pack(self, call):
-        packs = self.get("packs", [])
-        if not packs:
-            await call.edit("<b>No tracked packs to delete</b>")
-            return
-
-        last = packs[-1]
-        sn = last["short_name"]
+        sn = await self._get_sn(call.client)
         ss = InputStickerSetShortName(sn)
 
         try:
@@ -424,30 +418,24 @@ class RoflsMod(loader.Module):
             await call.edit(f"<b>Error:</b> <code>{e}</code>")
             return
 
-        packs.pop()
-        self.set("packs", packs)
-        await call.edit(f"<b>Pack deleted:</b> <code>{sn}</code>")
+        self.set("sticker_ids", [])
+        await call.edit(f"<b>Pack cleared:</b> <code>{sn}</code>")
 
     async def _cb_delete_last(self, call):
-        packs = self.get("packs", [])
-        if not packs:
-            await call.edit("<b>No tracked packs</b>")
+        sticker_ids = self.get("sticker_ids", [])
+        if not sticker_ids:
+            await call.edit("<b>No stickers to remove</b>")
             return
 
-        last = packs[-1]
-        if not last["stickers"]:
-            await call.edit("<b>No stickers in last pack</b>")
-            return
-
-        sn = last["short_name"]
+        sn = await self._get_sn(call.client)
         ss = InputStickerSetShortName(sn)
 
         try:
             sticker_set = await call.client(GetStickerSetRequest(ss, 0))
-            last_doc_id = last["stickers"][-1]
+            last_id = sticker_ids[-1]
             target_doc = None
             for doc in sticker_set.documents:
-                if doc.id == last_doc_id:
+                if doc.id == last_id:
                     target_doc = doc
                     break
             if not target_doc:
@@ -455,11 +443,9 @@ class RoflsMod(loader.Module):
 
             inp = get_input_document(target_doc)
             await call.client(RemoveStickerFromSetRequest(inp))
-            last["stickers"].pop()
-            if not last["stickers"]:
-                packs.pop()
-            self.set("packs", packs)
-            await call.edit(f"<b>Last sticker removed from</b> <code>{sn}</code>")
+            sticker_ids.pop()
+            self.set("sticker_ids", sticker_ids)
+            await call.edit("<b>Last sticker removed</b>")
         except Exception as e:
             await call.edit(f"<b>Error:</b> <code>{e}</code>")
 
