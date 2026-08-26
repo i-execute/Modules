@@ -84,7 +84,8 @@ class XRay(loader.Module):
             "<b>XRay Multi-User VPN</b>\n"
             "<blockquote>Total users: {total}\n"
             "Active: {active}\n"
-            "XRay version: {version}</blockquote>"
+            "XRay version: {version}\n"
+            "Cloudflared version: {cloudflared_version}</blockquote>"
         ),
         
         "setup_menu": (
@@ -459,7 +460,8 @@ class XRay(loader.Module):
             "<b>XRay Мультиюзерный VPN</b>\n"
             "<blockquote>Всего юзеров: {total}\n"
             "Активных: {active}\n"
-            "Версия XRay: {version}</blockquote>"
+            "Версия XRay: {version}\n"
+            "Версия Cloudflared: {cloudflared_version}</blockquote>"
         ),
         
         "setup_menu": (
@@ -1073,8 +1075,70 @@ class XRay(loader.Module):
     def _websocket_site_script(
         self, path: str, backend_port: int, site_port: int, mask_url: str
     ) -> str:
-        with urllib.request.urlopen(self._WEBSOCKET_SITE_SCRIPT_URL, timeout=15) as response:
-            template = response.read().decode("utf-8")
+        try:
+            with urllib.request.urlopen(self._WEBSOCKET_SITE_SCRIPT_URL, timeout=15) as response:
+                template = response.read().decode("utf-8")
+        except Exception:
+            template = """
+import asyncio
+import urllib.request
+from aiohttp import web, ClientSession, WSMsgType
+
+PATH = "__PATH__"
+BACKEND = "ws://127.0.0.1:__BACKEND_PORT__" + PATH
+GATE_JSX = "__MASK_URL__"
+LOADING_HTML = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Loading.html?v=loading-v4"
+
+async def fetch_text(url, timeout=10):
+    def read():
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return response.read().decode("utf-8")
+    return await asyncio.to_thread(read)
+
+async def index(request):
+    try:
+        html = await fetch_text(LOADING_HTML)
+    except Exception:
+        html = "<!doctype html><title>Connecting</title><body style='margin:0;background:#111214;color:#e7e7e8;font:16px system-ui;display:grid;place-items:center;min-height:100vh'>Preparing your connection.</body>"
+    return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-store"})
+
+async def gate_jsx(request):
+    try:
+        body = await fetch_text(GATE_JSX)
+        return web.Response(text=body, content_type="application/javascript", headers={"Cache-Control": "no-store"})
+    except Exception:
+        return web.Response(text="window.App=function(){return React.createElement('main',null)};", content_type="application/javascript")
+
+async def proxy(request):
+    client_ws = web.WebSocketResponse(autoping=False, heartbeat=30)
+    await client_ws.prepare(request)
+    try:
+        async with ClientSession() as session:
+            async with session.ws_connect(BACKEND, autoping=False, heartbeat=30) as backend_ws:
+                async def forward(source, target):
+                    async for message in source:
+                        if message.type == WSMsgType.BINARY:
+                            await target.send_bytes(message.data)
+                        elif message.type == WSMsgType.TEXT:
+                            await target.send_str(message.data)
+                        elif message.type == WSMsgType.PING:
+                            await target.ping()
+                        elif message.type == WSMsgType.PONG:
+                            await target.pong()
+                        elif message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
+                            break
+                await asyncio.gather(forward(client_ws, backend_ws), forward(backend_ws, client_ws), return_exceptions=True)
+    except Exception:
+        if not client_ws.closed:
+            await client_ws.close(code=1011, message=b"backend unavailable")
+    return client_ws
+
+app = web.Application()
+app.router.add_get(PATH, proxy)
+app.router.add_get('/', index)
+app.router.add_get('/gate.jsx', gate_jsx)
+web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
+"""
         return (
             template.replace("__PATH__", path)
             .replace("__BACKEND_PORT__", str(backend_port))
@@ -1089,7 +1153,9 @@ class XRay(loader.Module):
         self._site_processes.pop(name, None)
         user = self._users[name]
         site_port = self._find_free_loopback_port()
-        path = user.get("path") or f"/ws-{secrets.token_urlsafe(12)}"
+        path = user.get("path") or "/xhttps"
+        if not path.startswith("/"):
+            path = "/" + path
         user["path"] = path
         user["site_port"] = site_port
         mask_name = user.get("mask_site", "Evil Cat")
@@ -1098,15 +1164,35 @@ class XRay(loader.Module):
         mask_url = self._mask_sites[mask_name]
         user["mask_site"] = mask_name
         script_path = os.path.join(user_dir, "websocket_site.py")
+        try:
+            p = await asyncio.create_subprocess_exec(
+                sys.executable, "-c", "import aiohttp",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await p.communicate()
+            if p.returncode != 0:
+                p2 = await asyncio.create_subprocess_exec(
+                    sys.executable, "-m", "pip", "install", "--quiet", "aiohttp",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await p2.communicate()
+        except Exception:
+            pass
+        try:
+            script_content = self._websocket_site_script(path, user["port"], site_port, mask_url)
+        except Exception as e:
+            return False, f"site_script_fetch_failed: {e}"
         with open(script_path, "w", encoding="utf-8") as f:
-            f.write(self._websocket_site_script(path, user["port"], site_port, mask_url))
+            f.write(script_content)
         log_path = os.path.join(user_dir, "daemon.log")
         try:
             self._write_unit(unit, f"XRay WebSocket site for {name}", [sys.executable, script_path], log_path)
             ok, output = await self._start_unit(unit)
             if not ok:
                 return False, output
-            deadline = time.time() + 8
+            deadline = time.time() + 10
             while time.time() < deadline:
                 await asyncio.sleep(0.25)
                 if not await self._unit_active(unit):
@@ -1601,7 +1687,14 @@ class XRay(loader.Module):
             out, _ = await p.communicate()
             if p.returncode != 0:
                 return None, None
-            pairs = re.findall(r'"decryption":\s*"([^"]+)"\s*\n"encryption":\s*"([^"]+)"', out.decode(errors="replace"))
+            txt = out.decode(errors="replace")
+            decs = re.findall(r'"decryption"\s*:\s*"([^"]+)"', txt)
+            encs = re.findall(r'"encryption"\s*:\s*"([^"]+)"', txt)
+            if decs and encs and len(decs) == len(encs):
+                return decs[-1], encs[-1]
+            if decs and encs:
+                return decs[0], encs[0]
+            pairs = re.findall(r'"decryption":\s*"([^"]+)"\s*\n"encryption":\s*"([^"]+)"', txt)
             if len(pairs) >= 2:
                 return pairs[-1]
             return pairs[0] if pairs else (None, None)
@@ -1735,19 +1828,22 @@ class XRay(loader.Module):
         }
 
         if transport == "websocket":
+            ws_path = user.get("path") or "/xhttps"
+            if not ws_path.startswith("/"):
+                ws_path = "/" + ws_path
             config["inbounds"][0]["settings"]["decryption"] = user.get("vless_decryption", "none")
             config["inbounds"][0]["streamSettings"] = {
                 "network": "ws",
                 "security": "none",
                 "wsSettings": {
-                    "path": user.get("path", "/"),
+                    "path": ws_path,
                 },
             }
             if user.get("websocket_mode") == "tls-fallback":
                 config["inbounds"][0]["settings"]["decryption"] = "none"
                 config["inbounds"][0]["settings"]["fallbacks"] = [{
                     "dest": user.get("site_port", 0),
-                    "xver": 1,
+                    "xver": 0,
                 }]
         elif transport == "xhttp":
             config["inbounds"][0]["streamSettings"] = {
@@ -1802,7 +1898,9 @@ class XRay(loader.Module):
         import json as _json
 
         if transport == "websocket":
-            path = user.get("path", "/")
+            path = user.get("path") or "/xhttps"
+            if not path.startswith("/"):
+                path = "/" + path
             fallback = user.get("websocket_mode") == "tls-fallback"
             params = urllib.parse.urlencode({
                 "type": "ws",
@@ -2263,11 +2361,13 @@ class XRay(loader.Module):
         total = len(self._users)
         active = len(self._processes)
         version = await self._get_xray_version()
+        cf_version = await self._get_cloudflared_version()
         
         text = self.strings["main_menu"].format(
             total=total,
             active=active,
             version=version,
+            cloudflared_version=cf_version,
         )
         
         markup = [
@@ -2361,7 +2461,7 @@ class XRay(loader.Module):
             {"text": self.strings["btn_settings"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"},
         ])
         
-        if user.get("transport") == "websocket":
+        if user.get("transport") == "websocket" and user.get("websocket_mode") == "tls-fallback":
             markup.append([
                 {"text": self.strings["btn_mask_site"], "callback": self._cb_mask_site_menu, "args": (name,), "style": "primary"},
             ])
@@ -2652,60 +2752,30 @@ class XRay(loader.Module):
 
         back_markup = [[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
 
-        if kind == "xray" and len(chosen) > 1:
-            labels = [label for _, label in chosen]
-            paths  = [path  for path,  _ in chosen]
-            state: dict = {}
-
-            done_event = asyncio.Event()
-            render_task = asyncio.create_task(
-                self._upload_progress_render_loop(
-                    call, state, labels, done_event,
-                    header=f"Uploading Xray-core logs for {_escape(name)}…",
-                )
-            )
-            try:
-                import telethon.tl.types as _tlt
-                shared_label = " + ".join(labels)
-                state[shared_label] = (0, 0)
-
-                await self._client.send_file(
-                    call.chat_id,
-                    paths,
-                    caption=f"<b>Xray-core logs:</b> <code>{_escape(name)}</code>",
-                    parse_mode="html",
-                    force_document=True,
-                    progress_callback=self._make_upload_progress_cb(state, shared_label),
-                )
-            except Exception as e:
-                logger.exception("[XR] album send_file failed: %s", e)
-            finally:
-                done_event.set()
-                render_task.cancel()
-        else:
-            path, label = chosen[0]
-            state = {label: (0, 0)}
-            done_event = asyncio.Event()
-            render_task = asyncio.create_task(
-                self._upload_progress_render_loop(
-                    call, state, [label], done_event,
-                    header=f"Uploading {label} for {_escape(name)}…",
-                )
-            )
-            try:
-                await self._client.send_file(
-                    call.chat_id,
-                    path,
-                    caption=f"<b>{kind.title()} {label}:</b> <code>{_escape(name)}</code>",
-                    parse_mode="html",
-                    force_document=True,
-                    progress_callback=self._make_upload_progress_cb(state, label),
-                )
-            except Exception as e:
-                logger.exception("[XR] send_file failed: %s", e)
-            finally:
-                done_event.set()
-                render_task.cancel()
+        try:
+            for fpath, label in chosen:
+                try:
+                    await utils.answer_file(
+                        call,
+                        fpath,
+                        caption=f"<b>{kind.title()} {label}:</b> <code>{_escape(name)}</code>",
+                        force_document=True,
+                    )
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    logger.exception(f"[XR] send_file failed for {label}: %s", e)
+                    try:
+                        await self._client.send_file(
+                            call.chat_id,
+                            fpath,
+                            caption=f"<b>{kind.title()} {label}:</b> <code>{_escape(name)}</code>",
+                            parse_mode="html",
+                            force_document=True,
+                        )
+                    except Exception as e2:
+                        logger.exception(f"[XR] fallback send_file failed for {label}: %s", e2)
+        except Exception as e:
+            logger.exception(f"[XR] logs sending failed: %s", e)
 
         await call.edit(
             f"<b>Logs sent for {_escape(name)}</b>",
@@ -2869,7 +2939,8 @@ class XRay(loader.Module):
         if transport == "websocket":
             user.pop("tunnel_host", None)
             user.pop("site_port", None)
-            user["path"] = ""
+            if not user.get("path"):
+                user["path"] = "/xhttps"
 
         user["restart_required"] = True
         self._save_users()
@@ -3222,6 +3293,7 @@ class XRay(loader.Module):
                 total=len(self._users),
                 active=len(self._processes),
                 version=await self._get_xray_version(),
+                cloudflared_version=await self._get_cloudflared_version(),
             ),
             message=message,
             reply_markup=[
