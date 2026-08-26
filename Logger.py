@@ -13,7 +13,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Logger/Greetings.jpeg"
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Logger/Reloading.jpeg"
 
 
 @loader.tds
@@ -22,11 +22,7 @@ class Logger(loader.Module):
 
     strings = {
         "name": "Logger",
-        "greeting_first": (
-            "<blockquote><b>Yo!</b>\n"
-            "Watchers are active. Now every command will be logged here, if some asshole uses your userbot I'll tag you</blockquote>"
-        ),
-        "reloaded": "<blockquote><b>Module successfully reloaded, everything works</b></blockquote>",
+        "reloaded": "<blockquote><b>Logger module successfully reloaded, everything works</b></blockquote>",
         "username_row": "@{uname}",
         "owner_attention": "<blockquote><b><a href='tg://user?id={owner_id}'>{owner_name}</a>, attention please</b></blockquote>\n",
         "log_dm_user": (
@@ -62,11 +58,7 @@ class Logger(loader.Module):
     }
 
     strings_ru = {
-        "greeting_first": (
-            "<blockquote><b>Ку!</b>\n"
-            "Вотчеры активны. Теперь каждая команда будет залетать сюда, если какой-то хуй будет использовать твой юзербот то я тэгну тебя</blockquote>"
-        ),
-        "reloaded": "<blockquote><b>Модуль был успешно перезагружен, все воркает</b></blockquote>",
+        "reloaded": "<blockquote><b>Модуль Logger был успешно перезагружен, все воркает</b></blockquote>",
         "username_row": "@{uname}",
         "owner_attention": "<blockquote><b><a href='tg://user?id={owner_id}'>{owner_name}</a>, минуточку внимания</b></blockquote>\n",
         "log_dm_user": (
@@ -225,7 +217,7 @@ class Logger(loader.Module):
                         id=msg.id,
                         message=msg_text,
                         media=InputMediaWebPage(
-                            url=GREETING_MEDIA_URL,
+                            url=RELOADING_MEDIA_URL,
                             optional=True,
                             force_large_media=True,
                         ),
@@ -270,7 +262,6 @@ class Logger(loader.Module):
             await self._send_with_preview(chat_id, self.strings["reloaded"])
         else:
             self.set(greeting_key, True)
-            await self._send_with_preview(chat_id, self.strings["greeting_first"])
 
     async def _send_log(self, text: str):
         if not self._logger_topic or not self._asset_channel:

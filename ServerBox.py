@@ -14,7 +14,7 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/ServerBox/Greetings.jpeg"
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/ServerBox/Reloading.jpeg"
 
 
 @loader.tds
@@ -23,11 +23,7 @@ class ServerBox(loader.Module):
 
     strings = {
         "name": "ServerBox",
-        "greeting_first": (
-            "<blockquote><b>ServerBox active.</b></blockquote>\n"
-            "<blockquote>Resource monitoring is running. Alerts will be sent here when thresholds are exceeded.</blockquote>"
-        ),
-        "reloaded": "<blockquote><b>ServerBox module reloaded, monitoring resumed.</b></blockquote>",
+        "reloaded": "<blockquote><b>ServerBox module successfully reloaded, everything works</b></blockquote>",
         "cpu_alert": (
             "<pre><code class=\"language-serverbox\">"
             "<b>CPU ALERT</b>\n"
@@ -84,11 +80,7 @@ class ServerBox(loader.Module):
 
     strings_ru = {
         "name": "ServerBox",
-        "greeting_first": (
-            "<blockquote><b>ServerBox активен.</b></blockquote>\n"
-            "<blockquote>Мониторинг ресурсов запущен. Алерты будут отправляться сюда при превышении порогов.</blockquote>"
-        ),
-        "reloaded": "<blockquote><b>Модуль ServerBox перезагружен, мониторинг возобновлён.</b></blockquote>",
+        "reloaded": "<blockquote><b>Модуль ServerBox был успешно перезагружен, все воркает</b></blockquote>",
         "cpu_alert": (
             "<pre><code class=\"language-serverbox\">"
             "<b>CPU ALERT</b>\n"
@@ -207,10 +199,20 @@ class ServerBox(loader.Module):
             logger.error(f"[ServerBox] Failed to create/get forum topic: {e}")
             return
 
-        try:
-            chat_id = int(f"-100{self._asset_channel}")
-            msg_text, entities = await self.inline.bot._parse_message_text(self.strings["greeting_first"], "html")
+        chat_id = int(f"-100{self._asset_channel}")
+        greeting_key = f"serverbox_greeted_{self._asset_channel}_{self._logger_topic.id}"
+        already_greeted = self.get(greeting_key, False)
 
+        if already_greeted:
+            await self._send_with_preview(chat_id, self.strings["reloaded"])
+        else:
+            self.set(greeting_key, True)
+
+        self._start_monitor()
+
+    async def _send_with_preview(self, chat_id, text):
+        try:
+            msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
             msg = await self._send_with_flood_wait(
                 self.inline.bot.send_message,
                 chat_id,
@@ -219,18 +221,20 @@ class ServerBox(loader.Module):
                 entities=entities,
                 message_thread_id=self._logger_topic.id,
             )
-
             if msg:
                 try:
                     peer = await self.inline.bot.get_input_entity(chat_id)
                     current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
                     reply_markup = current_msg.reply_markup if current_msg else None
-
                     await self.inline.bot(EditMessageRequest(
                         peer=peer,
                         id=msg.id,
                         message=msg_text,
-                        media=InputMediaWebPage(url=GREETING_MEDIA_URL, optional=True, force_large_media=True),
+                        media=InputMediaWebPage(
+                            url=RELOADING_MEDIA_URL,
+                            optional=True,
+                            force_large_media=True,
+                        ),
                         invert_media=True,
                         reply_markup=reply_markup,
                         entities=entities,
@@ -238,19 +242,8 @@ class ServerBox(loader.Module):
                     ))
                 except Exception as e:
                     logger.error(f"[ServerBox] Failed to add preview: {e}")
-        except Exception:
-            try:
-                await self._send_with_flood_wait(
-                    self.inline.bot.send_message,
-                    int(f"-100{self._asset_channel}"),
-                    self.strings["reloaded"],
-                    parse_mode="HTML",
-                    message_thread_id=self._logger_topic.id,
-                )
-            except Exception as e:
-                logger.error(f"[ServerBox] Failed to send greeting: {e}")
-
-        self._start_monitor()
+        except Exception as e:
+            logger.error(f"[ServerBox] Failed to send message with preview: {e}")
 
     async def _send_with_flood_wait(self, coro_func, *args, **kwargs):
         for attempt in range(5):

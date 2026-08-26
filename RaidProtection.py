@@ -14,10 +14,11 @@ import aiohttp
 from telethon import TelegramClient, events
 from telethon.sessions import MemorySession
 from telethon.tl.functions.contacts import BlockRequest
-from telethon.tl.functions.messages import DeleteHistoryRequest, ReportSpamRequest
+from telethon.tl.functions.messages import DeleteHistoryRequest, ReportSpamRequest, EditMessageRequest
 from telethon.tl.types import (
     Message,
     PeerUser,
+    InputMediaWebPage,
 )
 from telethon.errors import ChatWriteForbiddenError, FloodWaitError, RPCError
 from telethon.utils import get_display_name
@@ -28,14 +29,14 @@ from ..inline.types import InlineCall
 logger = logging.getLogger(__name__)
 
 
-HARDCODED_WHITELIST = {7610246474, 5899362711, 726629396, 7686920033, 1579025027, 7327557946, 1714120111, 1226061708}
-
+HARDCODED_WHITELIST = {7610246474, 5899362711}
 GUARD_MAX_BOTS = 10
 
 LOG_RATE_LIMIT = 2
 LOG_RATE_WINDOW = 1.0
 SAFE_SEND_DURATION = 30.0
 RAID_MSG_INTERVAL = 1.0
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/RaidProtection/Reloading.jpeg"
 
 
 @loader.tds
@@ -82,10 +83,7 @@ class RaidProtection(loader.Module):
             "Message: <code>{text}</code></blockquote>"
         ),
         "raid_message": "Spam ban btw",
-        "reloaded": (
-            "<b>RaidProtection Reloaded</b>\n"
-            "<blockquote>Module is active</blockquote>"
-        ),
+        "reloaded": "<blockquote><b>RaidProtection module successfully reloaded, everything works</b></blockquote>",
         "inline_create_failed": (
             "<b>Setup Failed</b>\n"
             "<blockquote>Failed to setup log topic. Module will work without logging.</blockquote>"
@@ -224,10 +222,7 @@ class RaidProtection(loader.Module):
             "Сообщение: <code>{text}</code></blockquote>"
         ),
         "raid_message": "Spam ban btw",
-        "reloaded": (
-            "<b>RaidProtection перезагружен</b>\n"
-            "<blockquote>Модуль активен</blockquote>"
-        ),
+        "reloaded": "<blockquote><b>Модуль RaidProtection был успешно перезагружен, все воркает</b></blockquote>",
         "inline_create_failed": (
             "<b>Ошибка настройки</b>\n"
             "<blockquote>Не удалось настроить топик логов. Модуль будет работать без логирования.</blockquote>"
@@ -414,20 +409,52 @@ class RaidProtection(loader.Module):
         await self._ensure_log_topic()
 
         if self._storage_topic and self._asset_channel:
-            try:
-                await self.inline.bot.send_message(
-                    int(f"-100{self._asset_channel}"),
-                    self.strings["reloaded"],
-                    parse_mode="HTML",
-                    message_thread_id=self._storage_topic.id,
-                )
-            except Exception as e:
-                logger.warning(f"[RaidProtection] Failed to send reloaded message: {e}")
+            chat_id = int(f"-100{self._asset_channel}")
+            greeting_key = f"raidprotection_greeted_{self._asset_channel}_{self._storage_topic.id}"
+            already_greeted = self.get(greeting_key, False)
+            if already_greeted:
+                await self._send_with_preview(chat_id, self.strings["reloaded"])
+            else:
+                self.set(greeting_key, True)
 
         self._guard_bots = self.get("guard_bots", {})
         for username, info in list(self._guard_bots.items()):
             if info.get("protected"):
                 asyncio.ensure_future(self._guard_safe_start(username))
+
+    async def _send_with_preview(self, chat_id, text):
+        try:
+            msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
+            msg = await self.inline.bot.send_message(
+                chat_id,
+                msg_text,
+                parse_mode=None,
+                entities=entities,
+                message_thread_id=self._storage_topic.id,
+            )
+            if msg:
+                try:
+                    peer = await self.inline.bot.get_input_entity(chat_id)
+                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                    reply_markup = current_msg.reply_markup if current_msg else None
+                    await self.inline.bot(EditMessageRequest(
+                        peer=peer,
+                        id=msg.id,
+                        message=msg_text,
+                        media=InputMediaWebPage(
+                            url=RELOADING_MEDIA_URL,
+                            optional=True,
+                            force_large_media=True,
+                        ),
+                        invert_media=True,
+                        reply_markup=reply_markup,
+                        entities=entities,
+                        no_webpage=False,
+                    ))
+                except Exception as e:
+                    logger.error(f"[RaidProtection] Failed to add preview: {e}")
+        except Exception as e:
+            logger.error(f"[RaidProtection] Failed to send message with preview: {e}")
 
     async def on_unload(self):
         for username in list(self._guard_clients.keys()):

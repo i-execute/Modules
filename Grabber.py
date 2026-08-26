@@ -34,7 +34,8 @@ from telethon.tl.types import (
     DocumentAttributeFilename,
     ReactionEmoji,
 )
-from telethon.tl.functions.messages import SendReactionRequest
+from telethon.tl.functions.messages import SendReactionRequest, EditMessageRequest
+from telethon.tl.types import InputMediaWebPage
 from telethon.errors import (
     MessageNotModifiedError,
     FloodWaitError,
@@ -66,6 +67,7 @@ OG_IMAGE_RE2 = re.compile(
 )
 
 GRABBER_TOPIC_ICON = 5303138391162919957
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/Reloading.jpeg"
 
 
 def _escape_html(t):
@@ -389,6 +391,7 @@ class Grabber(loader.Module):
 
     strings = {
         "name": "Grabber",
+        "reloaded": "<blockquote><b>Grabber module successfully reloaded, everything works</b></blockquote>",
         "btn_video": "Video",
         "btn_audio": "Audio (MP3)",
         "btn_cancel": "Cancel",
@@ -572,6 +575,7 @@ class Grabber(loader.Module):
 
     strings_ru = {
         "name": "Grabber",
+        "reloaded": "<blockquote><b>Модуль Grabber был успешно перезагружен, все воркает</b></blockquote>",
         "btn_video": "Видео",
         "btn_audio": "Аудио (MP3)",
         "btn_cancel": "Отмена",
@@ -1137,40 +1141,13 @@ class Grabber(loader.Module):
         if self._grabber_topic_id:
             asset_channel = self._db.get("heroku.forums", "channel_id", None)
             if asset_channel:
-                try:
-                    await self.inline.bot.send_message(
-                        int(f"-100{asset_channel}"),
-                        "<b>Grabber online.</b>",
-                        parse_mode="HTML",
-                        message_thread_id=self._grabber_topic_id,
-                        disable_web_page_preview=True,
-                    )
-                except Exception:
-                    forums_cache = self._db.get("heroku.forums", "forums_cache", {})
-                    if isinstance(forums_cache, dict):
-                        heroku_cache = forums_cache.get("heroku-userbot", {})
-                        if isinstance(heroku_cache, dict):
-                            heroku_cache.pop("Grabber", None)
-                        forums_cache["heroku-userbot"] = heroku_cache
-                        self._db.set("heroku.forums", "forums_cache", forums_cache)
-                    self._grabber_topic_id = None
-                    try:
-                        topic = await utils.asset_forum_topic(
-                            self._client, self._db, asset_channel,
-                            "Grabber", description="Grabber downloads log.",
-                            icon_emoji_id=GRABBER_TOPIC_ICON,
-                        )
-                        self._grabber_topic_id = topic.id if topic else None
-                        if self._grabber_topic_id:
-                            await self.inline.bot.send_message(
-                                int(f"-100{asset_channel}"),
-                                "<b>Grabber online.</b>",
-                                parse_mode="HTML",
-                                message_thread_id=self._grabber_topic_id,
-                                disable_web_page_preview=True,
-                            )
-                    except Exception as e:
-                        logger.error(f"[GRABBER] topic recreate failed: {e}")
+                chat_id = int(f"-100{asset_channel}")
+                greeting_key = f"grabber_greeted_{asset_channel}_{self._grabber_topic_id}"
+                already_greeted = self.get(greeting_key, False)
+                if already_greeted:
+                    await self._send_with_preview(chat_id, self.strings["reloaded"])
+                else:
+                    self.set(greeting_key, True)
 
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(self._executor, _install_deps)
@@ -1180,6 +1157,41 @@ class Grabber(loader.Module):
                 await self._launch(self.config["BOT_TOKEN"])
             except Exception as e:
                 logger.error(f"[GRABBER] Autorunner failed: {e}")
+
+
+    async def _send_with_preview(self, chat_id, text):
+        try:
+            msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
+            msg = await self.inline.bot.send_message(
+                chat_id,
+                msg_text,
+                parse_mode=None,
+                entities=entities,
+                message_thread_id=self._grabber_topic_id,
+            )
+            if msg:
+                try:
+                    peer = await self.inline.bot.get_input_entity(chat_id)
+                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                    reply_markup = current_msg.reply_markup if current_msg else None
+                    await self.inline.bot(EditMessageRequest(
+                        peer=peer,
+                        id=msg.id,
+                        message=msg_text,
+                        media=InputMediaWebPage(
+                            url=RELOADING_MEDIA_URL,
+                            optional=True,
+                            force_large_media=True,
+                        ),
+                        invert_media=True,
+                        reply_markup=reply_markup,
+                        entities=entities,
+                        no_webpage=False,
+                    ))
+                except Exception as e:
+                    logger.error(f"[GRABBER] Failed to add preview: {e}")
+        except Exception as e:
+            logger.error(f"[GRABBER] Failed to send message with preview: {e}")
 
     async def _check_deps(self):
         deps = {"yt-dlp": "yt_dlp",

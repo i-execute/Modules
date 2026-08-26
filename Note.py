@@ -5,7 +5,8 @@ __version__ = (3, 0, 1)
 import logging
 import asyncio
 from telethon import errors
-from telethon.tl.types import MessageMediaWebPage, DocumentAttributeVideo, DocumentAttributeAudio
+from telethon.tl.functions.messages import EditMessageRequest
+from telethon.tl.types import MessageMediaWebPage, DocumentAttributeVideo, DocumentAttributeAudio, InputMediaWebPage
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,7 @@ E_DIZZY = '<tg-emoji emoji-id=5258511597898340942>😵</tg-emoji>'
 E_CAT = '<tg-emoji emoji-id=5255715243476164998>😸</tg-emoji>'
 E_ANGRY = '<tg-emoji emoji-id=5258084738278658226>😠</tg-emoji>'
 E_STORAGE = 5260682587902354590
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Note/Reloading.jpeg"
 
 
 @loader.tds
@@ -23,6 +25,7 @@ class Note(loader.Module):
 
     strings = {
         "name": "Note",
+        "reloaded": "<blockquote><b>Note module successfully reloaded, everything works</b></blockquote>",
         "help": (
             "<b>Note module commands</b>\n"
             "<blockquote><code>{prefix}note create [name]</code> - save replied media\n"
@@ -61,6 +64,7 @@ class Note(loader.Module):
     }
 
     strings_ru = {
+        "reloaded": "<blockquote><b>Модуль Note был успешно перезагружен, все воркает</b></blockquote>",
         "help": (
             "<b>Команды модуля Note</b>\n"
             "<blockquote><code>{prefix}note create [название]</code> - сохранить медиа из реплая\n"
@@ -143,6 +147,49 @@ class Note(loader.Module):
             )
         except Exception as e:
             logger.error(f"[Note] Failed to create/get storage topic: {e}")
+            return
+
+        chat_id = int(f"-100{self._asset_channel}")
+        greeting_key = f"note_greeted_{self._asset_channel}_{self._storage_topic.id}"
+        already_greeted = self.get(greeting_key, False)
+        if already_greeted:
+            await self._send_with_preview(chat_id, self.strings["reloaded"])
+        else:
+            self.set(greeting_key, True)
+
+    async def _send_with_preview(self, chat_id, text):
+        try:
+            msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
+            msg = await self.inline.bot.send_message(
+                chat_id,
+                msg_text,
+                parse_mode=None,
+                entities=entities,
+                message_thread_id=self._storage_topic.id,
+            )
+            if msg:
+                try:
+                    peer = await self.inline.bot.get_input_entity(chat_id)
+                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                    reply_markup = current_msg.reply_markup if current_msg else None
+                    await self.inline.bot(EditMessageRequest(
+                        peer=peer,
+                        id=msg.id,
+                        message=msg_text,
+                        media=InputMediaWebPage(
+                            url=RELOADING_MEDIA_URL,
+                            optional=True,
+                            force_large_media=True,
+                        ),
+                        invert_media=True,
+                        reply_markup=reply_markup,
+                        entities=entities,
+                        no_webpage=False,
+                    ))
+                except Exception as e:
+                    logger.error(f"[Note] Failed to add preview: {e}")
+        except Exception as e:
+            logger.error(f"[Note] Failed to send message with preview: {e}")
 
     async def _send_with_flood_wait(self, coro, *a, **k):
         try:

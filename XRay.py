@@ -25,8 +25,13 @@ import urllib.request
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
+from telethon.tl.functions.messages import EditMessageRequest
+from telethon.tl.types import InputMediaWebPage
+
 from .. import loader, utils
 from ..inline.types import InlineCall
+
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/Reloading.jpeg"
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +74,11 @@ def _in_docker():
 
 @loader.tds
 class XRay(loader.Module):
-    """Multi-user VPN with VLESS+Reality (XHTTP/TCP+Vision/WebSocket and post-quantum encryption)"""
+    """Multi-user VPN with VLESS+Reality (XHTTP/TCP(RAW)+Vision/WebSocket and post-quantum encryption)"""
 
     strings = {
         "name": "XRay",
+        "reloaded": "<blockquote><b>XRay module successfully reloaded, everything works</b></blockquote>",
         
         "main_menu": (
             "<b>XRay Multi-User VPN</b>\n"
@@ -346,7 +352,7 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre><code class=\"language-Started\"></code></pre>"
+            "<pre><code class=\"language-started\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -356,7 +362,7 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
         "log_user_stopped": (
-            "<pre><code class=\"language-Stoped\"></code></pre>"
+            "<pre><code class=\"language-stoped\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -366,8 +372,7 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
         "log_device_limit": (
-            "<pre><code class=\"language-xray\">"
-            "DEVICE LIMIT EXCEEDED\n"
+            "<pre><code class=\"language-device limit exceeded\">"
             "---------------------\n"
             "User:      {name}\n"
             "Port:      {port}\n"
@@ -378,8 +383,7 @@ class XRay(loader.Module):
             "</code></pre>"
         ),
         "log_user_deleted": (
-            "<pre><code class=\"language-xray\">"
-            "XRAY USER DELETED\n"
+            "<pre><code class=\"language-user deleted\">"
             "-----------------\n"
             "User:      {name}\n"
             "Port:      {port}\n"
@@ -450,6 +454,7 @@ class XRay(loader.Module):
 
     strings_ru = {
         "name": "XRay",
+        "reloaded": "<blockquote><b>Модуль XRay был успешно перезагружен, все воркает</b></blockquote>",
         "main_menu": (
             "<b>XRay Мультиюзерный VPN</b>\n"
             "<blockquote>Всего юзеров: {total}\n"
@@ -708,7 +713,7 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre><code class=\"language-Started\"></code></pre>"
+            "<pre><code class=\"language-started\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -718,7 +723,7 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
         "log_user_stopped": (
-            "<pre><code class=\"language-Stoped\"></code></pre>"
+            "<pre><code class=\"language-stoped\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -728,8 +733,7 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
         "log_device_limit": (
-            "<pre><code class=\"language-xray\">"
-            "DEVICE LIMIT EXCEEDED\n"
+            "<pre><code class=\"language-device limit exceeded\">"
             "---------------------\n"
             "User:      {name}\n"
             "Port:      {port}\n"
@@ -740,8 +744,7 @@ class XRay(loader.Module):
             "</code></pre>"
         ),
         "log_user_deleted": (
-            "<pre><code class=\"language-xray\">"
-            "XRAY USER DELETED\n"
+            "<pre><code class=\"language-user deleted\">"
             "-----------------\n"
             "User:      {name}\n"
             "Port:      {port}\n"
@@ -841,8 +844,6 @@ class XRay(loader.Module):
         self._root = None
         self._xray_path = None
         self._users: Dict[str, Dict] = {}
-        # Values are systemd unit names, not child processes.  This keeps VPNs
-        # alive while the userbot is restarted or the module is unloaded.
         self._processes: Dict[str, str] = {}
         self._monitor_task = None
         self._external_ip = ""
@@ -884,6 +885,15 @@ class XRay(loader.Module):
                 )
             except Exception as e:
                 logger.error(f"[XR] Failed to create/get forum topic: {e}")
+
+        if self._logger_topic and self._asset_channel:
+            chat_id = int(f"-100{self._asset_channel}")
+            greeting_key = f"xray_greeted_{self._asset_channel}_{self._logger_topic.id}"
+            already_greeted = self.get(greeting_key, False)
+            if already_greeted:
+                await self._send_with_preview(chat_id, self.strings["reloaded"])
+            else:
+                self.set(greeting_key, True)
         
         if not self._xray_installed():
             logger.warning("[XR] XRay not installed")
@@ -906,6 +916,40 @@ class XRay(loader.Module):
             if not ok:
                 logger.error(f"[XR] WebSocket recovery failed for {name}: {error}")
         self._start_monitor()
+
+    async def _send_with_preview(self, chat_id, text):
+        try:
+            msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
+            msg = await self.inline.bot.send_message(
+                chat_id,
+                msg_text,
+                parse_mode=None,
+                entities=entities,
+                message_thread_id=self._logger_topic.id,
+            )
+            if msg:
+                try:
+                    peer = await self.inline.bot.get_input_entity(chat_id)
+                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                    reply_markup = current_msg.reply_markup if current_msg else None
+                    await self.inline.bot(EditMessageRequest(
+                        peer=peer,
+                        id=msg.id,
+                        message=msg_text,
+                        media=InputMediaWebPage(
+                            url=RELOADING_MEDIA_URL,
+                            optional=True,
+                            force_large_media=True,
+                        ),
+                        invert_media=True,
+                        reply_markup=reply_markup,
+                        entities=entities,
+                        no_webpage=False,
+                    ))
+                except Exception as e:
+                    logger.error(f"[XR] Failed to add preview: {e}")
+        except Exception as e:
+            logger.error(f"[XR] Failed to send message with preview: {e}")
 
     async def on_unload(self):
         if self._monitor_task:
@@ -966,7 +1010,6 @@ class XRay(loader.Module):
         return int(self.config["MAX_LOG_FILE_SIZE"]) * 1024 * 1024
 
     def _trim_log(self, path: str):
-        """Drop exactly the oldest 10 MiB once a managed log reaches its cap."""
         try:
             if os.path.getsize(path) < self._log_limit_bytes():
                 return
@@ -1020,7 +1063,6 @@ class XRay(loader.Module):
         user = self._users.get(name)
         if not user:
             return
-        # Configuration changes must never be silently applied by autostart.
         if name in self._processes or await self._unit_active(self._unit_name(name)):
             await self._stop_user(name, reason="configuration changed")
         user["restart_required"] = True
@@ -1702,9 +1744,6 @@ class XRay(loader.Module):
                 },
             }
             if user.get("websocket_mode") == "tls-fallback":
-                # ML-KEM and VLESS fallbacks are mutually exclusive.  In this
-                # mode the public CF TLS endpoint forwards regular web traffic
-                # to the local cover site and VLESS uses `encryption=none`.
                 config["inbounds"][0]["settings"]["decryption"] = "none"
                 config["inbounds"][0]["settings"]["fallbacks"] = [{
                     "dest": user.get("site_port", 0),
@@ -2563,10 +2602,7 @@ class XRay(loader.Module):
                 pass
         await self._cb_logs_menu(call, name, kind)
 
-    # ── upload-progress helpers ──────────────────────────────────────────────
-
     def _make_upload_progress_cb(self, state: dict, label: str):
-        """Returns a synchronous Telethon progress_callback for one file."""
         def _cb(current: int, total: int):
             total_safe = total if total else current or 1
             state[label] = (current, total_safe)
@@ -2580,7 +2616,6 @@ class XRay(loader.Module):
         done_event: asyncio.Event,
         header: str,
     ):
-        """Periodically edits the inline message with per-file upload progress."""
         while not done_event.is_set():
             try:
                 await asyncio.sleep(2)
@@ -2598,8 +2633,6 @@ class XRay(loader.Module):
                 break
             except Exception:
                 pass
-
-    # ────────────────────────────────────────────────────────────────────────
 
     async def _cb_get_user_logs(self, call: InlineCall, name: str, kind: str = "xray"):
         await call.edit(self.strings["loading"])
@@ -2620,7 +2653,6 @@ class XRay(loader.Module):
         back_markup = [[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
 
         if kind == "xray" and len(chosen) > 1:
-            # ── send all 3 xray-core logs as a single album with progress ──
             labels = [label for _, label in chosen]
             paths  = [path  for path,  _ in chosen]
             state: dict = {}
@@ -2633,14 +2665,7 @@ class XRay(loader.Module):
                 )
             )
             try:
-                # Build list of InputFile-compatible objects with individual callbacks
-                import telethon.tl.types as _tlt  # noqa: F401 – just confirming telethon is here
-
-                # send_file accepts a list of paths as an album; one caption on
-                # the first file, progress_callback fires per-chunk for the whole
-                # upload session — we track by hooking one shared state dict,
-                # updated from a single callback (Telethon sends list as one
-                # multipart upload session, so current/total span all files).
+                import telethon.tl.types as _tlt
                 shared_label = " + ".join(labels)
                 state[shared_label] = (0, 0)
 
@@ -2658,7 +2683,6 @@ class XRay(loader.Module):
                 done_event.set()
                 render_task.cancel()
         else:
-            # ── single file (daemon.log or only one xray log exists) ──
             path, label = chosen[0]
             state = {label: (0, 0)}
             done_event = asyncio.Event()
@@ -2834,8 +2858,6 @@ class XRay(loader.Module):
             return
         
         await call.edit(self.strings["loading"])
-        # Stop helpers while the old transport is still known, otherwise a
-        # WebSocket CF/site unit could be orphaned after switching transport.
         if name in self._processes:
             await self._stop_user(name, reason="configuration changed")
         user["transport"] = transport

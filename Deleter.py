@@ -8,7 +8,8 @@ import random
 from datetime import timedelta, timezone, datetime
 
 from telethon.tl.functions.channels import LeaveChannelRequest
-from telethon.tl.types import Message, User
+from telethon.tl.functions.messages import EditMessageRequest
+from telethon.tl.types import Message, User, InputMediaWebPage
 
 from .. import loader, utils
 from ..inline.types import InlineCall
@@ -16,6 +17,7 @@ from ..inline.types import InlineCall
 logger = logging.getLogger(__name__)
 
 SAYONARA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/Sayonara.mp4"
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/Reloading.jpeg"
 
 
 @loader.tds
@@ -24,6 +26,7 @@ class Deleter(loader.Module):
 
     strings = {
         "name": "Deleter",
+        "reloaded": "<blockquote><b>Deleter module successfully reloaded, everything works</b></blockquote>",
         "help": (
             "<b>Deleter - swift message deletion</b>\n"
             "<b>Own messages:</b>\n"
@@ -100,6 +103,7 @@ class Deleter(loader.Module):
     }
 
     strings_ru = {
+        "reloaded": "<blockquote><b>Модуль Deleter был успешно перезагружен, все воркает</b></blockquote>",
         "help": (
             "<b>Deleter - быстрое удаление сообщений</b>\n"
             "<b>Свои сообщения:</b>\n"
@@ -196,53 +200,72 @@ class Deleter(loader.Module):
         self._asset_channel = db.get("heroku.forums", "channel_id", None)
 
         if not self._asset_channel:
-            logger.warning("[Deleter] heroku.forums channel_id not found in DB, notifications will be disabled.")
+            logger.warning("[Deleter] heroku.forums channel_id not found in DB, attempting create new one...")
             return
 
-        await self._ensure_topic()
-
-    async def _ensure_topic(self):
-        if not self._asset_channel:
-            logger.warning("[Deleter] _ensure_topic: asset_channel not set, skipping.")
+        try:
+            self._deleter_topic = await utils.asset_forum_topic(
+                self._client,
+                self._db,
+                self._asset_channel,
+                "Deleter",
+                description="Logs of message deletion by Deleter module.",
+                icon_emoji_id=5303138391162919957,
+            )
+        except Exception as e:
+            logger.error("[Deleter] Failed to create/get forum topic: %s", e)
             return
 
-        for attempt in range(1, 4):
-            try:
-                logger.info("[Deleter] Creating/getting forum topic, attempt %d...", attempt)
-                self._deleter_topic = await utils.asset_forum_topic(
-                    self._client,
-                    self._db,
-                    self._asset_channel,
-                    "Deleter",
-                    description="Logs of message deletion by Deleter module.",
-                    icon_emoji_id=5303138391162919957,
-                )
-                logger.info(
-                    "[Deleter] Forum topic ready: id=%s name=%s",
-                    getattr(self._deleter_topic, 'id', '?'),
-                    getattr(self._deleter_topic, 'title', '?'),
-                )
-                return
-            except Exception as e:
-                logger.error("[Deleter] Failed to create/get forum topic (attempt %d): %s", attempt, e)
-                if attempt < 3:
-                    await asyncio.sleep(3 * attempt)
+        chat_id = int(f"-100{self._asset_channel}")
+        greeting_key = f"deleter_greeted_{self._asset_channel}_{self._deleter_topic.id}"
+        already_greeted = self.get(greeting_key, False)
+        if already_greeted:
+            await self._send_with_preview(chat_id, self.strings["reloaded"])
+        else:
+            self.set(greeting_key, True)
 
-        logger.error("[Deleter] All attempts to create forum topic failed. Logs will go to Saved Messages.")
+    async def _send_with_preview(self, chat_id, text):
+        try:
+            msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
+            msg = await self.inline.bot.send_message(
+                chat_id,
+                msg_text,
+                parse_mode=None,
+                entities=entities,
+                message_thread_id=self._deleter_topic.id,
+            )
+            if msg:
+                try:
+                    peer = await self.inline.bot.get_input_entity(chat_id)
+                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                    reply_markup = current_msg.reply_markup if current_msg else None
+                    await self.inline.bot(EditMessageRequest(
+                        peer=peer,
+                        id=msg.id,
+                        message=msg_text,
+                        media=InputMediaWebPage(
+                            url=RELOADING_MEDIA_URL,
+                            optional=True,
+                            force_large_media=True,
+                        ),
+                        invert_media=True,
+                        reply_markup=reply_markup,
+                        entities=entities,
+                        no_webpage=False,
+                    ))
+                except Exception as e:
+                    logger.error("[Deleter] Failed to add preview: %s", e)
+        except Exception as e:
+            logger.error("[Deleter] Failed to send message with preview: %s", e)
 
     async def _send_log(self, text: str):
         if not self._deleter_topic or not self._asset_channel:
-            if not self._deleter_topic and self._asset_channel:
-                logger.info("[Deleter] Topic not ready, retrying creation before sending log.")
-                await self._ensure_topic()
-
-            if not self._deleter_topic or not self._asset_channel:
-                try:
-                    me = await self._client.get_me()
-                    await self._client.send_message(me.id, text, parse_mode="html")
-                except Exception as e:
-                    logger.error("[Deleter] Failed to send fallback log to Saved Messages: %s", e)
-                return
+            try:
+                me = await self._client.get_me()
+                await self._client.send_message(me.id, text, parse_mode="html")
+            except Exception as e:
+                logger.error("[Deleter] Failed to send fallback log to Saved Messages: %s", e)
+            return
 
         try:
             await self.inline.bot.send_message(

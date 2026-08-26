@@ -17,7 +17,12 @@ from herokutl.tl.types import (
     Channel,
 )
 
+from telethon.tl.functions.messages import EditMessageRequest
+from telethon.tl.types import InputMediaWebPage
+
 from .. import loader, utils
+
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/STALKER/Reloading.jpeg"
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +37,7 @@ class STALKER(loader.Module):
 
     strings = {
         "name": "STALKER",
+        "reloaded": "<blockquote><b>STALKER module successfully reloaded, everything works</b></blockquote>",
         "log_entry": (
             "<blockquote><b>Stopped typing</b>\n"
             "<b>From:</b> {from_name}\n"
@@ -43,6 +49,7 @@ class STALKER(loader.Module):
     }
 
     strings_ru = {
+        "reloaded": "<blockquote><b>Модуль STALKER был успешно перезагружен, все воркает</b></blockquote>",
         "log_entry": (
             "<blockquote><b>Передумал писать</b>\n"
             "<b>От:</b> {from_name}\n"
@@ -145,7 +152,50 @@ class STALKER(loader.Module):
             logger.error(f"[STALKER] Failed to create/get forum topic: {e}")
             return
 
+        chat_id = int(f"-100{self._asset_channel}")
+        greeting_key = f"stalker_greeted_{self._asset_channel}_{self._logger_topic.id}"
+        already_greeted = self.get(greeting_key, False)
+        if already_greeted:
+            await self._send_with_preview(chat_id, self.strings["reloaded"])
+        else:
+            self.set(greeting_key, True)
+
         self._checker_task = asyncio.ensure_future(self._checker_loop())
+
+    async def _send_with_preview(self, chat_id, text):
+        try:
+            msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
+            msg = await self._send_with_flood_wait(
+                self.inline.bot.send_message,
+                chat_id,
+                msg_text,
+                parse_mode=None,
+                entities=entities,
+                message_thread_id=self._logger_topic.id,
+            )
+            if msg:
+                try:
+                    peer = await self.inline.bot.get_input_entity(chat_id)
+                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                    reply_markup = current_msg.reply_markup if current_msg else None
+                    await self.inline.bot(EditMessageRequest(
+                        peer=peer,
+                        id=msg.id,
+                        message=msg_text,
+                        media=InputMediaWebPage(
+                            url=RELOADING_MEDIA_URL,
+                            optional=True,
+                            force_large_media=True,
+                        ),
+                        invert_media=True,
+                        reply_markup=reply_markup,
+                        entities=entities,
+                        no_webpage=False,
+                    ))
+                except Exception as e:
+                    logger.error(f"[STALKER] Failed to add preview: {e}")
+        except Exception as e:
+            logger.error(f"[STALKER] Failed to send message with preview: {e}")
 
     async def on_unload(self):
         if self._checker_task:
