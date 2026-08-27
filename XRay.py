@@ -1236,6 +1236,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         if not self._cloudflared_installed():
             return False, "cloudflared_not_installed"
         log_path = os.path.join(user_dir, "daemon.log")
+        start_size = os.path.getsize(log_path) if os.path.exists(log_path) else 0
         try:
             self._write_unit(unit, f"XRay CF Tunnel for {name}", [cloudflared, "tunnel", "--protocol", "http2", "--url", f"http://127.0.0.1:{site_port}", "--no-autoupdate"], log_path)
             ok, output = await self._start_unit(unit)
@@ -1246,12 +1247,14 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             while time.time() < deadline:
                 await asyncio.sleep(1)
                 try:
-                    text = open(log_path, "r", errors="replace").read()
+                    with open(log_path, "r", errors="replace") as f:
+                        f.seek(start_size)
+                        text = f.read()
                 except OSError:
                     text = ""
-                match = re.search(r"https://([a-z0-9-]+\.trycloudflare\.com)", text, re.I)
-                if match:
-                    hostname = match.group(1)
+                matches = re.findall(r"https://([a-z0-9-]+\.trycloudflare\.com)", text, re.I)
+                if matches:
+                    hostname = matches[-1]
                     break
                 if not await self._unit_active(unit):
                     break
