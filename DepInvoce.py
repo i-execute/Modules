@@ -38,9 +38,10 @@ class DepInvoice(loader.Module):
 
     strings = {
         "name": "DepInvoice",
+
         "reloaded": "<blockquote><b>DepInvoice module successfully reloaded, everything works</b></blockquote>",
         
-        "no_bot": "<blockquote><b>Error:</b> Inline bot not found. Enable inline mode in config.</blockquote>",
+        "no_bot": "<blockquote><b>Error:</b> Inline bot not found.</blockquote>",
         "refund_invalid_args": "<blockquote><b>Error:</b> Invalid arguments. User ID must be a number.</blockquote>",
         
         "refund_usage": (
@@ -94,10 +95,9 @@ class DepInvoice(loader.Module):
     }
 
     strings_ru = {
-        "name": "DepInvoice",
         "reloaded": "<blockquote><b>Модуль DepInvoice был успешно перезагружен, все воркает</b></blockquote>",
         
-        "no_bot": "<blockquote><b>Ошибка:</b> Inline бот не найден. Включите inline режим в конфиге.</blockquote>",
+        "no_bot": "<blockquote><b>Ошибка:</b> Inline бот не найден.</blockquote>",
         "refund_invalid_args": "<blockquote><b>Ошибка:</b> Неверные аргументы. ID пользователя должен быть числом.</blockquote>",
         
         "refund_usage": (
@@ -329,7 +329,10 @@ class DepInvoice(loader.Module):
         except Exception as e:
             return False, str(e)
 
-    @loader.command()
+    @loader.command(
+        ru_doc="[user_id] [charge_id] - Refund Stars to user", 
+        en_doc="[user_id] [charge_id] - Refund Stars to user"
+    )
     async def refund(self, message):
         """[user_id] [charge_id] - Refund Stars to user"""
         if not self._bot_token:
@@ -369,7 +372,11 @@ class DepInvoice(loader.Module):
             return None
         return InputWebDocument(url=url, size=0, mime_type=mime_type, attributes=[])
 
-    @loader.inline_handler()
+
+    @loader.inline_handler(
+        ru_doc="Создать инвойс на звезды",
+        en_doc="Create Stars invoice",
+    )
     async def dep_inline_handler(self, query):
         """Create Stars invoice"""
         text = query.query.strip()
