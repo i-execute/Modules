@@ -1,8 +1,126 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Connecting</title>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Connecting</title>
 <style>
-:root{color-scheme:dark;--bg:#111214;--ink:#e7e7e8;--muted:#898b90;--line:#2b2d31}*{box-sizing:border-box}html,body,#root{margin:0;min-height:100%;background:var(--bg)}body{overflow:hidden;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink)}.loader{position:fixed;inset:0;display:grid;place-items:center;padding:28px;background:radial-gradient(ellipse 74% 48% at 50% 45%,#191a1d 0%,var(--bg) 70%)}.loader__card{width:min(360px,100%)}.loader__eyebrow{margin:0 0 12px;color:var(--muted);font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.18em;text-transform:uppercase}.loader h1{margin:0;max-width:300px;font-size:clamp(31px,8.2vw,43px);font-weight:450;letter-spacing:-.05em;line-height:1.02}.loader__row{display:flex;align-items:center;gap:13px;margin-top:29px}.loader__track{flex:1;height:2px;background:var(--line);overflow:hidden}.loader__track i{display:block;width:32%;height:100%;background:var(--ink);animation:scan 1.15s cubic-bezier(.65,0,.35,1) infinite}.loader__status{color:var(--muted);font:10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase}@keyframes scan{from{transform:translateX(-115%)}to{transform:translateX(330%)}}@media(prefers-reduced-motion:reduce){.loader__track i{animation:none;transform:translateX(110%)}}
-</style></head><body><div id="root"><main class="loader" aria-live="polite"><div class="loader__card"><p class="loader__eyebrow">private network</p><h1>Preparing your connection.</h1><div class="loader__row"><div class="loader__track"><i></i></div><span class="loader__status">loading</span></div></div></main></div>
+:root {
+  color-scheme: dark;
+  --bg: #0e0e10;
+  --ink: #eaeaea;
+  --mute: #71717a;
+  --line: rgba(255,255,255,0.06);
+  --accent: #52525b;
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; min-height: 100%; background: var(--bg); }
+body {
+  overflow: hidden;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--ink);
+}
+.loader {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.loader__card {
+  width: min(360px, 100%);
+  text-align: left;
+}
+.loader__eyebrow {
+  margin: 0 0 10px;
+  color: var(--mute);
+  font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+.loader h1 {
+  margin: 0;
+  font-size: clamp(28px, 8vw, 42px);
+  font-weight: 500;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+}
+.loader__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 30px;
+  color: var(--mute);
+}
+.loader__track {
+  flex: 1;
+  height: 2px;
+  background: var(--line);
+  overflow: hidden;
+  border-radius: 2px;
+}
+.loader__track i {
+  display: block;
+  width: 30%;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  animation: scan 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+.loader__status {
+  min-width: 70px;
+  text-align: right;
+  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+@keyframes scan {
+  from { transform: translateX(-150%); }
+  to { transform: translateX(350%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loader__track i { animation: none; transform: translateX(90%); }
+}
+</style>
+</head>
+<body>
+<div id="root">
+  <main class="loader" aria-live="polite">
+    <div class="loader__card">
+      <p class="loader__eyebrow">private network</p>
+      <h1>Preparing your connection.</h1>
+      <div class="loader__row">
+        <div class="loader__track"><i></i></div>
+        <span class="loader__status">loading</span>
+      </div>
+    </div>
+  </main>
+</div>
 <script>
-(function(){const root=document.getElementById('root'),fallback=root.innerHTML,load=s=>new Promise((ok,no)=>{const e=document.createElement('script');e.src=s;e.onload=ok;e.onerror=no;document.head.appendChild(e)});Promise.resolve().then(()=>load('https://unpkg.com/react@18.3.1/umd/react.production.min.js')).then(()=>load('https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js')).then(()=>load('https://unpkg.com/@babel/standalone@7.25.9/babel.min.js')).then(()=>fetch('/gate.jsx',{cache:'no-store'})).then(r=>{if(!r.ok)throw Error('cover '+r.status);return r.text()}).then(src=>{const js=Babel.transform(src,{presets:['react']}).code;new Function('React','ReactDOM',js+';if(!window.App)throw Error("App missing");ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(window.App));')(window.React,window.ReactDOM)}).catch(()=>{root.innerHTML=fallback})})();
-</script></body></html>
+(function(){
+  const root = document.getElementById('root');
+  const fallback = root.innerHTML;
+  const load = s => new Promise((ok, no) => {
+    const e = document.createElement('script');
+    e.src = s; e.onload = ok; e.onerror = no;
+    document.head.appendChild(e);
+  });
+  const fail = () => { root.innerHTML = fallback; };
+  Promise.resolve()
+    .then(() => load('https://unpkg.com/react@18.3.1/umd/react.production.min.js'))
+    .then(() => load('https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js'))
+    .then(() => load('https://unpkg.com/@babel/standalone@7.25.9/babel.min.js'))
+    .then(() => fetch('/gate.jsx', {cache: 'no-store'}))
+    .then(r => {
+      if(!r.ok) throw Error('cover ' + r.status);
+      return r.text();
+    })
+    .then(src => {
+      const js = Babel.transform(src, {presets: ['react']}).code;
+      new Function('React','ReactDOM', js + ';if(!window.App)throw Error("App missing");ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(window.App));')(window.React, window.ReactDOM);
+    })
+    .catch(fail);
+})();
+</script>
+</body>
+</html>
