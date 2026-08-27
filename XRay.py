@@ -2670,8 +2670,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             tmp.close()
 
             try:
-                await utils.answer_file(
-                    call,
+                await self.inline.bot.send_file(
+                    call.form["chat"],
                     tmp.name,
                     attributes=[],
                     force_document=True,
@@ -2712,8 +2712,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         tmp.close()
 
         try:
-            await utils.answer_file(
-                call,
+            await self.inline.bot.send_file(
+                call.form["chat"],
                 tmp.name,
                 attributes=[],
                 force_document=True,
@@ -2842,8 +2842,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
 
         try:
             cb = self._make_upload_progress_cb(state, cb_label)
-            await self._client.send_file(
-                call.chat_id,
+            await self.inline.bot.send_file(
+                call.form["chat"],
                 send_paths,
                 caption=caption,
                 parse_mode="html",
@@ -2854,8 +2854,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             logger.exception(f"[XR] album send_file failed: {e}")
             try:
                 for fpath, label in chosen:
-                    await self._client.send_file(
-                        call.chat_id,
+                    await self.inline.bot.send_file(
+                        call.form["chat"],
                         fpath,
                         caption=f"<b>{kind.title()} {label}:</b> <code>{_escape(name)}</code>",
                         parse_mode="html",
