@@ -1054,7 +1054,7 @@ class KeyKeeper(loader.Module):
             tmp = tempfile.NamedTemporaryFile(
                 mode="w",
                 suffix=".json",
-                prefix=f"kr_models_{provider['name'].lower()}_",
+                prefix=f"kk_models_{provider['name'].lower()}_",
                 delete=False,
             )
             json.dump(export, tmp, indent=2, ensure_ascii=False)
@@ -1225,7 +1225,7 @@ class KeyKeeper(loader.Module):
         tmp = tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".json",
-            prefix=f"kr_logs_{provider['name'].lower()}_",
+            prefix=f"kk_logs_{provider['name'].lower()}_",
             delete=False,
         )
         json.dump(export, tmp, indent=2, ensure_ascii=False)
@@ -1273,7 +1273,7 @@ class KeyKeeper(loader.Module):
         tmp = tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".json",
-            prefix=f"kr_keys_{provider['name'].lower()}_",
+            prefix=f"kk_keys_{provider['name'].lower()}_",
             delete=False,
         )
         json.dump(export_data, tmp, indent=2, ensure_ascii=False)
