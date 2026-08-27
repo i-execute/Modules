@@ -140,14 +140,14 @@ class StickerClone(loader.Module):
             "<b>Done</b>\n"
             "<blockquote>Pack: <b>{name}</b>\n"
             "Stickers: {count}</blockquote>\n"
-            "<blockquote><a href='tg://addstickers?set={short}'>Open pack</a></blockquote>"
+            "<blockquote><a href='https://t.me/addstickers/{short}'>Open pack</a></blockquote>"
         ),
         "done_partial": (
             "<b>Done with errors</b>\n"
             "<blockquote>Pack: <b>{name}</b>\n"
             "Copied: {copied}/{total}\n"
             "Failed: {failed}</blockquote>\n"
-            "<blockquote><a href='tg://addstickers?set={short}'>Open pack</a></blockquote>"
+            "<blockquote><a href='https://t.me/addstickers/{short}'>Open pack</a></blockquote>"
         ),
         "copy_failed": (
             "<b>Copy Failed</b>\n"
@@ -244,14 +244,14 @@ class StickerClone(loader.Module):
             "<b>Готово</b>\n"
             "<blockquote>Пак: <b>{name}</b>\n"
             "Стикеров: {count}</blockquote>\n"
-            "<blockquote><a href='tg://addstickers?set={short}'>Открыть пак</a></blockquote>"
+            "<blockquote><a href='https://t.me/addstickers/{short}'>Открыть пак</a></blockquote>"
         ),
         "done_partial": (
             "<b>Готово с ошибками</b>\n"
             "<blockquote>Пак: <b>{name}</b>\n"
             "Скопировано: {copied}/{total}\n"
             "Ошибок: {failed}</blockquote>\n"
-            "<blockquote><a href='tg://addstickers?set={short}'>Открыть пак</a></blockquote>"
+            "<blockquote><a href='https://t.me/addstickers/{short}'>Открыть пак</a></blockquote>"
         ),
         "copy_failed": (
             "<b>Ошибка копирования</b>\n"

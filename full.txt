@@ -32,6 +32,7 @@ SCMusic
 ServerBox
 Session
 ShorBot
+SQLDumper
 STALKER
 Statistics
 StickerClone
