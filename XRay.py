@@ -353,7 +353,7 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre><code class=\"language-xray started\"></code></pre>"
+            "<pre><code class=\"language-Started\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -363,7 +363,7 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
         "log_user_stopped": (
-            "<pre><code class=\"language-xray stoped\"></code></pre>"
+            "<pre><code class=\"language-Stopped\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -715,7 +715,7 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre><code class=\"language-xray started\"></code></pre>"
+            "<pre><code class=\"language-Started\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -725,7 +725,7 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
         "log_user_stopped": (
-            "<pre><code class=\"language-xray stoped\"></code></pre>"
+            "<pre><code class=\"language-Stopped\"></code></pre>"
             "<blockquote>"
             "----------------\n"
             "User:      {name}\n"
@@ -2819,13 +2819,19 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         state = {}
         done_event = asyncio.Event()
 
+        import zipfile
         if len(chosen) > 1:
-            shared_label = " + ".join(labels)
+            zip_path = os.path.join(user_dir, f"xray_logs_{name}.zip")
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for fpath, label in chosen:
+                    zf.write(fpath, arcname=label)
+            
+            shared_label = "xray_logs.zip"
             state[shared_label] = (0, 0)
             header = f"Uploading Xray-core logs for {_escape(name)}"
             render_labels = [shared_label]
             cb_label = shared_label
-            send_paths = paths
+            send_paths = zip_path
             caption = f"<b>Xray-core logs:</b> <code>{_escape(name)}</code>"
         else:
             label = labels[0]
