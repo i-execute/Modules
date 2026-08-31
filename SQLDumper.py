@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 # meta developer: I_execute.t.me
 
 import asyncio
@@ -34,12 +34,12 @@ def _is_sql_text(data: bytes) -> bool:
 
 def _detect_sql(data: bytes):
     if not data:
-        return None, "файл пустой"
+        return None, "empty file"
     if _is_sqlite(data):
         return "sqlite_binary", None
     if _is_sql_text(data):
         return "sql_text", None
-    return None, "нет сигнатуры SQLite и SQL-ключевых слов"
+    return None, "no SQLite signature and no SQL keywords"
 
 
 def _tables_to_csvs(conn: sqlite3.Connection):
@@ -71,7 +71,7 @@ def _dump_sqlite(data: bytes):
         result = _tables_to_csvs(conn)
         conn.close()
         if not result:
-            raise ValueError("таблиц не найдено")
+            raise ValueError("no tables found")
         return result
     finally:
         try:
@@ -86,7 +86,7 @@ def _dump_sql_text(data: bytes):
         conn.executescript(data.decode("utf-8", errors="replace"))
         result = _tables_to_csvs(conn)
         if not result:
-            raise ValueError("таблиц не найдено после импорта")
+            raise ValueError("no tables found after import")
         return result
     finally:
         conn.close()
@@ -152,7 +152,6 @@ class SQLDumper(loader.Module):
     }
 
     strings_ru = {
-        "name": "SQLDumper",
         "no_reply": (
             "<b>SQLDumper</b>\n"
             "<blockquote>Ответьте на файл командой .sqld</blockquote>"
@@ -262,7 +261,10 @@ class SQLDumper(loader.Module):
             except Exception:
                 pass
 
-    @loader.command(ru_doc="[реплай] — дамп SQL/SQLite в CSV")
+    @loader.command(
+        ru_doc="[реплай] — дамп SQL/SQLite в CSV",
+        en_doc="[reply] — dump SQL/SQLite to CSV",
+    )
     async def sqld(self, message):
         """[reply] — dump SQL/SQLite to CSV"""
         reply = await message.get_reply_message()
@@ -308,17 +310,27 @@ class SQLDumper(loader.Module):
 
         buf = io.BytesIO()
         try:
-            await self._client.download_file(doc, buf, progress_callback=self._dl_cb(tid_dl, time.time()))
+            await self._client.download_file(
+                doc, buf,
+                progress_callback=self._dl_cb(tid_dl, time.time()),
+            )
         except Exception as e:
-            dl_done.set(); dl_task.cancel(); self._dl_state.pop(tid_dl, None)
+            dl_done.set()
+            dl_task.cancel()
+            self._dl_state.pop(tid_dl, None)
             await edit(self.strings["error"].format(error=str(e)))
             return
         finally:
-            dl_done.set(); dl_task.cancel(); self._dl_state.pop(tid_dl, None)
+            dl_done.set()
+            dl_task.cancel()
+            self._dl_state.pop(tid_dl, None)
 
         data = buf.getvalue()
 
-        await edit(self.strings["analyzing"].format(name=file_name, size=self._fmt_size(len(data))))
+        await edit(self.strings["analyzing"].format(
+            name=file_name,
+            size=self._fmt_size(len(data)),
+        ))
         await asyncio.sleep(0.3)
 
         sql_type, reason = _detect_sql(data)
@@ -329,10 +341,11 @@ class SQLDumper(loader.Module):
         type_label = "SQLite binary" if sql_type == "sqlite_binary" else "SQL text"
 
         try:
-            tables_csv = _dump_sqlite(data) if sql_type == "sqlite_binary" else _dump_sql_text(data)
-        except ValueError as e:
-            await edit(self.strings["error"].format(error=str(e)))
-            return
+            tables_csv = (
+                _dump_sqlite(data)
+                if sql_type == "sqlite_binary"
+                else _dump_sql_text(data)
+            )
         except Exception as e:
             await edit(self.strings["error"].format(error=str(e)))
             return
@@ -341,37 +354,46 @@ class SQLDumper(loader.Module):
             await edit(self.strings["empty"])
             return
 
-        await edit(self.strings["dumping"].format(sql_type=type_label, tables=len(tables_csv)))
+        await edit(self.strings["dumping"].format(
+            sql_type=type_label,
+            tables=len(tables_csv),
+        ))
 
+        base = os.path.splitext(file_name)[0]
         tmp_files = []
         total_rows = 0
-        base = os.path.splitext(file_name)[0]
 
         try:
             for tname, csv_bytes in tables_csv.items():
                 total_rows += max(csv_bytes.count(b"\n") - 1, 0)
-                f = tempfile.NamedTemporaryFile(
-                    suffix=".csv",
-                    prefix=f"{base}_{tname}_",
-                    delete=False,
+                csv_path = os.path.join(
+                    tempfile.gettempdir(),
+                    f"{base}_{tname}.csv",
                 )
-                f.write(csv_bytes)
-                f.close()
-                tmp_files.append(f.name)
+                if os.path.exists(csv_path):
+                    try:
+                        os.unlink(csv_path)
+                    except Exception:
+                        pass
+                with open(csv_path, "wb") as f:
+                    f.write(csv_bytes)
+                tmp_files.append(csv_path)
 
             tid_ul = f"ul_{id(message)}"
             self._ul_state[tid_ul] = {"text": ""}
             ul_done = asyncio.Event()
             ul_task = asyncio.create_task(
                 self._render_loop(
-                    lambda: self.strings["uploading"].format(progress=self._ul_state[tid_ul]["text"]),
+                    lambda: self.strings["uploading"].format(
+                        progress=self._ul_state[tid_ul]["text"]
+                    ),
                     edit,
                     ul_done,
                 )
             )
 
             try:
-                for chunk in [tmp_files[i:i+10] for i in range(0, len(tmp_files), 10)]:
+                for chunk in [tmp_files[i:i + 10] for i in range(0, len(tmp_files), 10)]:
                     cb = self._ul_cb(tid_ul, time.time())
                     await self._client.send_file(
                         message.chat_id,
@@ -384,7 +406,9 @@ class SQLDumper(loader.Module):
                 await edit(self.strings["error"].format(error=str(e)))
                 return
             finally:
-                ul_done.set(); ul_task.cancel(); self._ul_state.pop(tid_ul, None)
+                ul_done.set()
+                ul_task.cancel()
+                self._ul_state.pop(tid_ul, None)
 
         finally:
             for p in tmp_files:
@@ -393,4 +417,8 @@ class SQLDumper(loader.Module):
                 except Exception:
                     pass
 
-        await edit(self.strings["done"].format(name=file_name, tables=len(tables_csv), rows=total_rows))
+        await edit(self.strings["done"].format(
+            name=file_name,
+            tables=len(tables_csv),
+            rows=total_rows,
+        ))
