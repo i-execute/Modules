@@ -73,8 +73,8 @@ class StickerClone(loader.Module):
         "btn_back": "Back",
         "btn_close": "Close",
         "btn_retry": "Try Again",
-        "input_source": "Send source pack link (https://t.me/addstickers/PackName):",
-        "input_short": "Send new pack link (https://t.me/addstickers/MyNewPack) - must be free:",
+        "input_source": "Send source pack link:",
+        "input_short": "Send new pack link - must be free:",
         "input_name": "Send the name for the new sticker pack:",
         "source_set": (
             "<b>Source Pack Set</b>\n"
@@ -230,8 +230,8 @@ class StickerClone(loader.Module):
         "btn_back": "Назад",
         "btn_close": "Закрыть",
         "btn_retry": "Попробовать снова",
-        "input_source": "Отправьте ссылку на исходный пак (https://t.me/addstickers/PackName):",
-        "input_short": "Отправьте ссылку для нового пака (https://t.me/addstickers/MyNewPack) - должна быть свободной:",
+        "input_source": "Вставьте ссылку на исходный пак:",
+        "input_short": "Вставьте ссылку для нового пака",
         "input_name": "Отправьте название для нового стикерпака:",
         "source_set": (
             "<b>Исходный пак задан</b>\n"

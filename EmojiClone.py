@@ -62,8 +62,8 @@ class EmojiClone(loader.Module):
         "btn_back": "Back",
         "btn_close": "Close",
         "btn_retry": "Try Again",
-        "input_source": "Send source emoji pack link (https://t.me/addemoji/PackName):",
-        "input_short": "Send new pack link (https://t.me/addemoji/MyNewPack) - must be free:",
+        "input_source": "Send source emoji pack link:",
+        "input_short": "Send new pack link - must be free:",
         "input_name": "Send the name for the new emoji pack:",
         "source_set": (
             "<b>Source Pack Set</b>\n"
@@ -155,8 +155,8 @@ class EmojiClone(loader.Module):
         "btn_back": "Назад",
         "btn_close": "Закрыть",
         "btn_retry": "Попробовать снова",
-        "input_source": "Отправьте ссылку на исходный пак (https://t.me/addemoji/PackName):",
-        "input_short": "Отправьте ссылку для нового пака (https://t.me/addemoji/MyNewPack) - должна быть свободной:",
+        "input_source": "Отправьте ссылку на исходный пак:",
+        "input_short": "Отправьте ссылку для нового пака:",
         "input_name": "Отправьте название для нового эмодзи-пака:",
         "source_set": (
             "<b>Исходный пак задан</b>\n"
