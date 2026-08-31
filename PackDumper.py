@@ -79,62 +79,61 @@ class PackDumper(loader.Module):
         ),
         "rd_title": "<b>Message Dump</b>",
         "rd_message": (
-            "<b>Message</b>\n"
-            "<blockquote>ID: {msg_id}\n"
+            "<blockquote expandable><b>Message</b>\n"
+            "ID: {msg_id}\n"
             "Date: {date}\n"
             "From: {from_id}</blockquote>"
         ),
         "rd_text": (
-            "<b>Text</b>\n"
-            "<blockquote>{text}</blockquote>"
+            "<blockquote expandable><b>Text</b>\n"
+            "{text}</blockquote>"
         ),
         "rd_no_text": (
-            "<b>Text</b>\n"
-            "<blockquote><i>empty</i></blockquote>"
+            "<blockquote expandable><b>Text</b>\n"
+            "<i>empty</i></blockquote>"
         ),
         "rd_media_none": (
-            "<b>Media</b>\n"
-            "<blockquote><i>none</i></blockquote>"
+            "<blockquote expandable><b>Media</b>\n"
+            "<i>none</i></blockquote>"
         ),
-        "rd_media_header": "<b>Media</b>",
-        "rd_media_type": (
-            "<blockquote>Type: {media_type}</blockquote>"
-        ),
-        "rd_doc_header": "<b>Document</b>",
+        "rd_media_header": "<blockquote expandable><b>Media</b>\n",
+        "rd_media_type": "Type: {media_type}\n",
+        "rd_doc_header": "<b>Document</b>\n",
         "rd_doc_fields": (
-            "<blockquote>ID: {doc_id}\n"
+            "ID: {doc_id}\n"
             "Access hash: {access_hash}\n"
             "File ref: {file_ref}\n"
             "MIME: {mime}\n"
-            "Size: {size} bytes</blockquote>"
+            "Size: {size} bytes\n"
         ),
         "rd_sticker": (
             "<b>Sticker</b>\n"
-            "<blockquote>Alt: {alt}\n"
+            "Alt: {alt}\n"
             "Pack short: {short_name}\n"
-            "Pack ID: {pack_id}</blockquote>"
+            "Pack ID: {pack_id}\n"
         ),
         "rd_custom_emoji": (
             "<b>Custom Emoji</b>\n"
-            "<blockquote>Alt: {alt}\n"
+            "Alt: {alt}\n"
             "Pack short: {short_name}\n"
-            "Pack ID: {pack_id}</blockquote>"
+            "Pack ID: {pack_id}\n"
         ),
         "rd_gif": (
             "<b>GIF / Animation</b>\n"
-            "<blockquote>ID: {doc_id}\n"
+            "ID: {doc_id}\n"
             "MIME: {mime}\n"
-            "Size: {size} bytes</blockquote>"
+            "Size: {size} bytes\n"
         ),
-        "rd_photo_header": "<b>Photo</b>",
+        "rd_photo_header": "<b>Photo</b>\n",
         "rd_photo_fields": (
-            "<blockquote>ID: {photo_id}\n"
+            "ID: {photo_id}\n"
             "Access hash: {access_hash}\n"
-            "File ref: {file_ref}</blockquote>"
+            "File ref: {file_ref}\n"
         ),
-        "rd_entities_header": "<b>Entities</b>",
-        "rd_entities_item": "<blockquote>{idx}. {etype}: offset={offset} length={length}{extra}</blockquote>",
-        "rd_entities_none": "<blockquote><i>none</i></blockquote>",
+        "rd_entities_header": "<b>Entities</b>\n",
+        "rd_entities_item": "{idx}. {etype}: offset={offset} length={length}{extra}\n",
+        "rd_entities_none": "<i>none</i>",
+        "rd_blockquote_end": "</blockquote>",
         "rd_btn_close": "Close",
         "btn_back": "Back",
         "type_stickers": "Stickers",
@@ -182,62 +181,61 @@ class PackDumper(loader.Module):
         ),
         "rd_title": "<b>Дамп сообщения</b>",
         "rd_message": (
-            "<b>Сообщение</b>\n"
-            "<blockquote>ID: {msg_id}\n"
+            "<blockquote expandable><b>Сообщение</b>\n"
+            "ID: {msg_id}\n"
             "Дата: {date}\n"
             "От: {from_id}</blockquote>"
         ),
         "rd_text": (
-            "<b>Текст</b>\n"
-            "<blockquote>{text}</blockquote>"
+            "<blockquote expandable><b>Текст</b>\n"
+            "{text}</blockquote>"
         ),
         "rd_no_text": (
-            "<b>Текст</b>\n"
-            "<blockquote><i>пусто</i></blockquote>"
+            "<blockquote expandable><b>Текст</b>\n"
+            "<i>пусто</i></blockquote>"
         ),
         "rd_media_none": (
-            "<b>Медиа</b>\n"
-            "<blockquote><i>нет</i></blockquote>"
+            "<blockquote expandable><b>Медиа</b>\n"
+            "<i>нет</i></blockquote>"
         ),
-        "rd_media_header": "<b>Медиа</b>",
-        "rd_media_type": (
-            "<blockquote>Тип: {media_type}</blockquote>"
-        ),
-        "rd_doc_header": "<b>Документ</b>",
+        "rd_media_header": "<blockquote expandable><b>Медиа</b>\n",
+        "rd_media_type": "Тип: {media_type}\n",
+        "rd_doc_header": "<b>Документ</b>\n",
         "rd_doc_fields": (
-            "<blockquote>ID: {doc_id}\n"
+            "ID: {doc_id}\n"
             "Access hash: {access_hash}\n"
             "File ref: {file_ref}\n"
             "MIME: {mime}\n"
-            "Размер: {size} байт</blockquote>"
+            "Размер: {size} байт\n"
         ),
         "rd_sticker": (
             "<b>Стикер</b>\n"
-            "<blockquote>Alt: {alt}\n"
+            "Alt: {alt}\n"
             "Пак short: {short_name}\n"
-            "Пак ID: {pack_id}</blockquote>"
+            "Пак ID: {pack_id}\n"
         ),
         "rd_custom_emoji": (
             "<b>Кастомный эмодзи</b>\n"
-            "<blockquote>Alt: {alt}\n"
+            "Alt: {alt}\n"
             "Пак short: {short_name}\n"
-            "Пак ID: {pack_id}</blockquote>"
+            "Пак ID: {pack_id}\n"
         ),
         "rd_gif": (
             "<b>GIF / Анимация</b>\n"
-            "<blockquote>ID: {doc_id}\n"
+            "ID: {doc_id}\n"
             "MIME: {mime}\n"
-            "Размер: {size} байт</blockquote>"
+            "Размер: {size} байт\n"
         ),
-        "rd_photo_header": "<b>Фото</b>",
+        "rd_photo_header": "<b>Фото</b>\n",
         "rd_photo_fields": (
-            "<blockquote>ID: {photo_id}\n"
+            "ID: {photo_id}\n"
             "Access hash: {access_hash}\n"
-            "File ref: {file_ref}</blockquote>"
+            "File ref: {file_ref}\n"
         ),
-        "rd_entities_header": "<b>Entities</b>",
-        "rd_entities_item": "<blockquote>{idx}. {etype}: offset={offset} length={length}{extra}</blockquote>",
-        "rd_entities_none": "<blockquote><i>нет</i></blockquote>",
+        "rd_entities_header": "<b>Entities</b>\n",
+        "rd_entities_item": "{idx}. {etype}: offset={offset} length={length}{extra}\n",
+        "rd_entities_none": "<i>нет</i>",
+        "rd_blockquote_end": "</blockquote>",
         "rd_btn_close": "Закрыть",
         "btn_back": "Назад",
         "type_stickers": "Стикеры",
@@ -350,14 +348,15 @@ class PackDumper(loader.Module):
             parts.append(self.strings["rd_media_none"])
         else:
             media_type = type(media).__name__
-            parts.append(self.strings["rd_media_header"])
-            parts.append(self.strings["rd_media_type"].format(media_type=_escape(media_type)))
+            media_parts = []
+            media_parts.append(self.strings["rd_media_header"])
+            media_parts.append(self.strings["rd_media_type"].format(media_type=_escape(media_type)))
 
             if isinstance(media, MessageMediaDocument):
                 doc = media.document
                 if doc:
-                    parts.append(self.strings["rd_doc_header"])
-                    parts.append(self.strings["rd_doc_fields"].format(
+                    media_parts.append(self.strings["rd_doc_header"])
+                    media_parts.append(self.strings["rd_doc_fields"].format(
                         doc_id=doc.id,
                         access_hash=doc.access_hash,
                         file_ref=doc.file_reference.hex() if doc.file_reference else "",
@@ -395,19 +394,19 @@ class PackDumper(loader.Module):
                             pack_id = str(sticker_set.id)
 
                     if is_sticker:
-                        parts.append(self.strings["rd_sticker"].format(
+                        media_parts.append(self.strings["rd_sticker"].format(
                             alt=_escape(sticker_alt),
                             short_name=_escape(pack_short) or "<i>N/A</i>",
                             pack_id=_escape(pack_id) or "<i>N/A</i>",
                         ))
                     elif is_custom_emoji:
-                        parts.append(self.strings["rd_custom_emoji"].format(
+                        media_parts.append(self.strings["rd_custom_emoji"].format(
                             alt=_escape(sticker_alt),
                             short_name=_escape(pack_short) or "<i>N/A</i>",
                             pack_id=_escape(pack_id) or "<i>N/A</i>",
                         ))
                     elif is_animated or (doc.mime_type in ("image/gif", "video/mp4") and not is_sticker):
-                        parts.append(self.strings["rd_gif"].format(
+                        media_parts.append(self.strings["rd_gif"].format(
                             doc_id=doc.id,
                             mime=_escape(doc.mime_type or ""),
                             size=doc.size,
@@ -416,17 +415,21 @@ class PackDumper(loader.Module):
             elif isinstance(media, MessageMediaPhoto):
                 photo = media.photo
                 if photo:
-                    parts.append(self.strings["rd_photo_header"])
-                    parts.append(self.strings["rd_photo_fields"].format(
+                    media_parts.append(self.strings["rd_photo_header"])
+                    media_parts.append(self.strings["rd_photo_fields"].format(
                         photo_id=photo.id,
                         access_hash=photo.access_hash,
                         file_ref=photo.file_reference.hex() if photo.file_reference else "",
                     ))
 
+            media_parts.append(self.strings["rd_blockquote_end"])
+            parts.append("".join(media_parts))
+
         entities = reply.entities or []
-        parts.append(self.strings["rd_entities_header"])
+        ent_parts = []
+        ent_parts.append(self.strings["rd_entities_header"])
         if not entities:
-            parts.append(self.strings["rd_entities_none"])
+            ent_parts.append(self.strings["rd_entities_none"])
         else:
             for idx, ent in enumerate(entities, 1):
                 etype = type(ent).__name__
@@ -437,13 +440,15 @@ class PackDumper(loader.Module):
                     extra = f"\nlang={_escape(ent.language)}"
                 elif hasattr(ent, "document_id"):
                     extra = f"\ndoc_id={ent.document_id}"
-                parts.append(self.strings["rd_entities_item"].format(
+                ent_parts.append(self.strings["rd_entities_item"].format(
                     idx=idx,
                     etype=_escape(etype),
                     offset=ent.offset,
                     length=ent.length,
                     extra=extra,
                 ))
+        
+        parts.append("<blockquote expandable>" + "".join(ent_parts) + self.strings["rd_blockquote_end"])
 
         return "\n".join(parts)
 
