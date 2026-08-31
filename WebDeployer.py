@@ -9,8 +9,10 @@ import platform
 import shutil
 import stat
 import subprocess
+import tarfile
 import tempfile
 import threading
+import zipfile
 
 from telethon.tl.types import Message
 
@@ -21,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 CF_REPO = "cloudflare/cloudflared"
 VERSIONS_PER_PAGE = 5
+ARCHIVE_SUFFIXES = (".tar.gz", ".tgz", ".tar", ".zip")
+PREFERRED_ROOT_NAMES = ("dist", "build", "public", "out", "www")
+SKIP_DIR_NAMES = {"node_modules", "__pycache__", ".git", ".svn", ".hg"}
 
 
 def _escape(text):
@@ -36,9 +41,58 @@ def _cf_arch():
     return "amd64"
 
 
+def _archive_kind(filename: str):
+    lower = filename.lower()
+    if lower.endswith(".zip"):
+        return "zip"
+    if lower.endswith(".tar.gz") or lower.endswith(".tgz") or lower.endswith(".tar"):
+        return "tar"
+    return None
+
+
+def _safe_extract(archive_path: str, dest_dir: str, kind: str):
+    os.makedirs(dest_dir, exist_ok=True)
+    abs_dest = os.path.abspath(dest_dir)
+    if kind == "zip":
+        with zipfile.ZipFile(archive_path) as zf:
+            for member in zf.infolist():
+                target = os.path.abspath(os.path.join(dest_dir, member.filename))
+                if target != abs_dest and not target.startswith(abs_dest + os.sep):
+                    raise ValueError(f"Unsafe path in archive: {member.filename}")
+            zf.extractall(dest_dir)
+    else:
+        with tarfile.open(archive_path, "r:*") as tf:
+            for member in tf.getmembers():
+                target = os.path.abspath(os.path.join(dest_dir, member.name))
+                if target != abs_dest and not target.startswith(abs_dest + os.sep):
+                    raise ValueError(f"Unsafe path in archive: {member.name}")
+            tf.extractall(dest_dir)
+
+
+def _find_site_index(root_dir: str):
+    candidates = []
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_NAMES and not d.startswith(".")]
+        if "index.html" in filenames:
+            candidates.append(os.path.join(dirpath, "index.html"))
+
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    for name in PREFERRED_ROOT_NAMES:
+        for path in candidates:
+            if os.path.basename(os.path.dirname(path)) == name:
+                return path
+
+    candidates.sort(key=lambda p: p.count(os.sep))
+    return candidates[0]
+
+
 @loader.tds
 class WebDeployer(loader.Module):
-    """Deploy .js/.jsx/.html files to temporary Cloudflare domains"""
+    """Deploy .js/.jsx/.html files or .zip/.tar.gz archives to temporary Cloudflare domains"""
 
     strings = {
         "name": "WebDeployer",
@@ -76,8 +130,8 @@ class WebDeployer(loader.Module):
             "<blockquote>{error}</blockquote>"
         ),
         "collecting_versions": "<b>Collecting versions...</b>",
-        "no_reply": "<b>Reply to a .js, .jsx or .html file</b>",
-        "wrong_type": "<b>File must be .js, .jsx or .html</b>",
+        "no_reply": "<b>Reply to a .js, .jsx, .html, .zip or .tar.gz file</b>",
+        "wrong_type": "<b>File must be .js, .jsx, .html, .zip, .tar.gz or .tgz</b>",
         "no_cf": (
             "<b>cloudflared not installed</b>\n"
             "<blockquote>Use .wd to open Setup</blockquote>"
@@ -85,6 +139,13 @@ class WebDeployer(loader.Module):
         "downloading": (
             "<b>Downloading file</b>\n"
             "<blockquote><code>{name}</code></blockquote>"
+        ),
+        "extracting": (
+            "<b>Extracting archive</b>\n"
+            "<blockquote><code>{name}</code></blockquote>"
+        ),
+        "no_index": (
+            "<b>No index.html found in archive</b>"
         ),
         "deploying": (
             "<b>Deploying</b>\n"
@@ -185,8 +246,8 @@ class WebDeployer(loader.Module):
             "<blockquote>{error}</blockquote>"
         ),
         "collecting_versions": "<b>Сбор версий...</b>",
-        "no_reply": "<b>Ответьте на .js, .jsx или .html файл</b>",
-        "wrong_type": "<b>Файл должен быть .js, .jsx или .html</b>",
+        "no_reply": "<b>Ответьте на .js, .jsx, .html, .zip или .tar.gz файл</b>",
+        "wrong_type": "<b>Файл должен быть .js, .jsx, .html, .zip, .tar.gz или .tgz</b>",
         "no_cf": (
             "<b>cloudflared не установлен</b>\n"
             "<blockquote>Используйте .wd для Setup</blockquote>"
@@ -194,6 +255,13 @@ class WebDeployer(loader.Module):
         "downloading": (
             "<b>Скачивание файла</b>\n"
             "<blockquote><code>{name}</code></blockquote>"
+        ),
+        "extracting": (
+            "<b>Распаковка архива</b>\n"
+            "<blockquote><code>{name}</code></blockquote>"
+        ),
+        "no_index": (
+            "<b>В архиве не найден index.html</b>"
         ),
         "deploying": (
             "<b>Деплой</b>\n"
@@ -722,10 +790,14 @@ if (typeof App !== 'undefined') {{
             await utils.answer(message, self.strings["wrong_type"])
             return
 
-        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        if ext not in ("js", "jsx", "html"):
-            await utils.answer(message, self.strings["wrong_type"])
-            return
+        archive_kind = _archive_kind(filename)
+        if archive_kind:
+            ext = "archive"
+        else:
+            ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+            if ext not in ("js", "jsx", "html"):
+                await utils.answer(message, self.strings["wrong_type"])
+                return
 
         m = await utils.answer(message, self.strings["downloading"].format(name=_escape(filename)))
         if isinstance(m, list):
@@ -745,20 +817,42 @@ if (typeof App !== 'undefined') {{
             )
             return
 
-        await m.edit(
-            self.strings["deploying"].format(name=_escape(filename)),
-            parse_mode="html",
-        )
+        if archive_kind:
+            await m.edit(
+                self.strings["extracting"].format(name=_escape(filename)),
+                parse_mode="html",
+            )
+        else:
+            await m.edit(
+                self.strings["deploying"].format(name=_escape(filename)),
+                parse_mode="html",
+            )
 
         try:
-            if ext in ("js", "jsx"):
+            if archive_kind:
+                extract_dir = os.path.join(site_dir, "extracted")
+                _safe_extract(file_path, extract_dir, archive_kind)
+                os.remove(file_path)
+                index_path = _find_site_index(extract_dir)
+                if not index_path:
+                    shutil.rmtree(site_dir, ignore_errors=True)
+                    await m.edit(self.strings["no_index"], parse_mode="html")
+                    return
+                serve_dir = os.path.dirname(index_path)
+                await m.edit(
+                    self.strings["deploying"].format(name=_escape(filename)),
+                    parse_mode="html",
+                )
+            elif ext in ("js", "jsx"):
                 html = self._build_html_from_js(file_path, filename)
                 with open(os.path.join(site_dir, "index.html"), "w", encoding="utf-8") as f:
                     f.write(html)
+                serve_dir = site_dir
             else:
                 dest = os.path.join(site_dir, "index.html")
                 if file_path != dest:
                     shutil.copy2(file_path, dest)
+                serve_dir = site_dir
         except Exception as e:
             shutil.rmtree(site_dir, ignore_errors=True)
             await m.edit(
@@ -768,7 +862,7 @@ if (typeof App !== 'undefined') {{
             return
 
         port = self._next_port()
-        http_proc = self._start_http_server(site_dir, port)
+        http_proc = self._start_http_server(serve_dir, port)
         await asyncio.sleep(1)
 
         result_holder = []
