@@ -1,4 +1,4 @@
-__version__ = (1, 1, 3)
+__version__ = (1, 1, 2)
 # meta developer: I_execute.t.me froked from @elisartix
 
 import asyncio
@@ -17,8 +17,6 @@ from ..inline.types import InlineCall
 DEPS = ["Pillow"]
 
 ADDSTICKERS_RE = re.compile(r'^https://t\.me/addstickers/([A-Za-z0-9_]+)$')
-
-PACKS_PER_PAGE = 5
 
 
 def _install_deps():
@@ -163,16 +161,6 @@ class StickerClone(loader.Module):
         "status_set": "Set",
         "status_not_set": "Not set",
         "checking": "Checking...",
-        "sadd_title": "<b>Add Sticker to Pack</b>\n<blockquote>Select your pack:</blockquote>",
-        "sadd_no_packs": "<b>No Packs</b>\n<blockquote>Create a pack with .sclone first</blockquote>",
-        "sadd_pack_selected": "<b>Pack: {title}</b>\n<blockquote>Send source pack link (where the sticker is from):</blockquote>",
-        "sadd_source_set": "<b>Source Pack Set</b>\n<blockquote>{link}\nStickers: {count}\n\nNow send the Document ID of the sticker:</blockquote>",
-        "sadd_invalid_id": "<b>Invalid ID</b>\n<blockquote>Sticker with this ID not found in the source pack</blockquote>",
-        "sadd_added": "<b>Done</b>\n<blockquote>Sticker added to <b>{title}</b></blockquote>",
-        "btn_left": "<",
-        "btn_right": ">",
-        "input_sadd_source": "Send source pack link:",
-        "input_sadd_id": "Send Document ID:",
     }
 
     strings_ru = {
@@ -277,16 +265,6 @@ class StickerClone(loader.Module):
         "status_set": "Задано",
         "status_not_set": "Не задано",
         "checking": "Проверяем...",
-        "sadd_title": "<b>Добавить стикер в пак</b>\n<blockquote>Выберите свой пак:</blockquote>",
-        "sadd_no_packs": "<b>Нет паков</b>\n<blockquote>Сначала создайте пак через .sclone</blockquote>",
-        "sadd_pack_selected": "<b>Пак: {title}</b>\n<blockquote>Отправьте ссылку на исходный пак (откуда берете стикер):</blockquote>",
-        "sadd_source_set": "<b>Исходный пак задан</b>\n<blockquote>{link}\nСтикеров: {count}\n\nТеперь отправьте Document ID стикера:</blockquote>",
-        "sadd_invalid_id": "<b>Неверный ID</b>\n<blockquote>Стикер с таким ID не найден в исходном паке</blockquote>",
-        "sadd_added": "<b>Готово</b>\n<blockquote>Стикер добавлен в <b>{title}</b></blockquote>",
-        "btn_left": "<",
-        "btn_right": ">",
-        "input_sadd_source": "Отправьте ссылку на исходный пак:",
-        "input_sadd_id": "Отправьте Document ID:",
     }
 
     def __init__(self):
@@ -298,25 +276,14 @@ class StickerClone(loader.Module):
             "name": None,
             "is_emoji": False,
         }
-        self._sadd_state = {}
 
     async def client_ready(self, client, db):
         self._client = client
-        self._db = db
         try:
             lines = _install_deps()
             logger.info("[Stickerclone] Deps:\n" + "\n".join(lines))
         except Exception as e:
             logger.error(f"[Stickerclone] Deps error: {e}")
-
-    def _get_my_packs(self) -> list:
-        return self._db.get("StickerClone", "my_packs", [])
-
-    def _save_my_pack(self, short_name: str, title: str, is_emoji: bool):
-        packs = self._get_my_packs()
-        if not any(p["short_name"] == short_name for p in packs):
-            packs.append({"short_name": short_name, "title": title, "is_emoji": is_emoji})
-            self._db.set("StickerClone", "my_packs", packs)
 
     def _get_sticker_emoji(self, doc) -> str:
         try:
@@ -747,8 +714,6 @@ class StickerClone(loader.Module):
             )
             return
 
-        self._save_my_pack(short_name, pack_title, is_emoji)
-
         try:
             await self._client(UninstallStickerSetRequest(
                 stickerset=InputStickerSetShortName(short_name=short_name)
@@ -780,173 +745,6 @@ class StickerClone(loader.Module):
                 reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
             )
 
-    async def _cb_sadd_page(self, call: InlineCall, page: int):
-        packs = self._get_my_packs()
-        if not packs:
-            await call.edit(
-                self.strings["sadd_no_packs"],
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]]
-            )
-            return
-
-        total_pages = max(1, (len(packs) + PACKS_PER_PAGE - 1) // PACKS_PER_PAGE)
-        page = max(0, min(page, total_pages - 1))
-        start = page * PACKS_PER_PAGE
-        page_packs = packs[start:start + PACKS_PER_PAGE]
-
-        markup = []
-        for p in page_packs:
-            markup.append([{
-                "text": p["title"],
-                "callback": self._cb_sadd_select_pack,
-                "args": (p["short_name"], p["title"], p.get("is_emoji", False)),
-                "style": "primary",
-            }])
-
-        left_btn = {"text": self.strings["btn_left"], "callback": self._cb_sadd_page, "args": (page - 1,)}
-        right_btn = {"text": self.strings["btn_right"], "callback": self._cb_sadd_page, "args": (page + 1,)}
-        
-        if page > 0:
-            left_btn["style"] = "primary"
-        if page < total_pages - 1:
-            right_btn["style"] = "primary"
-
-        if total_pages > 1:
-            markup.append([{"text": f"{page + 1}/{total_pages}", "callback": lambda c: None, "style": "primary"}])
-            markup.append([left_btn, right_btn])
-
-        markup.append([{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}])
-
-        await call.edit(self.strings["sadd_title"], reply_markup=markup)
-
-    async def _cb_sadd_select_pack(self, call: InlineCall, short_name: str, title: str, is_emoji: bool):
-        self._sadd_state = {
-            "target_short": short_name,
-            "target_title": title,
-            "target_is_emoji": is_emoji,
-            "source_documents": None,
-        }
-        await call.edit(
-            self.strings["sadd_pack_selected"].format(title=title),
-            reply_markup=[[{
-                "text": self.strings["input_sadd_source"],
-                "input": self.strings["input_sadd_source"],
-                "handler": self._cb_sadd_got_source,
-                "style": "primary",
-            }]],
-        )
-
-    async def _cb_sadd_got_source(self, call: InlineCall, query: str):
-        link = query.strip()
-        short_name = self._extract_short_name(link)
-
-        if not short_name:
-            await call.edit(
-                self.strings["source_invalid_format"],
-                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_sadd_source"], "handler": self._cb_sadd_got_source, "style": "primary"}]],
-            )
-            return
-
-        await call.edit(self.strings["checking"], reply_markup=[])
-
-        result = await self._try_resolve_pack(short_name)
-        if not result or not result.documents:
-            await call.edit(
-                self.strings["source_invalid_resolve"],
-                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_sadd_source"], "handler": self._cb_sadd_got_source, "style": "primary"}]],
-            )
-            return
-
-        self._sadd_state["source_documents"] = result.documents
-
-        await call.edit(
-            self.strings["sadd_source_set"].format(link=link, count=len(result.documents)),
-            reply_markup=[[{
-                "text": self.strings["input_sadd_id"],
-                "input": self.strings["input_sadd_id"],
-                "handler": self._cb_sadd_got_id,
-                "style": "primary",
-            }]],
-        )
-
-    async def _cb_sadd_got_id(self, call: InlineCall, query: str):
-        try:
-            doc_id = int(query.strip())
-        except ValueError:
-            await call.edit(
-                self.strings["sadd_invalid_id"],
-                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_sadd_id"], "handler": self._cb_sadd_got_id, "style": "primary"}]],
-            )
-            return
-
-        source_documents = self._sadd_state.get("source_documents", [])
-        target_doc = None
-        for doc in source_documents:
-            if doc.id == doc_id:
-                target_doc = doc
-                break
-
-        if not target_doc:
-            await call.edit(
-                self.strings["sadd_invalid_id"],
-                reply_markup=[[{"text": self.strings["btn_retry"], "input": self.strings["input_sadd_id"], "handler": self._cb_sadd_got_id, "style": "primary"}]],
-            )
-            return
-
-        target_short = self._sadd_state["target_short"]
-        target_title = self._sadd_state["target_title"]
-        target_is_emoji = self._sadd_state["target_is_emoji"]
-
-        from telethon.tl.functions.stickers import AddStickerToSetRequest
-        from telethon.tl.types import InputStickerSetShortName, InputStickerSetItem
-        from telethon.errors import FloodWaitError
-
-        emoji = self._get_sticker_emoji(target_doc)
-
-        try:
-            input_doc, sticker_type = await self._process_sticker(target_doc, target_is_emoji)
-            if input_doc is None:
-                await call.edit(
-                    self.strings["copy_failed"].format(failed=1),
-                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]]
-                )
-                return
-
-            await self._client(AddStickerToSetRequest(
-                stickerset=InputStickerSetShortName(short_name=target_short),
-                sticker=InputStickerSetItem(document=input_doc, emoji=emoji),
-            ))
-
-            await call.edit(
-                self.strings["sadd_added"].format(title=target_title),
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]]
-            )
-
-        except FloodWaitError as e:
-            wait_secs = e.seconds
-            rand_secs = random.randint(1, 10)
-            total_wait = wait_secs + rand_secs
-            await call.edit(
-                f"<b>FloodWait</b>\n<blockquote>Waiting {wait_secs} + {rand_secs} seconds...</blockquote>",
-                reply_markup=[]
-            )
-            await asyncio.sleep(total_wait)
-            await self._client(AddStickerToSetRequest(
-                stickerset=InputStickerSetShortName(short_name=target_short),
-                sticker=InputStickerSetItem(document=input_doc, emoji=emoji),
-            ))
-            await call.edit(
-                self.strings["sadd_added"].format(title=target_title),
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]]
-            )
-
-        except Exception as e:
-            logger.error(f"[Stickerclone] sadd add error: {e}")
-            await call.edit(
-                self.strings["error"].format(error=str(e)),
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]]
-            )
-
     @loader.command(
         ru_doc="Открыть меню клонирования стикерпака",
         en_doc="Open sticker pack cloner menu",
@@ -957,44 +755,5 @@ class StickerClone(loader.Module):
             text=self._format_state_menu(),
             message=message,
             reply_markup=self._get_state_markup(),
-            silent=True,
-        )
-
-    @loader.command(
-        ru_doc="Добавить стикер по ID в свой пак",
-        en_doc="Add sticker by ID to your pack",
-    )
-    async def sadd(self, message):
-        """Add sticker to existing pack"""
-        packs = self._get_my_packs()
-        
-        markup = []
-        if not packs:
-            text = self.strings["sadd_no_packs"]
-            markup.append([{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}])
-        else:
-            text = self.strings["sadd_title"]
-            total_pages = max(1, (len(packs) + PACKS_PER_PAGE - 1) // PACKS_PER_PAGE)
-            page_packs = packs[:PACKS_PER_PAGE]
-
-            for p in page_packs:
-                markup.append([{
-                    "text": p["title"],
-                    "callback": self._cb_sadd_select_pack,
-                    "args": (p["short_name"], p["title"], p.get("is_emoji", False)),
-                    "style": "primary",
-                }])
-
-            if total_pages > 1:
-                markup.append([{"text": f"1/{total_pages}", "callback": lambda c: None, "style": "primary"}])
-                right_btn = {"text": self.strings["btn_right"], "callback": self._cb_sadd_page, "args": (1,), "style": "primary"}
-                markup.append([{"text": self.strings["btn_left"], "callback": lambda c: None}, right_btn])
-
-            markup.append([{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}])
-
-        await self.inline.form(
-            text=text,
-            message=message,
-            reply_markup=markup,
             silent=True,
         )
