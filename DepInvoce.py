@@ -29,7 +29,7 @@ from .. import loader, utils
 logger = logging.getLogger(__name__)
 
 STARS_PATTERN = re.compile(r'^\s*(\d+)\s*$')
-RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DepInvoice/Reloading.jpeg"
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DepInvoce/Reloading.jpeg"
 
 
 @loader.tds
