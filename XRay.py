@@ -1,4 +1,4 @@
-__version__ = (4, 2, 2)
+__version__ = (4, 2, 3)
 # meta developer: I_execute.t.me 
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
@@ -1307,27 +1307,37 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             except OSError:
                 pass
 
+    @staticmethod
+    def _html_to_plain(text: str) -> str:
+        """Strip HTML tags and unescape entities for plain-text log files."""
+        text = re.sub(r"<[^>]+>", "", text)
+        text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"')
+        return text.strip()
+
     async def _send_log(self, text: str, name: str = None):
         """Send log to Telegram forum topic and save to file."""
         if name:
             user_dir = os.path.join(self._root, "users", name)
             os.makedirs(user_dir, exist_ok=True)
-            log_file = os.path.join(user_dir, f"daemon.log")
+            log_file = os.path.join(user_dir, "daemon.log")
             try:
+                plain = self._html_to_plain(text)
+                ts = datetime.utcfromtimestamp(int(time.time())).strftime("%Y-%m-%d %H:%M:%S")
                 with open(log_file, "a") as f:
-                    f.write(f"[{int(time.time())}] {text}\n")
+                    f.write(f"[{ts}] {plain}\n")
             except Exception as e:
                 logger.error(f"[XR] Failed to write daemon log for {name}: {e}")
         
         if not self._logger_topic or not self._asset_channel:
             return
+        chat_id = int(f"-100{self._asset_channel}")
         try:
-            await self.inline.bot.send_message(
-                int(f"-100{self._asset_channel}"),
+            await self._client.send_message(
+                chat_id,
                 text,
-                disable_web_page_preview=True,
                 parse_mode="html",
                 reply_to=self._logger_topic.id,
+                link_preview=False,
             )
         except Exception as e:
             logger.error(f"[XR] Failed to send log to Telegram: {e}")
@@ -2678,7 +2688,6 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                     call.form["chat"],
                     tmp.name,
                     force_document=True,
-                    attributes=[],
                 )
             except Exception as e:
                 logger.exception("[XR] send_file failed: %s", e)
@@ -2719,7 +2728,6 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 call.form["chat"],
                 tmp.name,
                 force_document=True,
-                attributes=[],
             )
         except Exception as e:
             logger.exception("[XR] send_file failed: %s", e)
@@ -2731,12 +2739,9 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         finally:
             os.unlink(tmp.name)
 
-        markup = [
-            [{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}],
-        ]
         await call.edit(
             self.strings["link_sent"].format(name=_escape(name)),
-            reply_markup=markup,
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]],
         )
 
     async def _cb_logs_menu(self, call: InlineCall, name: str, kind: str):
@@ -2776,20 +2781,30 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         done_event: asyncio.Event,
         header: str,
     ):
+        BAR_LEN = 12
         while not done_event.is_set():
             try:
                 await asyncio.sleep(2)
                 if done_event.is_set():
                     break
-                lines = [f"<b>{header}</b>"]
+                parts = []
                 for label in labels:
                     cur, tot = state.get(label, (0, 0))
                     cur_mb = cur / 1024 / 1024
                     tot_mb = tot / 1024 / 1024 if tot else cur_mb
-                    pct = (cur_mb / tot_mb * 100) if tot_mb > 0 else 0.0
-                    lines.append(f"  {label}: {pct:.0f}% ({cur_mb:.1f}/{tot_mb:.1f} MB)")
+                    pct = (cur / tot * 100) if tot > 0 else 0.0
+                    filled = int(BAR_LEN * pct / 100)
+                    bar = "\u2588" * filled + "\u2591" * (BAR_LEN - filled)
+                    parts.append(
+                        f"{bar}  {pct:.0f}%\n"
+                        f"{cur_mb:.1f} / {tot_mb:.1f} MB"
+                    )
+                text = (
+                    f"<b>{_escape(header)}</b>\n"
+                    f"<blockquote>{''.join(parts)}</blockquote>"
+                )
                 try:
-                    await call.edit("\n".join(lines))
+                    await call.edit(text)
                 except Exception:
                     pass
             except asyncio.CancelledError:
@@ -2853,20 +2868,16 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             await self._client.send_file(
                 call.form["chat"],
                 send_paths,
-                caption=caption,
-                parse_mode="html",
                 force_document=True,
                 progress_callback=cb,
             )
         except Exception as e:
             logger.exception(f"[XR] album send_file failed: {e}")
             try:
-                for fpath, label in chosen:
+                for fpath, _ in chosen:
                     await self._client.send_file(
                         call.form["chat"],
                         fpath,
-                        caption=f"<b>{kind.title()} {label}:</b> <code>{_escape(name)}</code>",
-                        parse_mode="html",
                         force_document=True,
                     )
                     await asyncio.sleep(0.3)
