@@ -1,4 +1,4 @@
-__version__ = (4, 2, 1)
+__version__ = (4, 2, 2)
 # meta developer: I_execute.t.me 
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
@@ -927,7 +927,7 @@ class XRay(loader.Module):
                 msg_text,
                 parse_mode=None,
                 entities=entities,
-                message_thread_id=self._logger_topic.id,
+                reply_to=self._logger_topic.id,
             )
             if msg:
                 try:
@@ -1287,7 +1287,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 f.write(link + "\n")
             link_file = io.BytesIO((link + "\n").encode("utf-8"))
             link_file.name = f"link_for_{safe_name}.txt"
-            await self.inline.bot.send_document(
+            await self.inline.bot.send_file(
                 int(f"-100{self._asset_channel}"),
                 link_file,
                 caption=(
@@ -1296,7 +1296,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                     f"TLS: <code>{_escape(user.get('tunnel_host', '?'))}</code></blockquote>"
                 ),
                 parse_mode="html",
-                message_thread_id=self._logger_topic.id,
+                reply_to=self._logger_topic.id,
+                force_document=True,
             )
         except Exception as e:
             logger.error(f"[XR] Failed to send WebSocket link file: {e}")
@@ -1325,8 +1326,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 int(f"-100{self._asset_channel}"),
                 text,
                 disable_web_page_preview=True,
-                parse_mode="HTML",
-                message_thread_id=self._logger_topic.id,
+                parse_mode="html",
+                reply_to=self._logger_topic.id,
             )
         except Exception as e:
             logger.error(f"[XR] Failed to send log to Telegram: {e}")
@@ -2673,12 +2674,11 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             tmp.close()
 
             try:
-                await self.inline.bot.send_file(
+                await self._client.send_file(
                     call.form["chat"],
                     tmp.name,
-                    attributes=[],
                     force_document=True,
-                    file_name=f"proxies_{name}.txt",
+                    attributes=[],
                 )
             except Exception as e:
                 logger.exception("[XR] send_file failed: %s", e)
@@ -2715,12 +2715,11 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         tmp.close()
 
         try:
-            await self.inline.bot.send_file(
+            await self._client.send_file(
                 call.form["chat"],
                 tmp.name,
-                attributes=[],
                 force_document=True,
-                file_name=f"link_for_{name}.txt",
+                attributes=[],
             )
         except Exception as e:
             logger.exception("[XR] send_file failed: %s", e)
@@ -2851,7 +2850,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
 
         try:
             cb = self._make_upload_progress_cb(state, cb_label)
-            await self.inline.bot.send_file(
+            await self._client.send_file(
                 call.form["chat"],
                 send_paths,
                 caption=caption,
@@ -2863,7 +2862,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             logger.exception(f"[XR] album send_file failed: {e}")
             try:
                 for fpath, label in chosen:
-                    await self.inline.bot.send_file(
+                    await self._client.send_file(
                         call.form["chat"],
                         fpath,
                         caption=f"<b>{kind.title()} {label}:</b> <code>{_escape(name)}</code>",
