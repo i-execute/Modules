@@ -1,4 +1,4 @@
-__version__ = (4, 2, 3)
+__version__ = (4, 2, 4)
 # meta developer: I_execute.t.me 
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
@@ -1331,16 +1331,24 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         if not self._logger_topic or not self._asset_channel:
             return
         chat_id = int(f"-100{self._asset_channel}")
-        try:
-            await self._client.send_message(
-                chat_id,
-                text,
-                parse_mode="html",
-                reply_to=self._logger_topic.id,
-                link_preview=False,
-            )
-        except Exception as e:
-            logger.error(f"[XR] Failed to send log to Telegram: {e}")
+        for attempt in range(5):
+            try:
+                bot = getattr(self.inline, "bot", None)
+                if bot is None:
+                    raise RuntimeError("inline bot not ready")
+                await bot.send_message(
+                    chat_id,
+                    text,
+                    parse_mode="html",
+                    reply_to=self._logger_topic.id,
+                    link_preview=False,
+                )
+                return
+            except Exception as e:
+                if attempt == 4:
+                    logger.error(f"[XR] Failed to send log to Telegram: {e}")
+                else:
+                    await asyncio.sleep(1.5)
 
     def _log_user_data(self, user: Dict) -> Dict:
         return {
@@ -2684,7 +2692,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             tmp.close()
 
             try:
-                await self._client.send_file(
+                await self.inline.bot.send_file(
                     call.form["chat"],
                     tmp.name,
                     force_document=True,
@@ -2724,7 +2732,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         tmp.close()
 
         try:
-            await self._client.send_file(
+            await self.inline.bot.send_file(
                 call.form["chat"],
                 tmp.name,
                 force_document=True,
@@ -2865,7 +2873,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
 
         try:
             cb = self._make_upload_progress_cb(state, cb_label)
-            await self._client.send_file(
+            await self.inline.bot.send_file(
                 call.form["chat"],
                 send_paths,
                 force_document=True,
@@ -2875,7 +2883,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             logger.exception(f"[XR] album send_file failed: {e}")
             try:
                 for fpath, _ in chosen:
-                    await self._client.send_file(
+                    await self.inline.bot.send_file(
                         call.form["chat"],
                         fpath,
                         force_document=True,
