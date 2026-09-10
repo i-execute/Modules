@@ -3,7 +3,7 @@
 # Licensed under AGPLv3.
 
 __version__ = (1, 1, 0)
-# meta developer: Execute_forge.t.me forked from @zetmodules
+# meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Rofls/MetaBanner.jpeg
 
 import io
