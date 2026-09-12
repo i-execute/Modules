@@ -21,6 +21,7 @@ from telethon.tl.functions.contacts import BlockRequest
 from telethon.tl.functions.messages import DeleteHistoryRequest, ReportSpamRequest, EditMessageRequest
 from telethon.tl.types import (
     Message,
+    MessageService,
     PeerUser,
     InputMediaWebPage,
 )
@@ -986,7 +987,7 @@ class RaidProtection(loader.Module):
         try:
             if (
                 getattr(message, "out", False)
-                or not isinstance(message, Message)
+                or not isinstance(message, (Message, MessageService))
                 or not isinstance(message.peer_id, PeerUser)
                 or not self.get("state", False)
                 or utils.get_chat_id(message) in {777000, self._tg_id}
@@ -1098,11 +1099,13 @@ class RaidProtection(loader.Module):
 
             try:
                 raw = getattr(message, "raw_text", None) or ""
+                action = getattr(message, "action", None)
                 msg_text = self._escape(
-                    "<sticker>" if message.sticker
-                    else "<photo>" if message.photo
-                    else "<video>" if message.video
-                    else "<file>" if message.document
+                    "<sticker>" if getattr(message, "sticker", None)
+                    else "<photo>" if getattr(message, "photo", None)
+                    else "<video>" if getattr(message, "video", None)
+                    else "<file>" if getattr(message, "document", None)
+                    else f"<service: {type(action).__name__}>" if action is not None
                     else raw[:3000]
                 )
                 username_line = f"Username: @{username}\n" if username else ""
