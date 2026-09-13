@@ -3,7 +3,7 @@
 # Licensed under AGPLv3.
 
 __version__ = (1, 2, 5)
-# meta developer: Execute_forge.t.me
+# meta developer: I_execute.t.me
 
 import os
 import asyncio
@@ -119,6 +119,7 @@ def _detect_type(name):
         "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "tgs": "application/x-tgsticker",
         "gia": "application/octet-stream",
+        "gil": "application/octet-stream",
     }
     return types.get(ext, f"file/{ext}" if ext else "unknown")
 
@@ -134,7 +135,7 @@ ALLOWED_EXTENSIONS = {
     "log", "cfg", "ini", "yaml", "yml", "toml",
     "zip", "rar", "7z", "tar", "gz",
     "apk", "ipa", "pdf", "doc", "docx", "xls", "xlsx", "pptx",
-    "tgs", "gia",
+    "tgs", "gia", "gil",
 }
 
 
@@ -157,7 +158,7 @@ class Uploader(loader.Module):
             "Text: py, sh, go, swift, ts, tsx, jsx, java, kt, c, h, cpp, hpp, cs, rb, php, rs, lua, dart, sql, r, scala, pl, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
             "Archives: zip, rar, 7z, tar, gz\n"
             "Docs: pdf, doc, docx, xls, xlsx, pptx\n"
-            "Other: apk, ipa, tgs, gia"
+            "Other: apk, ipa, tgs, gia, gil"
             "</blockquote>"
         ),
         "no_reply": (
@@ -239,7 +240,7 @@ class Uploader(loader.Module):
             "Текст: py, sh, go, swift, ts, tsx, jsx, java, kt, c, h, cpp, hpp, cs, rb, php, rs, lua, dart, sql, r, scala, pl, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
             "Архивы: zip, rar, 7z, tar, gz\n"
             "Документы: pdf, doc, docx, xls, xlsx, pptx\n"
-            "Другое: apk, ipa, tgs, gia"
+            "Другое: apk, ipa, tgs, gia, gil"
             "</blockquote>"
         ),
         "no_reply": (
