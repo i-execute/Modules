@@ -29,8 +29,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
-from telethon.tl.functions.messages import EditMessageRequest
-from telethon.tl.functions.channels import EditForumTopicRequest
+from telethon.tl.functions.messages import EditMessageRequest, EditForumTopicRequest
 from telethon.tl.types import InputMediaWebPage
 
 from .. import loader, utils
