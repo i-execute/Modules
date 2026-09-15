@@ -30,6 +30,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 
 from telethon.tl.functions.messages import EditMessageRequest
+from telethon.tl.functions.channels import EditForumTopicRequest
 from telethon.tl.types import InputMediaWebPage
 
 from .. import loader, utils
@@ -880,17 +881,7 @@ class XRay(loader.Module):
         self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
 
         if self._asset_channel:
-            try:
-                self._logger_topic = await utils.asset_forum_topic(
-                    self._client,
-                    self._db,
-                    self._asset_channel,
-                    "XRay",
-                    description="XRay users and device limit logs",
-                    icon_emoji_id=5449413488227166358,
-                )
-            except Exception as e:
-                logger.error(f"[XR] Failed to create/get forum topic: {e}")
+            await self._ensure_logger_topic()
 
         if self._logger_topic and self._asset_channel:
             chat_id = int(f"-100{self._asset_channel}")
@@ -931,7 +922,7 @@ class XRay(loader.Module):
                 msg_text,
                 parse_mode=None,
                 entities=entities,
-                reply_to=self._logger_topic.id,
+                message_thread_id=self._logger_topic.id,
             )
             if msg:
                 try:
@@ -956,6 +947,27 @@ class XRay(loader.Module):
                     logger.error(f"[XR] Failed to add preview: {e}")
         except Exception as e:
             logger.error(f"[XR] Failed to send message with preview: {e}")
+
+    async def _ensure_logger_topic(self):
+        if not self._asset_channel:
+            return None
+        try:
+            topic = await utils.asset_forum_topic(
+                self._client,
+                self._db,
+                self._asset_channel,
+                "XRay",
+                description="XRay users and device limit logs",
+                icon_emoji_id=5449413488227166358,
+            )
+            if getattr(topic, "closed", False):
+                peer = await self._client.get_input_entity(self._asset_channel)
+                await self._client(EditForumTopicRequest(peer=peer, topic_id=topic.id, closed=False))
+            self._logger_topic = topic
+            return topic
+        except Exception as e:
+            logger.error(f"[XR] Failed to create/open forum topic: {e}")
+            return None
 
     async def _send_file_to_call_chat(self, call: InlineCall, file, **kwargs):
         chat = call.form.get("chat")
@@ -1304,7 +1316,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                     f"TLS: <code>{_escape(user.get('tunnel_host', '?'))}</code></blockquote>"
                 ),
                 parse_mode="html",
-                reply_to=self._logger_topic.id,
+                message_thread_id=self._logger_topic.id,
                 force_document=True,
             )
         except Exception as e:
@@ -1343,11 +1355,13 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                     chat_id,
                     text,
                     parse_mode="html",
-                    reply_to=self._logger_topic.id,
+                    message_thread_id=self._logger_topic.id,
                     link_preview=False,
                 )
                 return
             except Exception as e:
+                if "TOPIC_CLOSED" in str(e) and await self._ensure_logger_topic():
+                    continue
                 if attempt == 4:
                     logger.error(f"[XR] Failed to send log to Telegram: {e}")
                 else:
