@@ -357,24 +357,22 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre><code class=\"language-Started\"></code></pre>"
-            "<blockquote>"
+            "<pre><code class=\"language-Started\">"
             "----------------\n"
             "User:      {name}\n"
             "Port:      {port}\n"
             "Transport: {transport}\n"
             "Autostart: {autostart}"
-            "</blockquote>"
+            "</code></pre>"
         ),
         "log_user_stopped": (
-            "<pre><code class=\"language-Stopped\"></code></pre>"
-            "<blockquote>"
+            "<pre><code class=\"language-Stopped\">"
             "----------------\n"
             "User:      {name}\n"
             "Port:      {port}\n"
             "Transport: {transport}\n"
             "Reason:    {reason}"
-            "</blockquote>"
+            "</code></pre>"
         ),
         "log_device_limit": (
             "<pre><code class=\"language-device limit exceeded\">"
@@ -719,24 +717,22 @@ class XRay(loader.Module):
         ),
 
         "log_user_started": (
-            "<pre><code class=\"language-Started\"></code></pre>"
-            "<blockquote>"
+            "<pre><code class=\"language-Started\">"
             "----------------\n"
             "User:      {name}\n"
             "Port:      {port}\n"
             "Transport: {transport}\n"
             "Autostart: {autostart}"
-            "</blockquote>"
+            "</code></pre>"
         ),
         "log_user_stopped": (
-            "<pre><code class=\"language-Stopped\"></code></pre>"
-            "<blockquote>"
+            "<pre><code class=\"language-Stopped\">"
             "----------------\n"
             "User:      {name}\n"
             "Port:      {port}\n"
             "Transport: {transport}\n"
             "Reason:    {reason}"
-            "</blockquote>"
+            "</code></pre>"
         ),
         "log_device_limit": (
             "<pre><code class=\"language-device limit exceeded\">"
