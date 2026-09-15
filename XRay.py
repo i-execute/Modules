@@ -957,6 +957,13 @@ class XRay(loader.Module):
         except Exception as e:
             logger.error(f"[XR] Failed to send message with preview: {e}")
 
+    async def _send_file_to_call_chat(self, call: InlineCall, file, **kwargs):
+        chat = call.form.get("chat")
+        if chat is None:
+            raise RuntimeError("inline form chat is unavailable")
+        peer = await self._client.get_input_entity(chat)
+        return await self._client.send_file(peer, file, **kwargs)
+
     async def on_unload(self):
         if self._monitor_task:
             self._monitor_task.cancel()
@@ -1285,10 +1292,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             return
         name = str(user.get("name", "user"))
         safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", name)
-        path = os.path.join(tempfile.gettempdir(), f"link_for_{safe_name}.txt")
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(link + "\n")
             link_file = io.BytesIO((link + "\n").encode("utf-8"))
             link_file.name = f"link_for_{safe_name}.txt"
             await self.inline.bot.send_file(
@@ -1305,11 +1309,6 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             )
         except Exception as e:
             logger.error(f"[XR] Failed to send WebSocket link file: {e}")
-        finally:
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
 
     @staticmethod
     def _html_to_plain(text: str) -> str:
@@ -2209,19 +2208,6 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                             name=name
                         )
                         
-                        try:
-                            await self._client.send_message(
-                                self._me.id,
-                                self.strings["device_limit_exceeded"].format(
-                                    name=_escape(name),
-                                    limit=limit,
-                                    active=active,
-                                ),
-                                parse_mode="html",
-                            )
-                        except:
-                            pass
-                
                 if not self._xray_installed():
                     continue
                 
@@ -2696,8 +2682,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             tmp.close()
 
             try:
-                await self.inline.bot.send_file(
-                    call.form["chat"],
+                await self._send_file_to_call_chat(
+                    call,
                     tmp.name,
                     force_document=True,
                 )
@@ -2736,8 +2722,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         tmp.close()
 
         try:
-            await self.inline.bot.send_file(
-                call.form["chat"],
+            await self._send_file_to_call_chat(
+                call,
                 tmp.name,
                 force_document=True,
             )
@@ -2877,18 +2863,20 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
 
         try:
             cb = self._make_upload_progress_cb(state, cb_label)
-            await self.inline.bot.send_file(
-                call.form["chat"],
+            await self._send_file_to_call_chat(
+                call,
                 send_paths,
                 force_document=True,
+                caption=caption,
+                parse_mode="html",
                 progress_callback=cb,
             )
         except Exception as e:
             logger.exception(f"[XR] album send_file failed: {e}")
             try:
                 for fpath, _ in chosen:
-                    await self.inline.bot.send_file(
-                        call.form["chat"],
+                    await self._send_file_to_call_chat(
+                        call,
                         fpath,
                         force_document=True,
                     )
