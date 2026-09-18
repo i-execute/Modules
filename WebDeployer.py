@@ -10,12 +10,13 @@ import json
 import logging
 import os
 import platform
+import re
 import shutil
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
-import threading
 import zipfile
 
 from telethon.tl.types import Message
@@ -344,7 +345,6 @@ class WebDeployer(loader.Module):
         self._cf_bin = None
         self._db = None
         self._client = None
-        self._active = {}
         self._releases_cache = None
 
     async def client_ready(self, client, db):
@@ -355,18 +355,104 @@ class WebDeployer(loader.Module):
         self._root = os.path.join(os.path.expanduser("~"), ".cloudflared_on_userbot", str(tg_user_id))
         self._cf_bin = os.path.join(self._root, "cloudflared")
         os.makedirs(self._root, mode=0o700, exist_ok=True)
-        for site_id in list(self._get_sites().keys()):
-            site = self._get_sites()[site_id]
-            pid = site.get("pid")
-            if pid:
-                try:
-                    os.kill(pid, 0)
-                except OSError:
-                    self._remove_site(site_id)
+        await self._reattach_sites()
 
-    async def on_unload(self):
-        for site_id in list(self._active.keys()):
-            self._kill_site(site_id)
+    @property
+    def _is_root(self) -> bool:
+        return os.name == "posix" and os.geteuid() == 0
+
+    @property
+    def _systemd_dir(self) -> str:
+        if self._is_root:
+            return "/etc/systemd/system"
+        return os.path.join(os.path.expanduser("~"), ".config", "systemd", "user")
+
+    async def _systemctl(self, *args: str):
+        try:
+            cmd = ["systemctl"] if self._is_root else ["systemctl", "--user"]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, *args,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            out, err = await proc.communicate()
+            return proc.returncode == 0, (out + err).decode(errors="replace").strip()
+        except Exception as e:
+            return False, str(e)
+
+    def _unit_name(self, site_id: str, kind: str) -> str:
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", site_id)
+        return f"wd-{safe}-{kind}.service"
+
+    def _write_unit(self, unit: str, description: str, command: list, work_dir: str, log_path: str):
+        os.makedirs(self._systemd_dir, mode=0o700, exist_ok=True)
+        quoted = " ".join(subprocess.list2cmdline([part]) for part in command)
+        content = (
+            "[Unit]\n"
+            f"Description={description}\n"
+            "After=network-online.target\nWants=network-online.target\n\n"
+            "[Service]\nType=simple\n"
+            f"WorkingDirectory={work_dir}\n"
+            f"ExecStart={quoted}\n"
+            "Restart=on-failure\nRestartSec=3\n"
+            f"StandardOutput=append:{log_path}\nStandardError=append:{log_path}\n\n"
+            f"[Install]\nWantedBy={'multi-user.target' if self._is_root else 'default.target'}\n"
+        )
+        with open(os.path.join(self._systemd_dir, unit), "w", encoding="utf-8") as f:
+            f.write(content)
+
+    def _remove_unit_file(self, unit: str):
+        path = os.path.join(self._systemd_dir, unit)
+        if os.path.exists(path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+    async def _unit_active(self, unit: str) -> bool:
+        ok, out = await self._systemctl("is-active", "--quiet", unit)
+        return ok and out == ""
+
+    async def _start_unit(self, unit: str):
+        ok, out = await self._systemctl("daemon-reload")
+        if not ok:
+            return False, out
+        return await self._systemctl("enable", "--now", unit)
+
+    async def _stop_unit(self, unit: str):
+        await self._systemctl("disable", "--now", unit)
+
+    async def _wait_for_tunnel_url(self, log_path: str, timeout: int = 30):
+        for _ in range(timeout):
+            await asyncio.sleep(1)
+            try:
+                with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+            except OSError:
+                continue
+            for line in content.splitlines():
+                if "trycloudflare.com" in line:
+                    for part in line.split():
+                        if part.startswith("https://") and "trycloudflare.com" in part:
+                            return part.strip()
+        return None
+
+    async def _reattach_sites(self):
+        for site_id, site in list(self._get_sites().items()):
+            http_unit = site.get("http_unit")
+            cf_unit = site.get("cf_unit")
+            if not http_unit or not cf_unit:
+                self._remove_site(site_id)
+                continue
+            if await self._unit_active(http_unit):
+                continue
+            await self._stop_unit(cf_unit)
+            self._remove_unit_file(http_unit)
+            self._remove_unit_file(cf_unit)
+            await self._systemctl("daemon-reload")
+            site_dir = site.get("dir")
+            if site_dir and os.path.isdir(site_dir):
+                shutil.rmtree(site_dir, ignore_errors=True)
+            self._remove_site(site_id)
 
     def _cf_installed(self):
         return bool(self._cf_bin and os.path.isfile(self._cf_bin) and os.access(self._cf_bin, os.X_OK))
@@ -402,20 +488,38 @@ class WebDeployer(loader.Module):
         sites.pop(site_id, None)
         self._set_sites(sites)
 
-    def _kill_site(self, site_id: str):
-        procs = self._active.pop(site_id, {})
-        for key in ("http_proc", "cf_proc"):
-            proc = procs.get(key)
-            if proc:
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
+    async def _stop_site(self, site_id: str):
         site = self._get_sites().get(site_id, {})
+        http_unit = site.get("http_unit")
+        cf_unit = site.get("cf_unit")
+        if http_unit:
+            await self._stop_unit(http_unit)
+            self._remove_unit_file(http_unit)
+        if cf_unit:
+            await self._stop_unit(cf_unit)
+            self._remove_unit_file(cf_unit)
+        await self._systemctl("daemon-reload")
         site_dir = site.get("dir")
         if site_dir and os.path.isdir(site_dir):
             shutil.rmtree(site_dir, ignore_errors=True)
         self._remove_site(site_id)
+
+    def _unique_site_name(self, name: str) -> str:
+        """If a site with this display name already exists, append -2, -3, ...
+        so two deploys never look identical in the menu / logs, and nothing
+        that keys off the name (e.g. future features) can collide."""
+        existing = {site.get("name") for site in self._get_sites().values()}
+        if name not in existing:
+            return name
+        if "." in name:
+            base, ext = name.rsplit(".", 1)
+            ext = f".{ext}"
+        else:
+            base, ext = name, ""
+        n = 2
+        while f"{base}-{n}{ext}" in existing:
+            n += 1
+        return f"{base}-{n}{ext}"
 
     def _next_port(self) -> int:
         used = set()
@@ -530,32 +634,6 @@ if (typeof App !== 'undefined') {{
 </script>
 </body>
 </html>"""
-
-    def _start_http_server(self, serve_dir: str, port: int) -> subprocess.Popen:
-        import sys as _sys
-        return subprocess.Popen(
-            [_sys.executable, "-m", "http.server", str(port), "--directory", serve_dir],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-    def _start_cf_tunnel(self, port: int, result_holder: list):
-        try:
-            proc = subprocess.Popen(
-                [self._cf_bin, "tunnel", "--url", f"http://localhost:{port}", "--no-autoupdate"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            result_holder.append(proc)
-            for line in proc.stdout:
-                if "trycloudflare.com" in line:
-                    for part in line.split():
-                        if part.startswith("https://") and "trycloudflare.com" in part:
-                            result_holder.insert(0, part.strip())
-                            return
-        except Exception as e:
-            logger.error(f"[WebDeployer] cloudflared: {e}")
 
     async def _cb_close(self, call: InlineCall):
         await call.delete()
@@ -743,18 +821,18 @@ if (typeof App !== 'undefined') {{
     async def _cb_stop_site(self, call: InlineCall, site_id: str):
         site = self._get_sites().get(site_id, {})
         url = site.get("url", "?")
-        self._kill_site(site_id)
+        await self._stop_site(site_id)
         await call.edit(
             self.strings["site_stopped"].format(url=url),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sites_menu, "style": "primary"}]],
         )
 
     @loader.command(
-        ru_doc="Реплай на .js/.jsx/.html для деплоя | без реплая — меню",
-        en_doc="Reply to .js/.jsx/.html to deploy | without reply — menu",
+        ru_doc="- Реплай на .js/.jsx/.html для деплоя либо без реплая — меню",
+        en_doc="- Reply to .js/.jsx/.html to deploy or without reply — menu",
     )
     async def wd(self, message: Message):
-        """Reply to .js/.jsx/.html to deploy | without reply — menu"""
+        """- Reply to .js/.jsx/.html to deploy or without reply — menu"""
         reply = await message.get_reply_message()
 
         if not reply or not reply.media:
@@ -793,6 +871,8 @@ if (typeof App !== 'undefined') {{
         if not filename:
             await utils.answer(message, self.strings["wrong_type"])
             return
+
+        display_name = self._unique_site_name(filename)
 
         archive_kind = _archive_kind(filename)
         if archive_kind:
@@ -866,53 +946,72 @@ if (typeof App !== 'undefined') {{
             return
 
         port = self._next_port()
-        http_proc = self._start_http_server(serve_dir, port)
-        await asyncio.sleep(1)
+        site_id = utils.rand(12)
+        http_unit = self._unit_name(site_id, "http")
+        cf_unit = self._unit_name(site_id, "cf")
+        http_log = os.path.join(site_dir, "http.log")
+        cf_log = os.path.join(site_dir, "cf.log")
 
-        result_holder = []
-        cf_thread = threading.Thread(
-            target=self._start_cf_tunnel,
-            args=(port, result_holder),
-            daemon=True,
+        self._write_unit(
+            http_unit,
+            f"WebDeployer HTTP server {site_id}",
+            [sys.executable, "-m", "http.server", str(port), "--directory", serve_dir],
+            serve_dir,
+            http_log,
         )
-        cf_thread.start()
+        ok, out = await self._start_unit(http_unit)
+        if not ok:
+            self._remove_unit_file(http_unit)
+            shutil.rmtree(site_dir, ignore_errors=True)
+            await m.edit(
+                self.strings["deploy_fail"].format(error=_escape(out[:400])),
+                parse_mode="html",
+            )
+            return
 
-        url = None
-        for _ in range(30):
-            await asyncio.sleep(1)
-            if result_holder and isinstance(result_holder[0], str):
-                url = result_holder[0]
-                break
+        self._write_unit(
+            cf_unit,
+            f"WebDeployer cloudflared tunnel {site_id}",
+            [self._cf_bin, "tunnel", "--url", f"http://localhost:{port}", "--no-autoupdate"],
+            self._root,
+            cf_log,
+        )
+        ok, out = await self._start_unit(cf_unit)
+        if not ok:
+            await self._stop_unit(http_unit)
+            self._remove_unit_file(http_unit)
+            self._remove_unit_file(cf_unit)
+            shutil.rmtree(site_dir, ignore_errors=True)
+            await m.edit(
+                self.strings["deploy_fail"].format(error=_escape(out[:400])),
+                parse_mode="html",
+            )
+            return
 
+        url = await self._wait_for_tunnel_url(cf_log)
         if not url:
-            http_proc.terminate()
+            await self._stop_unit(http_unit)
+            await self._stop_unit(cf_unit)
+            self._remove_unit_file(http_unit)
+            self._remove_unit_file(cf_unit)
+            await self._systemctl("daemon-reload")
             shutil.rmtree(site_dir, ignore_errors=True)
             await m.edit(self.strings["cf_fail"], parse_mode="html")
             return
 
-        cf_proc = None
-        for item in result_holder:
-            if hasattr(item, "terminate"):
-                cf_proc = item
-                break
-
-        site_id = utils.rand(12)
-        self._active[site_id] = {
-            "http_proc": http_proc,
-            "cf_proc": cf_proc,
-        }
         self._add_site(site_id, {
-            "name": filename,
+            "name": display_name,
             "url": url,
             "port": port,
-            "pid": http_proc.pid,
             "dir": site_dir,
+            "http_unit": http_unit,
+            "cf_unit": cf_unit,
         })
 
         await m.delete()
         await self.inline.form(
             text=self.strings["deployed"].format(
-                name=_escape(filename),
+                name=_escape(display_name),
                 url=url,
             ),
             message=message,
