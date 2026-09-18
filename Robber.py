@@ -377,6 +377,26 @@ class Robber(loader.Module):
             except Exception:
                 raise
 
+    async def _is_forum_chat(self, message):
+        if getattr(message, "is_private", False):
+            return False
+        try:
+            chat = await message.get_chat()
+            return getattr(chat, "forum", False)
+        except Exception:
+            return False
+
+    def _get_topic_id(self, message):
+        reply_to = getattr(message, "reply_to", None)
+        if reply_to:
+            top_id = getattr(reply_to, "reply_to_top_id", None)
+            if top_id:
+                return top_id
+            msg_id = getattr(reply_to, "reply_to_msg_id", None)
+            if msg_id and getattr(reply_to, "forum_topic", False):
+                return msg_id
+        return None
+
     def _get_html(self, msg):
         if not msg.message:
             return None
@@ -1240,8 +1260,11 @@ class Robber(loader.Module):
         """Channel & content stealer"""
         reply = await message.get_reply_message()
 
+        is_forum = await self._is_forum_chat(message)
+        topic_id = self._get_topic_id(message) if is_forum else None
+
         if reply:
-            text = reply.text or ""
+            text = getattr(reply, "raw_text", None) or reply.message or ""
             input_type = None
             input_data = None
 
@@ -1283,6 +1306,7 @@ class Robber(loader.Module):
                         text=self.strings["connect_slots_full"],
                         message=message,
                         reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                        reply_to=topic_id,
                         silent=True,
                     )
                     return
@@ -1303,6 +1327,7 @@ class Robber(loader.Module):
                             ],
                             [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
                         ],
+                        reply_to=topic_id,
                         silent=True,
                     )
                 else:
@@ -1313,6 +1338,7 @@ class Robber(loader.Module):
                             [{"text": "Connect", "callback": self._cb_connect_string, "args": (input_data,), "style": "success"}],
                             [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
                         ],
+                        reply_to=topic_id,
                         silent=True,
                     )
                 return
@@ -1323,6 +1349,7 @@ class Robber(loader.Module):
                 text=self.strings["account_select"],
                 message=message,
                 reply_markup=self._get_account_select_markup(slots),
+                reply_to=topic_id,
                 silent=True,
             )
         else:
@@ -1330,5 +1357,6 @@ class Robber(loader.Module):
                 text=self.strings["main_menu"],
                 message=message,
                 reply_markup=self._get_main_markup(None),
+                reply_to=topic_id,
                 silent=True,
             )
