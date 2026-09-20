@@ -295,19 +295,17 @@ class SessionKiller(loader.Module):
         end = min(start + SESSIONS_PER_PAGE, total)
         page_sessions = sessions[start:end]
 
-        session_buttons = []
+        rows = []
         for i, auth in enumerate(page_sessions):
             label = auth.app_name or self.strings["unknown"]
             if auth.current:
                 label = f"* {label}"
-            session_buttons.append({
+            rows.append([{
                 "text": label[:32],
                 "callback": self._cb_session_detail,
                 "args": (start + i,),
                 "style": "primary",
-            })
-
-        rows = [session_buttons]
+            }])
 
         nav_row = []
         if page > 0:
