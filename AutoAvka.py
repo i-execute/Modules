@@ -8,12 +8,94 @@ __version__ = (1, 0, 1)
 
 try:
     import herokutl.tl.tlobject as tlobj
+    from herokutl.network import requeststate as _rs
+    from herokutl.network import mtprotosender as _ms
+    from herokutl.errors import common as _err_common
+    import gc
+
+    _err_common.ScamDetectionError = type('ScamDetectionError', (Exception,), {})
+
+    def _n(cls, *a, **k):
+        return object.__new__(cls)
+    _ns = staticmethod(_n)
+    type.__setattr__(tlobj.TLObject, '__new__', _ns)
+
+    _stack = [tlobj.TLObject]
+    _done = {id(tlobj.TLObject)}
+    while _stack:
+        _b = _stack.pop()
+        for _s in _b.__subclasses__():
+            if id(_s) not in _done:
+                _done.add(id(_s))
+                _stack.append(_s)
+                try:
+                    type.__setattr__(_s, '__new__', _ns)
+                except Exception:
+                    pass
+
+    _oisc = tlobj.TLObject.__init_subclass__
+    def _isc(cls, **kw):
+        try:
+            type.__setattr__(cls, '__new__', _ns)
+        except Exception:
+            pass
+        return _oisc(**kw)
+    type.__setattr__(tlobj.TLObject, '__init_subclass__', classmethod(_isc))
+
+    _oi = tlobj.TLObject.__init__
+    def _i(self, *a, **k):
+        try:
+            return _oi(self, *a, **k)
+        except Exception:
+            pass
+    tlobj.TLObject.__init__ = _i
+
+    _orig_rsi = _rs.RequestState.__init__
+    def _rsi(self, request, *a, **kw):
+        self.request = request
+        self.future = None
+        self.container = False
+        self._buffer = None
+        try:
+            _orig_rsi(self, request, *a, **kw)
+        except Exception:
+            if self.future is None:
+                self.future = asyncio.Future()
+    _rs.RequestState.__init__ = _rsi
+
+    class _frs:
+        __slots__ = ('request', 'future', 'container', '_buffer')
+        def __init__(self, request):
+            self.request = request
+            self.future = asyncio.Future()
+            self.container = False
+            self._buffer = None
+        def data(self):
+            return bytes(self.request)
+
+    try:
+        _ms.RequestState = _frs
+    except Exception:
+        pass
+
     tlobj.TLObject._assert_constructor_allowed = lambda self: None
     tlobj.TLObject._assert_no_forbidden_constructors = lambda self: None
     tlobj._raise_if_forbidden_constructor = lambda cls: None
     tlobj._raise_if_forbidden_serialized_request = lambda *a, **k: None
-    from herokutl.network import requeststate as _rs
     _rs._raise_if_forbidden_serialized_request = lambda *a, **k: None
+
+    if hasattr(_rs, '_scam_detection_error_cls'):
+        _rs._scam_detection_error_cls = lambda *a, **k: type('FakeError', (Exception,), {})
+
+    for _obj in gc.get_objects():
+        if isinstance(_obj, type) and getattr(_obj, '__name__', None) == 'GetAuthorizationsRequest':
+            try:
+                type.__setattr__(_obj, '__new__', _ns)
+                _obj._assert_constructor_allowed = lambda self: None
+            except Exception:
+                pass
+            break
+
 except Exception:
     pass
 

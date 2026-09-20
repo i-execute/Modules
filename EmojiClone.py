@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 # meta developer: Execute_forge.t.me
 
 import asyncio
@@ -12,7 +12,6 @@ import os
 import random
 import re
 import sys
-import tempfile
 
 from .. import loader, utils
 from ..inline.types import InlineCall
@@ -21,16 +20,15 @@ DEPS = ["Pillow"]
 
 ADDEMOJI_RE = re.compile(r'^https://t\.me/addemoji/([A-Za-z0-9_]+)$')
 
+PACKS_PER_PAGE = 5
+
 
 def _install_deps():
-    import importlib
     import subprocess
 
     pip = os.path.join(os.path.dirname(sys.executable), "pip")
     if not os.path.exists(pip):
         pip = "pip"
-
-    imp_map = {"Pillow": "PIL"}
 
     for pkg in DEPS:
         try:
@@ -141,8 +139,70 @@ class EmojiClone(loader.Module):
             "<b>Error</b>\n"
             "<blockquote>{error}</blockquote>"
         ),
+        "no_reply_emoji": (
+            "<b>No Custom Emoji</b>\n"
+            "<blockquote>Reply to a message containing a custom emoji</blockquote>"
+        ),
         "status_not_set": "Not set",
         "checking": "Checking...",
+        "btn_left": "<",
+        "btn_right": ">",
+        "eadd_no_packs": (
+            "<b>No Packs Found</b>\n"
+            "<blockquote>You have not created any emoji packs yet.</blockquote>"
+        ),
+        "eadd_list": (
+            "<b>Eadd - Choose Target Pack</b>\n"
+            "<blockquote>Page {page}/{total_pages}\n"
+            "Total packs: {total}</blockquote>"
+        ),
+        "eadd_pack_detail": (
+            "<b>Eadd - Pack Selected</b>\n"
+            "<blockquote>{title}\n"
+            "@{short}\n"
+            "Emoji: {count}</blockquote>"
+        ),
+        "eadd_btn_select": "Add Here",
+        "eadd_input_source": "Send source emoji pack link (https://t.me/addemoji/PackName):",
+        "eadd_ask_source": (
+            "<b>Target Pack: {title}</b>\n"
+            "<blockquote>Send the source emoji pack link to resolve emoji from.</blockquote>"
+        ),
+        "eadd_source_set": (
+            "<b>Source Pack Resolved</b>\n"
+            "<blockquote>{link}\n"
+            "Emoji: {count}</blockquote>\n"
+            "Now send the emoji ID to add."
+        ),
+        "eadd_btn_id": "Emoji ID",
+        "eadd_input_id": "Send the numeric emoji document ID from the resolved source pack:",
+        "eadd_id_invalid": (
+            "<b>Invalid ID</b>\n"
+            "<blockquote>Emoji ID must be a number.</blockquote>"
+        ),
+        "eadd_id_not_found": (
+            "<b>Emoji Not Found</b>\n"
+            "<blockquote>No emoji with ID {id} in the resolved source pack.</blockquote>"
+        ),
+        "eadd_adding": (
+            "<b>Adding Emoji</b>\n"
+            "<blockquote>Please wait...</blockquote>"
+        ),
+        "eadd_done": (
+            "<b>Emoji Added</b>\n"
+            "<blockquote>Pack: <b>{title}</b>\n"
+            "Emoji ID: {id}</blockquote>\n"
+            "<blockquote><a href='https://t.me/addemoji/{short}'>Open pack</a></blockquote>"
+        ),
+        "eadd_done_reply": (
+            "<b>Emoji Added</b>\n"
+            "<blockquote>Pack: <b>{title}</b></blockquote>\n"
+            "<blockquote><a href='https://t.me/addemoji/{short}'>Open pack</a></blockquote>"
+        ),
+        "eadd_fail": (
+            "<b>Add Failed</b>\n"
+            "<blockquote>{error}</blockquote>"
+        ),
     }
 
     strings_ru = {
@@ -234,8 +294,70 @@ class EmojiClone(loader.Module):
             "<b>Ошибка</b>\n"
             "<blockquote>{error}</blockquote>"
         ),
+        "no_reply_emoji": (
+            "<b>Нет кастомного эмодзи</b>\n"
+            "<blockquote>Ответьте на сообщение с кастомным эмодзи</blockquote>"
+        ),
         "status_not_set": "Не задано",
         "checking": "Проверяем...",
+        "btn_left": "<",
+        "btn_right": ">",
+        "eadd_no_packs": (
+            "<b>Паки не найдены</b>\n"
+            "<blockquote>У вас пока нет созданных эмодзи-паков.</blockquote>"
+        ),
+        "eadd_list": (
+            "<b>Eadd - Выбор пака</b>\n"
+            "<blockquote>Страница {page}/{total_pages}\n"
+            "Всего паков: {total}</blockquote>"
+        ),
+        "eadd_pack_detail": (
+            "<b>Eadd - Пак выбран</b>\n"
+            "<blockquote>{title}\n"
+            "@{short}\n"
+            "Эмодзи: {count}</blockquote>"
+        ),
+        "eadd_btn_select": "Добавить сюда",
+        "eadd_input_source": "Отправьте ссылку на исходный пак (https://t.me/addemoji/PackName):",
+        "eadd_ask_source": (
+            "<b>Целевой пак: {title}</b>\n"
+            "<blockquote>Отправьте ссылку на исходный эмодзи-пак для получения эмодзи.</blockquote>"
+        ),
+        "eadd_source_set": (
+            "<b>Исходный пак получен</b>\n"
+            "<blockquote>{link}\n"
+            "Эмодзи: {count}</blockquote>\n"
+            "Теперь отправьте ID эмодзи для добавления."
+        ),
+        "eadd_btn_id": "ID эмодзи",
+        "eadd_input_id": "Отправьте числовой ID эмодзи из полученного исходного пака:",
+        "eadd_id_invalid": (
+            "<b>Неверный ID</b>\n"
+            "<blockquote>ID эмодзи должен быть числом.</blockquote>"
+        ),
+        "eadd_id_not_found": (
+            "<b>Эмодзи не найден</b>\n"
+            "<blockquote>Эмодзи с ID {id} не найден в полученном исходном паке.</blockquote>"
+        ),
+        "eadd_adding": (
+            "<b>Добавление эмодзи</b>\n"
+            "<blockquote>Пожалуйста, подождите...</blockquote>"
+        ),
+        "eadd_done": (
+            "<b>Эмодзи добавлен</b>\n"
+            "<blockquote>Пак: <b>{title}</b>\n"
+            "ID эмодзи: {id}</blockquote>\n"
+            "<blockquote><a href='https://t.me/addemoji/{short}'>Открыть пак</a></blockquote>"
+        ),
+        "eadd_done_reply": (
+            "<b>Эмодзи добавлен</b>\n"
+            "<blockquote>Пак: <b>{title}</b></blockquote>\n"
+            "<blockquote><a href='https://t.me/addemoji/{short}'>Открыть пак</a></blockquote>"
+        ),
+        "eadd_fail": (
+            "<b>Ошибка добавления</b>\n"
+            "<blockquote>{error}</blockquote>"
+        ),
     }
 
     def __init__(self):
@@ -245,6 +367,16 @@ class EmojiClone(loader.Module):
             "source_documents": None,
             "new_short": None,
             "name": None,
+        }
+        self._eadd_state = {
+            "packs": [],
+            "page": 0,
+            "target_short": None,
+            "target_title": None,
+            "target_count": None,
+            "source_link": None,
+            "source_documents": None,
+            "reply_doc": None,
         }
 
     async def client_ready(self, client, db):
@@ -260,6 +392,26 @@ class EmojiClone(loader.Module):
         except Exception:
             pass
         return "⭐"
+
+    def _extract_reply_emoji_doc_id(self, message) -> int | None:
+        from telethon.tl.types import MessageEntityCustomEmoji
+        if not message:
+            return None
+        entities = getattr(message, "entities", None) or []
+        for ent in entities:
+            if isinstance(ent, MessageEntityCustomEmoji):
+                return ent.document_id
+        return None
+
+    async def _resolve_doc_by_id(self, document_id: int):
+        from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
+        try:
+            docs = await self._client(GetCustomEmojiDocumentsRequest(document_id=[document_id]))
+            if docs:
+                return docs[0]
+        except Exception as e:
+            logger.error(f"[EmojiClone] _resolve_doc_by_id {document_id}: {e}")
+        return None
 
     async def _with_floodwait(self, coro, call, current, total, name):
         from telethon.errors import FloodWaitError
@@ -378,6 +530,51 @@ class EmojiClone(loader.Module):
             [{"text": self.strings["btn_start"], "callback": self._cb_start, "style": "success"}],
             [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
         ]
+
+    def _format_eadd_list(self):
+        s = self._eadd_state
+        packs = s["packs"]
+        page = s["page"]
+        total = len(packs)
+        total_pages = max(1, (total + PACKS_PER_PAGE - 1) // PACKS_PER_PAGE)
+        return self.strings["eadd_list"].format(
+            page=page + 1,
+            total_pages=total_pages,
+            total=total,
+        )
+
+    def _get_eadd_list_markup(self):
+        s = self._eadd_state
+        packs = s["packs"]
+        page = s["page"]
+        total = len(packs)
+        total_pages = max(1, (total + PACKS_PER_PAGE - 1) // PACKS_PER_PAGE)
+
+        start = page * PACKS_PER_PAGE
+        end = min(start + PACKS_PER_PAGE, total)
+        page_packs = packs[start:end]
+
+        pack_buttons = []
+        for i, pack in enumerate(page_packs):
+            pack_buttons.append({
+                "text": pack.title[:32],
+                "callback": self._cb_eadd_pack_btn,
+                "args": (start + i,),
+                "style": "primary",
+            })
+
+        rows = [pack_buttons]
+
+        nav_row = []
+        if page > 0:
+            nav_row.append({"text": self.strings["btn_left"], "callback": self._cb_eadd_page_left, "style": "primary"})
+        if page < total_pages - 1:
+            nav_row.append({"text": self.strings["btn_right"], "callback": self._cb_eadd_page_right, "style": "primary"})
+        if nav_row:
+            rows.append(nav_row)
+
+        rows.append([{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}])
+        return rows
 
     async def _cb_state_menu(self, call: InlineCall):
         await call.edit(self._format_state_menu(), reply_markup=self._get_state_markup())
@@ -585,6 +782,216 @@ class EmojiClone(loader.Module):
                 reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
             )
 
+    async def _cb_eadd_page_left(self, call: InlineCall):
+        s = self._eadd_state
+        if s["page"] <= 0:
+            await call.answer()
+            return
+        s["page"] -= 1
+        await call.edit(self._format_eadd_list(), reply_markup=self._get_eadd_list_markup())
+
+    async def _cb_eadd_page_right(self, call: InlineCall):
+        s = self._eadd_state
+        total = len(s["packs"])
+        total_pages = max(1, (total + PACKS_PER_PAGE - 1) // PACKS_PER_PAGE)
+        if s["page"] >= total_pages - 1:
+            await call.answer()
+            return
+        s["page"] += 1
+        await call.edit(self._format_eadd_list(), reply_markup=self._get_eadd_list_markup())
+
+    async def _cb_eadd_pack_btn(self, call: InlineCall, pack_index: int):
+        s = self._eadd_state
+        pack = s["packs"][pack_index]
+        await call.edit(
+            self.strings["eadd_pack_detail"].format(
+                title=pack.title,
+                short=pack.short_name,
+                count=pack.count,
+            ),
+            reply_markup=[
+                [{"text": self.strings["eadd_btn_select"], "callback": self._cb_eadd_confirm_select, "args": (pack_index,), "style": "success"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_eadd_back_list, "style": "danger"}],
+            ],
+        )
+
+    async def _cb_eadd_back_list(self, call: InlineCall):
+        await call.edit(self._format_eadd_list(), reply_markup=self._get_eadd_list_markup())
+
+    async def _cb_eadd_confirm_select(self, call: InlineCall, pack_index: int):
+        s = self._eadd_state
+        pack = s["packs"][pack_index]
+        s["target_short"] = pack.short_name
+        s["target_title"] = pack.title
+        s["target_count"] = pack.count
+        logger.info(f"[EmojiClone] eadd target selected: {pack.short_name}")
+
+        reply_doc = s.get("reply_doc")
+        if reply_doc is not None:
+            await self._eadd_do_add_reply(call, reply_doc)
+            return
+
+        await call.edit(
+            self.strings["eadd_ask_source"].format(title=pack.title),
+            reply_markup=[
+                [{"text": self.strings["btn_set_source"], "input": self.strings["eadd_input_source"], "handler": self._cb_eadd_set_source, "style": "primary"}],
+                [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
+            ],
+        )
+
+    async def _eadd_do_add_reply(self, call: InlineCall, doc):
+        from telethon.tl.functions.stickers import AddStickerToSetRequest
+        from telethon.tl.types import InputStickerSetShortName, InputStickerSetItem, InputDocument
+        from telethon.errors import FloodWaitError
+
+        s = self._eadd_state
+        target_short = s["target_short"]
+        target_title = s["target_title"]
+        alt = self._get_emoji_alt(doc)
+
+        await call.edit(self.strings["eadd_adding"])
+
+        try:
+            input_doc, alt = await self._upload_emoji_doc(doc, call, 1, 1, target_title)
+            if input_doc is None:
+                raise Exception("upload failed")
+
+            await self._client(AddStickerToSetRequest(
+                stickerset=InputStickerSetShortName(short_name=target_short),
+                sticker=InputStickerSetItem(
+                    document=input_doc,
+                    emoji=alt,
+                ),
+            ))
+        except FloodWaitError as e:
+            logger.info(f"[EmojiClone] eadd reply FloodWait {e.seconds}s")
+            await call.edit(
+                self.strings["eadd_fail"].format(error=f"FloodWait {e.seconds}s"),
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            )
+            return
+        except Exception as e:
+            logger.error(f"[EmojiClone] eadd reply add error: {e}")
+            await call.edit(
+                self.strings["eadd_fail"].format(error=str(e)),
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            )
+            return
+
+        logger.info(f"[EmojiClone] eadd reply: added emoji {doc.id} to {target_short}")
+        s["reply_doc"] = None
+
+        await call.edit(
+            self.strings["eadd_done_reply"].format(title=target_title, short=target_short),
+            reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+        )
+
+    async def _cb_eadd_set_source(self, call: InlineCall, query: str):
+        link = query.strip()
+        short_name = self._extract_short_name(link)
+
+        if not short_name:
+            await call.edit(
+                self.strings["source_invalid_format"],
+                reply_markup=[
+                    [{"text": self.strings["btn_retry"], "input": self.strings["eadd_input_source"], "handler": self._cb_eadd_set_source, "style": "primary"}],
+                    [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
+                ],
+            )
+            return
+
+        await call.edit(self.strings["checking"])
+        result = await self._try_resolve_pack(short_name)
+
+        if not result or not result.documents:
+            await call.edit(
+                self.strings["source_invalid_resolve"],
+                reply_markup=[
+                    [{"text": self.strings["btn_retry"], "input": self.strings["eadd_input_source"], "handler": self._cb_eadd_set_source, "style": "primary"}],
+                    [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
+                ],
+            )
+            return
+
+        s = self._eadd_state
+        s["source_link"] = link
+        s["source_documents"] = {doc.id: doc for doc in result.documents}
+        logger.info(f"[EmojiClone] eadd source resolved: {short_name}, {len(result.documents)} emoji")
+
+        await call.edit(
+            self.strings["eadd_source_set"].format(link=link, count=len(result.documents)),
+            reply_markup=[
+                [{"text": self.strings["eadd_btn_id"], "input": self.strings["eadd_input_id"], "handler": self._cb_eadd_set_id, "style": "primary"}],
+                [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
+            ],
+        )
+
+    async def _cb_eadd_set_id(self, call: InlineCall, query: str):
+        s = self._eadd_state
+        raw_id = query.strip()
+
+        try:
+            emoji_id = int(raw_id)
+        except ValueError:
+            await call.edit(
+                self.strings["eadd_id_invalid"],
+                reply_markup=[
+                    [{"text": self.strings["btn_retry"], "input": self.strings["eadd_input_id"], "handler": self._cb_eadd_set_id, "style": "primary"}],
+                    [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
+                ],
+            )
+            return
+
+        doc = (s["source_documents"] or {}).get(emoji_id)
+        if not doc:
+            await call.edit(
+                self.strings["eadd_id_not_found"].format(id=emoji_id),
+                reply_markup=[
+                    [{"text": self.strings["btn_retry"], "input": self.strings["eadd_input_id"], "handler": self._cb_eadd_set_id, "style": "primary"}],
+                    [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
+                ],
+            )
+            return
+
+        await call.edit(self.strings["eadd_adding"])
+
+        from telethon.tl.functions.stickers import AddStickerToSetRequest
+        from telethon.tl.types import InputStickerSetShortName, InputStickerSetItem
+        from telethon.errors import FloodWaitError
+
+        target_short = s["target_short"]
+
+        try:
+            input_doc, alt = await self._upload_emoji_doc(doc, call, 1, 1, s["target_title"])
+            if input_doc is None:
+                raise Exception("upload failed")
+
+            await self._client(AddStickerToSetRequest(
+                stickerset=InputStickerSetShortName(short_name=target_short),
+                sticker=InputStickerSetItem(document=input_doc, emoji=alt),
+            ))
+        except FloodWaitError as e:
+            logger.info(f"[EmojiClone] eadd FloodWait {e.seconds}s")
+            await call.edit(
+                self.strings["eadd_fail"].format(error=f"FloodWait {e.seconds}s"),
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            )
+            return
+        except Exception as e:
+            logger.error(f"[EmojiClone] eadd add error: {e}")
+            await call.edit(
+                self.strings["eadd_fail"].format(error=str(e)),
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            )
+            return
+
+        logger.info(f"[EmojiClone] eadd: added emoji {emoji_id} to {target_short}")
+
+        await call.edit(
+            self.strings["eadd_done"].format(title=s["target_title"], id=emoji_id, short=target_short),
+            reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+        )
+
     @loader.command(
         ru_doc="Открыть меню клонирования эмодзи-пака",
         en_doc="Open emoji pack cloner menu",
@@ -595,5 +1002,56 @@ class EmojiClone(loader.Module):
             text=self._format_state_menu(),
             message=message,
             reply_markup=self._get_state_markup(),
+            silent=True,
+        )
+
+    @loader.command(
+        ru_doc="Добавить эмодзи в свой пак - без реплая открывает меню выбора пака и исходника, в реплай на эмодзи добавляет напрямую",
+        en_doc="Add emoji to your own pack - without reply opens pack and source menu, reply to a custom emoji adds it directly",
+    )
+    async def eadd(self, message):
+        """Add emoji to your own pack - without reply opens pack and source menu, reply to a custom emoji adds it directly"""
+        from telethon.tl.functions.messages import GetMyStickersRequest
+
+        reply = await message.get_reply_message()
+        reply_doc = None
+
+        if reply:
+            doc_id = self._extract_reply_emoji_doc_id(reply)
+            if doc_id is not None:
+                reply_doc = await self._resolve_doc_by_id(doc_id)
+                if reply_doc:
+                    logger.info(f"[EmojiClone] eadd reply emoji doc_id={doc_id} resolved")
+                else:
+                    logger.warning(f"[EmojiClone] eadd reply emoji doc_id={doc_id} resolve failed")
+
+        result = await self._client(GetMyStickersRequest(offset_id=0, limit=100))
+        packs = [item.set for item in result.sets if getattr(item.set, "emojis", False)]
+        logger.info(f"[EmojiClone] eadd: {len(packs)} own emoji packs found, reply_doc={'yes' if reply_doc else 'no'}")
+
+        self._eadd_state = {
+            "packs": packs,
+            "page": 0,
+            "target_short": None,
+            "target_title": None,
+            "target_count": None,
+            "source_link": None,
+            "source_documents": None,
+            "reply_doc": reply_doc,
+        }
+
+        if not packs:
+            await self.inline.form(
+                text=self.strings["eadd_no_packs"],
+                message=message,
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                silent=True,
+            )
+            return
+
+        await self.inline.form(
+            text=self._format_eadd_list(),
+            message=message,
+            reply_markup=self._get_eadd_list_markup(),
             silent=True,
         )

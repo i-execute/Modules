@@ -12,6 +12,7 @@ import os
 import platform
 import re
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -19,7 +20,8 @@ import tarfile
 import tempfile
 import zipfile
 
-from telethon.tl.types import Message
+from telethon.tl.functions.messages import EditMessageRequest
+from telethon.tl.types import InputMediaWebPage, Message
 
 from .. import loader, utils
 from ..inline.types import InlineCall
@@ -31,6 +33,8 @@ VERSIONS_PER_PAGE = 5
 ARCHIVE_SUFFIXES = (".tar.gz", ".tgz", ".tar", ".zip")
 PREFERRED_ROOT_NAMES = ("dist", "build", "public", "out", "www")
 SKIP_DIR_NAMES = {"node_modules", "__pycache__", ".git", ".svn", ".hg"}
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/WebDeployer/Reloading.jpeg"
+TOPIC_ICON_EMOJI_ID = 5463122435425448565
 
 
 def _escape(text):
@@ -97,10 +101,11 @@ def _find_site_index(root_dir: str):
 
 @loader.tds
 class WebDeployer(loader.Module):
-    """Deploy .js/.jsx/.html files or .zip/.tar.gz archives to temporary Cloudflare domains"""
+    """Deploy .js/.jsx/.ts/.tsx/.html files or .zip/.tar.gz archives to temporary Cloudflare domains"""
 
     strings = {
         "name": "WebDeployer",
+        "reloaded": "<b>WebDeployer reloaded</b>",
         "main_menu": (
             "<b>WebDeployer</b>\n"
             "<blockquote>"
@@ -135,8 +140,8 @@ class WebDeployer(loader.Module):
             "<blockquote>{error}</blockquote>"
         ),
         "collecting_versions": "<b>Collecting versions...</b>",
-        "no_reply": "<b>Reply to a .js, .jsx, .html, .zip or .tar.gz file</b>",
-        "wrong_type": "<b>File must be .js, .jsx, .html, .zip, .tar.gz or .tgz</b>",
+        "no_reply": "<b>Reply to a .js, .jsx, .ts, .tsx, .html, .zip or .tar.gz file</b>",
+        "wrong_type": "<b>File must be .js, .jsx, .ts, .tsx, .html, .zip, .tar.gz or .tgz</b>",
         "no_cf": (
             "<b>cloudflared not installed</b>\n"
             "<blockquote>Use .wd to open Setup</blockquote>"
@@ -176,7 +181,7 @@ class WebDeployer(loader.Module):
         ),
         "no_sites": (
             "<b>No active sites</b>\n"
-            "<blockquote>Reply to .js/.jsx/.html file with .wd to deploy</blockquote>"
+            "<blockquote>Reply to .js/.jsx/.ts/.tsx/.html file with .wd to deploy</blockquote>"
         ),
         "site_detail": (
             "<b>Site Info</b>\n"
@@ -208,6 +213,7 @@ class WebDeployer(loader.Module):
         "btn_close": "Close",
         "btn_sites": "Active Sites",
         "btn_stop": "Stop Site",
+        "btn_open_site": "Open Site",
         "btn_set_token": "Set GitHub Token",
         "btn_clear_token": "Clear Token",
         "btn_install_cf": "Install / Update cloudflared",
@@ -217,6 +223,7 @@ class WebDeployer(loader.Module):
     }
 
     strings_ru = {
+        "reloaded": "<b>WebDeployer перезагружен</b>",
         "main_menu": (
             "<b>WebDeployer</b>\n"
             "<blockquote>"
@@ -251,8 +258,8 @@ class WebDeployer(loader.Module):
             "<blockquote>{error}</blockquote>"
         ),
         "collecting_versions": "<b>Сбор версий...</b>",
-        "no_reply": "<b>Ответьте на .js, .jsx, .html, .zip или .tar.gz файл</b>",
-        "wrong_type": "<b>Файл должен быть .js, .jsx, .html, .zip, .tar.gz или .tgz</b>",
+        "no_reply": "<b>Ответьте на .js, .jsx, .ts, .tsx, .html, .zip или .tar.gz файл</b>",
+        "wrong_type": "<b>Файл должен быть .js, .jsx, .ts, .tsx, .html, .zip, .tar.gz или .tgz</b>",
         "no_cf": (
             "<b>cloudflared не установлен</b>\n"
             "<blockquote>Используйте .wd для Setup</blockquote>"
@@ -292,7 +299,7 @@ class WebDeployer(loader.Module):
         ),
         "no_sites": (
             "<b>Нет активных сайтов</b>\n"
-            "<blockquote>Ответьте на .js/.jsx/.html файл командой .wd для деплоя</blockquote>"
+            "<blockquote>Ответьте на .js/.jsx/.ts/.tsx/.html файл командой .wd для деплоя</blockquote>"
         ),
         "site_detail": (
             "<b>Информация о сайте</b>\n"
@@ -324,6 +331,7 @@ class WebDeployer(loader.Module):
         "btn_close": "Закрыть",
         "btn_sites": "Активные сайты",
         "btn_stop": "Остановить сайт",
+        "btn_open_site": "Открыть сайт",
         "btn_set_token": "Установить GitHub токен",
         "btn_clear_token": "Очистить токен",
         "btn_install_cf": "Установить / Обновить cloudflared",
@@ -333,19 +341,14 @@ class WebDeployer(loader.Module):
     }
 
     def __init__(self):
-        self.config = loader.ModuleConfig(
-            loader.ConfigValue(
-                "PORT_START",
-                9000,
-                "Starting port for local HTTP servers",
-                validator=loader.validators.Integer(minimum=1024),
-            ),
-        )
+        self.config = loader.ModuleConfig()
         self._root = None
         self._cf_bin = None
         self._db = None
         self._client = None
         self._releases_cache = None
+        self._logger_topic = None
+        self._asset_channel = None
 
     async def client_ready(self, client, db):
         self._client = client
@@ -355,7 +358,79 @@ class WebDeployer(loader.Module):
         self._root = os.path.join(os.path.expanduser("~"), ".cloudflared_on_userbot", str(tg_user_id))
         self._cf_bin = os.path.join(self._root, "cloudflared")
         os.makedirs(self._root, mode=0o700, exist_ok=True)
+
+        self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
+        if self._asset_channel:
+            try:
+                self._logger_topic = await utils.asset_forum_topic(
+                    self._client,
+                    self._db,
+                    self._asset_channel,
+                    "WebDeployer",
+                    description="WebDeployer notifications: deploys, cleanups, errors",
+                    icon_emoji_id=TOPIC_ICON_EMOJI_ID,
+                )
+            except Exception as e:
+                logger.error(f"[WD] Failed to create/get forum topic: {e}")
+
+        if self._logger_topic and self._asset_channel:
+            chat_id = int(f"-100{self._asset_channel}")
+            greeting_key = f"wd_greeted_{self._asset_channel}_{self._logger_topic.id}"
+            already_greeted = self.get(greeting_key, False)
+            if already_greeted:
+                await self._send_with_preview(chat_id, self.strings["reloaded"])
+            else:
+                self.set(greeting_key, True)
+
         await self._reattach_sites()
+
+    async def _send_with_preview(self, chat_id, text):
+        try:
+            msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
+            msg = await self.inline.bot.send_message(
+                chat_id,
+                msg_text,
+                parse_mode=None,
+                entities=entities,
+                reply_to=self._logger_topic.id,
+            )
+            if msg:
+                try:
+                    peer = await self.inline.bot.get_input_entity(chat_id)
+                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                    reply_markup = current_msg.reply_markup if current_msg else None
+                    await self.inline.bot(EditMessageRequest(
+                        peer=peer,
+                        id=msg.id,
+                        message=msg_text,
+                        media=InputMediaWebPage(
+                            url=RELOADING_MEDIA_URL,
+                            optional=True,
+                            force_large_media=True,
+                        ),
+                        invert_media=True,
+                        reply_markup=reply_markup,
+                        entities=entities,
+                        no_webpage=False,
+                    ))
+                except Exception as e:
+                    logger.error(f"[WD] Failed to add preview: {e}")
+        except Exception as e:
+            logger.error(f"[WD] Failed to send message with preview: {e}")
+
+    async def _notify(self, text: str):
+        if not self._logger_topic or not self._asset_channel:
+            return
+        try:
+            chat_id = int(f"-100{self._asset_channel}")
+            await self.inline.bot.send_message(
+                chat_id,
+                text,
+                parse_mode="html",
+                reply_to=self._logger_topic.id,
+            )
+        except Exception as e:
+            logger.error(f"[WD] Failed to send topic notification: {e}")
 
     @property
     def _is_root(self) -> bool:
@@ -444,7 +519,7 @@ class WebDeployer(loader.Module):
                 self._remove_site(site_id)
                 continue
             if await self._unit_active(http_unit):
-                continue
+                continue  
             await self._stop_unit(cf_unit)
             self._remove_unit_file(http_unit)
             self._remove_unit_file(cf_unit)
@@ -453,6 +528,9 @@ class WebDeployer(loader.Module):
             if site_dir and os.path.isdir(site_dir):
                 shutil.rmtree(site_dir, ignore_errors=True)
             self._remove_site(site_id)
+            await self._notify(
+                f"<b>🧹 Cleaned up stale site</b>\n<blockquote>{_escape(site.get('name', site_id))}</blockquote>"
+            )
 
     def _cf_installed(self):
         return bool(self._cf_bin and os.path.isfile(self._cf_bin) and os.access(self._cf_bin, os.X_OK))
@@ -505,9 +583,6 @@ class WebDeployer(loader.Module):
         self._remove_site(site_id)
 
     def _unique_site_name(self, name: str) -> str:
-        """If a site with this display name already exists, append -2, -3, ...
-        so two deploys never look identical in the menu / logs, and nothing
-        that keys off the name (e.g. future features) can collide."""
         existing = {site.get("name") for site in self._get_sites().values()}
         if name not in existing:
             return name
@@ -522,15 +597,17 @@ class WebDeployer(loader.Module):
         return f"{base}-{n}{ext}"
 
     def _next_port(self) -> int:
-        used = set()
-        for site in self._get_sites().values():
-            p = site.get("port")
-            if p:
-                used.add(p)
-        port = int(self.config["PORT_START"])
-        while port in used:
-            port += 1
-        return port
+        used = {site.get("port") for site in self._get_sites().values() if site.get("port")}
+        for _ in range(20):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                sock.bind(("127.0.0.1", 0))
+                port = sock.getsockname()[1]
+            finally:
+                sock.close()
+            if port not in used:
+                return port
+        raise RuntimeError("could not find a free port")
 
     async def _curl(self, *args, timeout=15):
         p = await asyncio.create_subprocess_exec(
@@ -608,9 +685,12 @@ class WebDeployer(loader.Module):
         self._releases_cache = None
         return True, tag
 
-    def _build_html_from_js(self, js_path: str, filename: str) -> str:
+    def _build_html_from_js(self, js_path: str, filename: str, ext: str = "jsx") -> str:
         with open(js_path, "r", encoding="utf-8", errors="replace") as f:
             js_code = f.read()
+        is_ts = ext in ("ts", "tsx")
+        presets = "typescript,react" if is_ts else "react"
+        script_type = "text/babel"
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -624,7 +704,7 @@ class WebDeployer(loader.Module):
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel">
+<script type="{script_type}" data-presets="{presets}" data-plugins="proposal-class-properties">
 {js_code}
 const domNode = document.getElementById('root');
 const root = ReactDOM.createRoot(domNode);
@@ -813,6 +893,7 @@ if (typeof App !== 'undefined') {{
                 port=site.get("port", "?"),
             ),
             reply_markup=[
+                [{"text": self.strings["btn_open_site"], "url": site.get("url", "")}],
                 [{"text": self.strings["btn_stop"], "callback": self._cb_stop_site, "args": (site_id,), "style": "danger"}],
                 [{"text": self.strings["btn_back"], "callback": self._cb_sites_menu, "style": "primary"}],
             ],
@@ -822,17 +903,20 @@ if (typeof App !== 'undefined') {{
         site = self._get_sites().get(site_id, {})
         url = site.get("url", "?")
         await self._stop_site(site_id)
+        await self._notify(
+            f"<b>Site stopped</b>\n<blockquote>{_escape(site.get('name', site_id))}\n{url}</blockquote>"
+        )
         await call.edit(
             self.strings["site_stopped"].format(url=url),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sites_menu, "style": "primary"}]],
         )
 
     @loader.command(
-        ru_doc="- Реплай на .js/.jsx/.html для деплоя либо без реплая — меню",
-        en_doc="- Reply to .js/.jsx/.html to deploy or without reply — menu",
+        ru_doc="Реплай на .js/.jsx/.ts/.tsx/.html для деплоя | без реплая — меню",
+        en_doc="Reply to .js/.jsx/.ts/.tsx/.html to deploy | without reply — menu",
     )
     async def wd(self, message: Message):
-        """- Reply to .js/.jsx/.html to deploy or without reply — menu"""
+        """Reply to .js/.jsx/.ts/.tsx/.html to deploy | without reply — menu"""
         reply = await message.get_reply_message()
 
         if not reply or not reply.media:
@@ -871,7 +955,6 @@ if (typeof App !== 'undefined') {{
         if not filename:
             await utils.answer(message, self.strings["wrong_type"])
             return
-
         display_name = self._unique_site_name(filename)
 
         archive_kind = _archive_kind(filename)
@@ -879,7 +962,7 @@ if (typeof App !== 'undefined') {{
             ext = "archive"
         else:
             ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-            if ext not in ("js", "jsx", "html"):
+            if ext not in ("js", "jsx", "ts", "tsx", "html"):
                 await utils.answer(message, self.strings["wrong_type"])
                 return
 
@@ -927,8 +1010,8 @@ if (typeof App !== 'undefined') {{
                     self.strings["deploying"].format(name=_escape(filename)),
                     parse_mode="html",
                 )
-            elif ext in ("js", "jsx"):
-                html = self._build_html_from_js(file_path, filename)
+            elif ext in ("js", "jsx", "ts", "tsx"):
+                html = self._build_html_from_js(file_path, filename, ext)
                 with open(os.path.join(site_dir, "index.html"), "w", encoding="utf-8") as f:
                     f.write(html)
                 serve_dir = site_dir
@@ -1009,6 +1092,9 @@ if (typeof App !== 'undefined') {{
         })
 
         await m.delete()
+        await self._notify(
+            f"<b>Site deployed</b>\n<blockquote>{_escape(display_name)}\n{url}</blockquote>"
+        )
         await self.inline.form(
             text=self.strings["deployed"].format(
                 name=_escape(display_name),
@@ -1016,6 +1102,7 @@ if (typeof App !== 'undefined') {{
             ),
             message=message,
             reply_markup=[
+                [{"text": self.strings["btn_open_site"], "url": url}],
                 [{"text": self.strings["btn_stop"], "callback": self._cb_stop_site, "args": (site_id,), "style": "danger"}],
                 [{"text": self.strings["btn_sites"], "callback": self._cb_sites_menu, "style": "primary"}],
                 [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
