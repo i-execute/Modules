@@ -50,7 +50,7 @@ class PackDumper(loader.Module):
         ),
         "btn_enter_url": "Enter URL",
         "btn_close": "Close",
-        "input_url": "Send pack link (https://t.me/addstickers/... or https://t.me/addemoji/...):",
+        "input_url": "Paste pack link:",
         "resolving": (
             "<b>Resolving</b>\n"
             "<blockquote>Fetching pack info...</blockquote>"
@@ -152,7 +152,7 @@ class PackDumper(loader.Module):
         ),
         "btn_enter_url": "Ввести ссылку",
         "btn_close": "Закрыть",
-        "input_url": "Отправьте ссылку на пак (https://t.me/addstickers/... или https://t.me/addemoji/...):",
+        "input_url": "Вставьте ссылку на пак:",
         "resolving": (
             "<b>Загружаем</b>\n"
             "<blockquote>Получаем информацию о паке...</blockquote>"
@@ -555,7 +555,7 @@ class PackDumper(loader.Module):
             )
 
     @loader.command(
-        ru_doc="Открыть меню дампа стикер/эмодзи пака",
+        ru_doc="Открыть меню дампа",
         en_doc="Open pack dumper menu",
     )
     async def pd(self, message):
@@ -571,11 +571,11 @@ class PackDumper(loader.Module):
         )
 
     @loader.command(
-        ru_doc="[реплай] дамп сообщения в инлайн форму",
-        en_doc="[reply] dump message to inline form",
+        ru_doc="в реплай - дамп сообщения в инлайн форму",
+        en_doc="reply dump - message to inline form",
     )
     async def rd(self, message):
-        """[reply] dump message to inline form"""
+        """report dump - message to inline form"""
         reply = await message.get_reply_message()
         if not reply:
             await utils.answer(message, self.strings["no_reply"])
