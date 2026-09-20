@@ -20,6 +20,7 @@ import tarfile
 import tempfile
 import zipfile
 
+from telethon.tl.functions.channels import EditForumTopicRequest
 from telethon.tl.functions.messages import EditMessageRequest
 from telethon.tl.types import InputMediaWebPage, Message
 
@@ -384,7 +385,7 @@ class WebDeployer(loader.Module):
 
         await self._reattach_sites()
 
-    async def _send_with_preview(self, chat_id, text):
+    async def _send_with_preview(self, chat_id, text, _retry=True):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
             msg = await self.inline.bot.send_message(
@@ -392,7 +393,7 @@ class WebDeployer(loader.Module):
                 msg_text,
                 parse_mode=None,
                 entities=entities,
-                reply_to=self._logger_topic.id,
+                message_thread_id=self._logger_topic.id,
             )
             if msg:
                 try:
@@ -416,21 +417,44 @@ class WebDeployer(loader.Module):
                 except Exception as e:
                     logger.error(f"[WD] Failed to add preview: {e}")
         except Exception as e:
+            if "TOPIC_CLOSED" in str(e) and _retry and await self._reopen_topic_if_closed():
+                await self._send_with_preview(chat_id, text, _retry=False)
+                return
             logger.error(f"[WD] Failed to send message with preview: {e}")
+
+    async def _reopen_topic_if_closed(self):
+        if not self._logger_topic or not self._asset_channel:
+            return False
+        try:
+            peer = await self.inline.bot.get_input_entity(int(f"-100{self._asset_channel}"))
+            await self.inline.bot(EditForumTopicRequest(
+                channel=peer,
+                topic_id=self._logger_topic.id,
+                closed=False,
+            ))
+            return True
+        except Exception as e:
+            logger.error(f"[WD] Failed to reopen topic: {e}")
+            return False
 
     async def _notify(self, text: str):
         if not self._logger_topic or not self._asset_channel:
             return
-        try:
-            chat_id = int(f"-100{self._asset_channel}")
-            await self.inline.bot.send_message(
-                chat_id,
-                text,
-                parse_mode="html",
-                reply_to=self._logger_topic.id,
-            )
-        except Exception as e:
-            logger.error(f"[WD] Failed to send topic notification: {e}")
+        chat_id = int(f"-100{self._asset_channel}")
+        for attempt in range(2):
+            try:
+                await self.inline.bot.send_message(
+                    chat_id,
+                    text,
+                    parse_mode="html",
+                    message_thread_id=self._logger_topic.id,
+                )
+                return
+            except Exception as e:
+                if "TOPIC_CLOSED" in str(e) and attempt == 0 and await self._reopen_topic_if_closed():
+                    continue
+                logger.error(f"[WD] Failed to send topic notification: {e}")
+                return
 
     @property
     def _is_root(self) -> bool:
@@ -519,7 +543,7 @@ class WebDeployer(loader.Module):
                 self._remove_site(site_id)
                 continue
             if await self._unit_active(http_unit):
-                continue  
+                continue
             await self._stop_unit(cf_unit)
             self._remove_unit_file(http_unit)
             self._remove_unit_file(cf_unit)
@@ -529,7 +553,7 @@ class WebDeployer(loader.Module):
                 shutil.rmtree(site_dir, ignore_errors=True)
             self._remove_site(site_id)
             await self._notify(
-                f"<b>🧹 Cleaned up stale site</b>\n<blockquote>{_escape(site.get('name', site_id))}</blockquote>"
+                f"<b>Cleaned up stale site</b>\n<blockquote>{_escape(site.get('name', site_id))}</blockquote>"
             )
 
     def _cf_installed(self):
@@ -893,7 +917,7 @@ if (typeof App !== 'undefined') {{
                 port=site.get("port", "?"),
             ),
             reply_markup=[
-                [{"text": self.strings["btn_open_site"], "url": site.get("url", "")}],
+                [{"text": self.strings["btn_open_site"], "url": site.get("url", ""), "style": "success"}],
                 [{"text": self.strings["btn_stop"], "callback": self._cb_stop_site, "args": (site_id,), "style": "danger"}],
                 [{"text": self.strings["btn_back"], "callback": self._cb_sites_menu, "style": "primary"}],
             ],
@@ -955,6 +979,7 @@ if (typeof App !== 'undefined') {{
         if not filename:
             await utils.answer(message, self.strings["wrong_type"])
             return
+
         display_name = self._unique_site_name(filename)
 
         archive_kind = _archive_kind(filename)
@@ -1102,7 +1127,7 @@ if (typeof App !== 'undefined') {{
             ),
             message=message,
             reply_markup=[
-                [{"text": self.strings["btn_open_site"], "url": url}],
+                [{"text": self.strings["btn_open_site"], "url": url, "style": "success"}],
                 [{"text": self.strings["btn_stop"], "callback": self._cb_stop_site, "args": (site_id,), "style": "danger"}],
                 [{"text": self.strings["btn_sites"], "callback": self._cb_sites_menu, "style": "primary"}],
                 [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],

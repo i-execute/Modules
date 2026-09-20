@@ -299,7 +299,7 @@ class SessionKiller(loader.Module):
         for i, auth in enumerate(page_sessions):
             label = auth.app_name or self.strings["unknown"]
             if auth.current:
-                label = f"[*] {label}"
+                label = f"* {label}"
             rows.append([{
                 "text": label[:32],
                 "callback": self._cb_session_detail,
