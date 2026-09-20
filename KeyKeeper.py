@@ -2,28 +2,28 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (2, 2, 0)
+__version__ = (3, 0, 0)
 # meta developer: Execute_forge.t.me
 
-import logging
 import json
-import tempfile
+import logging
 import os
 import asyncio
+import tempfile
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse
 
 import aiohttp
 
-from telethon.tl.types import Message
 from .. import loader, utils
 from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
-KEYS_PER_PAGE = 5
+ITEMS_PER_PAGE = 5
 
 
-def _escape(text):
+def _escape(text) -> str:
     if not text:
         return ""
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -35,510 +35,431 @@ def _mask(key: str) -> str:
     return key
 
 
-def _now(tz_offset: int) -> str:
+def _domain_from_url(url: str) -> str:
+    try:
+        host = urlparse(url).hostname or url
+        parts = host.split(".")
+        if len(parts) >= 2:
+            return parts[-2]
+        return host
+    except Exception:
+        return url
+
+
+def _now_str(tz_offset: int) -> str:
     tz = timezone(timedelta(hours=tz_offset))
     now = datetime.now(tz)
     sign = "+" if tz_offset >= 0 else "-"
-    return f"{now.strftime('%Y.%m.%d')}|{now.strftime('%H:%M:%S')}|{sign}{abs(tz_offset)} UTC"
+    return f"{now.strftime('%Y-%m-%d %H:%M:%S')} UTC{sign}{abs(tz_offset)}"
 
 
-async def _validate_key(api_key: str, base_url: str, model: str, timeout: int) -> dict:
-    logs = []
-    request_body = {
+async def _api_get(url: str, api_key: str, timeout: int) -> dict:
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                url,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as r:
+                data = await r.json(content_type=None)
+                return {"ok": r.status < 400, "status": r.status, "data": data}
+    except Exception as e:
+        return {"ok": False, "status": 0, "data": {}, "error": str(e)}
+
+
+async def _api_post(url: str, api_key: str, body: dict, timeout: int) -> dict:
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post(
+                url,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=body,
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as r:
+                data = await r.json(content_type=None)
+                return {"ok": r.status < 400, "status": r.status, "data": data}
+    except Exception as e:
+        return {"ok": False, "status": 0, "data": {}, "error": str(e)}
+
+
+async def _fetch_models(base_url: str, api_key: str, timeout: int) -> tuple[bool, list, str]:
+    r = await _api_get(f"{base_url.rstrip('/')}/models", api_key, timeout)
+    if not r["ok"]:
+        err = r.get("error") or r["data"].get("error", {}).get("message", str(r["data"]))
+        return False, [], str(err)[:200]
+    data = r["data"]
+    if "data" not in data:
+        return False, [], str(data)[:200]
+    ids = sorted(m.get("id", "") for m in data["data"] if m.get("id"))
+    return True, ids, ""
+
+
+async def _validate_key(base_url: str, api_key: str, model: str, timeout: int) -> dict:
+    body = {
         "model": model,
         "stream": False,
         "messages": [{"role": "user", "content": "Hello"}],
     }
-    request_headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    r = await _api_post(f"{base_url.rstrip('/')}/chat/completions", api_key, body, timeout)
+    data = r["data"]
 
-    logs.append({
-        "request": {
-            "url": f"{base_url.rstrip('/')}/chat/completions",
-            "method": "POST",
-            "headers": {k: (v if k != "Authorization" else f"Bearer {_mask(api_key)}") for k, v in request_headers.items()},
-            "body": request_body,
-        }
-    })
+    if "error" in data:
+        code = data["error"].get("code", "")
+        msg = data["error"].get("message", "")
+        if code == "rate_limit_exceeded":
+            return {"status": "rate-limited", "message": msg, "raw": r}
+        return {"status": "invalid", "message": msg, "raw": r}
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{base_url.rstrip('/')}/chat/completions",
-                headers=request_headers,
-                json=request_body,
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as resp:
-                data = await resp.json(content_type=None)
-                logs.append({"response": {"status": resp.status, "body": data}})
+    if "choices" in data:
+        return {"status": "valid", "message": "", "raw": r}
 
-                if "error" in data:
-                    code = data["error"].get("code", "")
-                    msg = data["error"].get("message", "")
-                    if code == "rate_limit_exceeded":
-                        return {"valid": True, "status": "rate-limited", "message": msg, "logs": logs}
-                    else:
-                        return {"valid": False, "status": "invalid", "message": msg, "logs": logs}
-
-                if "choices" in data:
-                    return {"valid": True, "status": "valid", "message": "", "logs": logs}
-
-                return {"valid": False, "status": "invalid", "message": str(data)[:200], "logs": logs}
-
-    except Exception as e:
-        logs.append({"error": str(e)})
-        return {"valid": False, "status": "invalid", "message": str(e)[:200], "logs": logs}
-
-
-async def _fetch_models(api_key: str, base_url: str, timeout: int) -> dict:
-    url = f"{base_url.rstrip('/')}/models"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as resp:
-                data = await resp.json(content_type=None)
-                if "error" in data:
-                    return {"ok": False, "message": data["error"].get("message", str(data["error"]))[:200], "models": []}
-                if "data" in data and isinstance(data["data"], list):
-                    ids = [m.get("id", "") for m in data["data"] if m.get("id")]
-                    return {"ok": True, "message": "", "models": ids}
-                return {"ok": False, "message": str(data)[:200], "models": []}
-    except Exception as e:
-        return {"ok": False, "message": str(e)[:200], "models": []}
+    err = r.get("error", str(data)[:200])
+    return {"status": "invalid", "message": str(err)[:200], "raw": r}
 
 
 @loader.tds
 class KeyKeeper(loader.Module):
-    """OpenAI-compatible API key manager for multiple providers"""
+    """OpenAI-compatible API key manager"""
 
     strings = {
         "name": "KeyKeeper",
-
         "main_menu": (
             "<b>KeyKeeper</b>\n"
-            "<blockquote>Providers: {providers} | Keys: {keys}</blockquote>"
+            "<blockquote>Providers: {providers}\n"
+            "Total keys: {keys}</blockquote>"
         ),
+        "btn_providers": "Providers",
+        "btn_add_provider": "Add Provider",
+        "btn_validate_all": "Validate All Keys",
+        "btn_export_all": "Export All",
+        "btn_close": "Close",
+        "btn_back": "Back",
+        "btn_left": "<",
+        "btn_right": ">",
 
-        "no_provider_for_key": (
-            "<b>No Providers</b>\n"
-            "<blockquote>Add a provider first</blockquote>"
-        ),
-
-        "add_provider_url": (
+        "add_url": (
             "<b>Add Provider</b>\n"
             "<blockquote>Enter base URL\n"
-            "<i>e.g. https://your.provider.domain/v1</i></blockquote>"
+            "<i>e.g. https://api.openai.com/v1</i></blockquote>"
         ),
-
-        "add_provider_name": (
+        "add_key": (
             "<b>Add Provider</b>\n"
             "<blockquote>URL: <code>{url}</code>\n"
-            "Enter display name</blockquote>"
+            "Enter API key:</blockquote>"
         ),
-
-        "add_provider_model": (
-            "<b>Add Provider</b>\n"
-            "<blockquote>URL: <code>{url}</code>\n"
-            "Name: <b>{name}</b>\n"
-            "Enter test model</blockquote>"
+        "fetching_models": (
+            "<b>Fetching models...</b>\n"
+            "<blockquote>URL: <code>{url}</code></blockquote>"
         ),
-
+        "select_model": (
+            "<b>Select Test Model</b>\n"
+            "<blockquote>Provider: <b>{name}</b>\n"
+            "Page {page}/{total_pages}</blockquote>"
+        ),
         "provider_saved": (
             "<b>Provider Added</b>\n"
             "<blockquote>Name: <b>{name}</b>\n"
             "URL: <code>{url}</code>\n"
             "Model: <code>{model}</code></blockquote>"
         ),
-
-        "select_provider_for_key": (
-            "<b>Add Key</b>\n"
-            "<blockquote>Select provider:</blockquote>"
+        "fetch_models_error": (
+            "<b>Failed to fetch models</b>\n"
+            "<blockquote>{error}</blockquote>"
         ),
 
-        "add_key": (
+        "providers_list": (
+            "<b>Providers</b>\n"
+            "<blockquote>Page {page}/{total_pages}\n"
+            "Total: {total}</blockquote>"
+        ),
+        "provider_menu": (
+            "<b>{name}</b>\n"
+            "<blockquote>URL: <code>{url}</code>\n"
+            "Model: <code>{model}</code>\n"
+            "Keys: {keys}</blockquote>"
+        ),
+        "btn_add_key": "Add Key",
+        "btn_list_keys": "Keys",
+        "btn_validate_provider": "Validate All",
+        "btn_export_provider": "Export",
+        "btn_change_model": "Change Model",
+        "btn_delete_provider": "Delete Provider",
+
+        "add_key_input": (
             "<b>Add Key</b>\n"
-            "<blockquote>Provider: <b>{provider}</b>\n"
+            "<blockquote>Provider: <b>{name}</b>\n"
             "Enter API key:</blockquote>"
         ),
-
-        "validating": "<b>Validating key...</b>",
-
-        "key_valid_comment": (
+        "validating": "<b>Validating...</b>",
+        "key_valid": (
             "<b>Key Valid</b>\n"
-            "<blockquote>"
-            "Key: <code>{key}</code>\n"
-            "Status: {status}\n"
-            "Add a comment or skip:</blockquote>"
+            "<blockquote>Status: {status}\n"
+            "Save with optional comment or skip:</blockquote>"
         ),
-
         "key_invalid": (
             "<b>Key Invalid</b>\n"
-            "<blockquote>"
-            "Key: <code>{key}</code>\n"
-            "Reason: {reason}"
-            "</blockquote>"
+            "<blockquote>Reason: {reason}</blockquote>"
         ),
-
-        "key_saved": (
-            "<b>Key Saved</b>\n"
-            "<blockquote>Provider: <b>{provider}</b>\n"
-            "<code>{key}</code></blockquote>"
+        "key_duplicate": (
+            "<b>Duplicate</b>\n"
+            "<blockquote>This key already exists</blockquote>"
         ),
+        "btn_save_key": "Save",
+        "btn_save_comment": "Save with Comment",
+        "input_key": "API key:",
+        "input_comment": "Comment:",
+        "input_new_model": "New test model:",
 
-        "manage_select_provider": (
-            "<b>Manage</b>\n"
-            "<blockquote>Select provider:</blockquote>"
+        "keys_list": (
+            "<b>{name} - Keys</b>\n"
+            "<blockquote>Page {page}/{total_pages}\n"
+            "Total: {total}</blockquote>"
         ),
-
-        "manage_provider": (
-            "<b>{provider}</b>\n"
-            "<blockquote>Keys: {keys}</blockquote>"
-        ),
-
-        "provider_settings": (
-            "<b>{provider} Settings</b>\n"
-            "<blockquote>URL: <code>{url}</code>\n"
-            "Model: <code>{model}</code></blockquote>"
-        ),
-
-        "provider_settings_model": (
-            "<b>{provider}</b>\n"
-            "<blockquote>Enter new test model:</blockquote>"
-        ),
-
-        "provider_model_updated": (
-            "<b>Model Updated</b>\n"
-            "<blockquote>Provider: <b>{provider}</b>\n"
-            "Model: <code>{model}</code></blockquote>"
-        ),
-
-        "provider_deleted": "<b>Provider <b>{name}</b> deleted</b>",
-
-        "keys_list": "<b>{provider} - Keys</b>",
-
         "no_keys": (
             "<b>No Keys</b>\n"
             "<blockquote>Add keys first</blockquote>"
         ),
-
-        "validate_all_running": "<b>Validating all keys...</b>",
-
-        "validate_all_results": (
-            "<b>Validation Results</b>\n"
-            "<blockquote>"
-            "Provider: <b>{provider}</b>\n"
-            "Total: {total}\n"
-            "Valid: {valid}\n"
-            "Rate limited: {rate_limited}\n"
-            "Invalid: {invalid}"
-            "</blockquote>"
-        ),
-
-        "export_done": (
-            "<b>Export Complete</b>\n"
-            "<blockquote>keys.json sent to chat</blockquote>"
-        ),
-
-        "logs_sent": (
-            "<b>Logs Sent</b>\n"
-            "<blockquote>Provider: <b>{provider}</b></blockquote>"
-        ),
-
-        "no_logs": (
-            "<b>No Logs</b>\n"
-            "<blockquote>Validate keys first to generate logs</blockquote>"
-        ),
-
         "key_detail": (
-            "<b>Key #{num}</b>\n"
-            "<blockquote>"
-            "Masked: <code>{masked}</code>\n"
-            "Comment: {comment}\n"
+            "<b>Key #{num} - {name}</b>\n"
+            "<blockquote>Masked: <code>{masked}</code>\n"
             "Status: {status}\n"
-            "Checked: {date}"
-            "</blockquote>"
+            "Comment: {comment}\n"
+            "Checked: {date}</blockquote>"
         ),
-
+        "btn_show_key": "Show Key",
+        "btn_check_key": "Check",
+        "btn_models_key": "Models",
+        "btn_delete_key": "Delete",
         "key_full": (
             "<b>Key #{num}</b>\n"
             "<blockquote><code>{value}</code></blockquote>"
         ),
-
-        "key_deleted": "<b>Key #{num} deleted</b>",
-
-        "clean_done": (
-            "<b>Cleanup Done</b>\n"
-            "<blockquote>Removed {count} invalid key(s)</blockquote>"
+        "key_deleted": (
+            "<b>Key #{num} deleted</b>"
+        ),
+        "key_saved": (
+            "<b>Key Saved</b>\n"
+            "<blockquote>Provider: <b>{name}</b>\n"
+            "Key #: {num}</blockquote>"
         ),
 
-        "key_duplicate": (
-            "<b>Duplicate Key</b>\n"
-            "<blockquote>This key is already in the database</blockquote>"
+        "validate_provider_running": "<b>Validating {name}...</b>",
+        "validate_provider_done": (
+            "<b>Validation Done - {name}</b>\n"
+            "<blockquote>Total: {total}\n"
+            "Valid: {valid}\n"
+            "Rate limited: {rate_limited}\n"
+            "Invalid: {invalid}</blockquote>"
         ),
-
-        "fetching_models": "<b>Fetching models...</b>",
-
-        "models_list": (
-            "<b>Models - Key #{num}</b>\n"
-            "<blockquote>Sent to chat ({total} models)</blockquote>"
+        "validate_all_running": "<b>Validating all keys...</b>",
+        "validate_all_done": (
+            "<b>Validation Done - All</b>\n"
+            "<blockquote>Total: {total}\n"
+            "Valid: {valid}\n"
+            "Rate limited: {rate_limited}\n"
+            "Invalid: {invalid}\n"
+            "Results sent as JSON</blockquote>"
         ),
-
+        "models_sent": (
+            "<b>Models</b>\n"
+            "<blockquote>Key #{num}\n"
+            "Total: {total}\n"
+            "Sent to chat</blockquote>"
+        ),
         "models_error": (
-            "<b>Failed to fetch models</b>\n"
-            "<blockquote>{reason}</blockquote>"
+            "<b>Models Error</b>\n"
+            "<blockquote>{error}</blockquote>"
         ),
-
-        "btn_models": "List Models",
-
-        "btn_add_provider": "Add Provider",
-        "btn_add_key": "Add Key",
-        "btn_manage": "Manage",
-        "btn_back": "Back",
-        "btn_save": "Save Key",
-        "btn_skip_comment": "Skip Comment",
-        "btn_validate_all": "Validate All",
-        "btn_export": "Export Keys",
-        "btn_send_logs": "Send Logs",
-        "btn_list": "List Keys",
-        "btn_show": "Show Key",
-        "btn_check": "Check Key",
-        "btn_delete": "Delete Key",
-        "btn_clean": "Clean Invalid",
-        "btn_settings": "Provider Settings",
-        "btn_delete_provider": "Delete Provider",
-        "btn_change_model": "Change Test Model",
-        "btn_left": "<",
-        "btn_right": ">",
-
-        "input_url": "Enter base URL:",
-        "input_name": "Enter provider display name:",
-        "input_model": "Enter test model name:",
-        "input_key": "Enter API key:",
-        "input_comment": "Enter comment:",
-        "input_new_model": "Enter new test model:",
+        "export_sent": (
+            "<b>Export Sent</b>\n"
+            "<blockquote>{count} keys</blockquote>"
+        ),
+        "provider_deleted": "<b>Provider {name} deleted</b>",
+        "model_updated": (
+            "<b>Model Updated</b>\n"
+            "<blockquote>Provider: <b>{name}</b>\n"
+            "Model: <code>{model}</code></blockquote>"
+        ),
+        "change_model_menu": (
+            "<b>Change Model - {name}</b>\n"
+            "<blockquote>Current: <code>{model}</code>\n"
+            "Page {page}/{total_pages}</blockquote>"
+        ),
 
         "status_valid": "Valid",
         "status_rate_limited": "Rate Limited",
         "status_invalid": "Invalid",
         "status_unknown": "Not checked",
+        "no_comment": "-",
     }
 
     strings_ru = {
         "main_menu": (
             "<b>KeyKeeper</b>\n"
-            "<blockquote>Провайдеры: {providers} | Ключи: {keys}</blockquote>"
+            "<blockquote>Провайдеры: {providers}\n"
+            "Ключей всего: {keys}</blockquote>"
         ),
+        "btn_providers": "Провайдеры",
+        "btn_add_provider": "Добавить провайдера",
+        "btn_validate_all": "Проверить все ключи",
+        "btn_export_all": "Экспорт всего",
+        "btn_close": "Закрыть",
+        "btn_back": "Назад",
+        "btn_left": "<",
+        "btn_right": ">",
 
-        "no_provider_for_key": (
-            "<b>Нет провайдеров</b>\n"
-            "<blockquote>Сначала добавьте провайдера</blockquote>"
-        ),
-
-        "add_provider_url": (
+        "add_url": (
             "<b>Добавить провайдера</b>\n"
             "<blockquote>Введите base URL\n"
-            "<i>например https://your.provider.domain/v1</i></blockquote>"
+            "<i>например https://api.openai.com/v1</i></blockquote>"
         ),
-
-        "add_provider_name": (
+        "add_key": (
             "<b>Добавить провайдера</b>\n"
             "<blockquote>URL: <code>{url}</code>\n"
-            "Введите отображаемое имя</blockquote>"
+            "Введите API ключ:</blockquote>"
         ),
-
-        "add_provider_model": (
-            "<b>Добавить провайдера</b>\n"
-            "<blockquote>URL: <code>{url}</code>\n"
-            "Имя: <b>{name}</b>\n"
-            "Введите тестовую модель</blockquote>"
+        "fetching_models": (
+            "<b>Загружаем модели...</b>\n"
+            "<blockquote>URL: <code>{url}</code></blockquote>"
         ),
-
+        "select_model": (
+            "<b>Выбери тестовую модель</b>\n"
+            "<blockquote>Провайдер: <b>{name}</b>\n"
+            "Страница {page}/{total_pages}</blockquote>"
+        ),
         "provider_saved": (
             "<b>Провайдер добавлен</b>\n"
             "<blockquote>Имя: <b>{name}</b>\n"
             "URL: <code>{url}</code>\n"
             "Модель: <code>{model}</code></blockquote>"
         ),
-
-        "select_provider_for_key": (
-            "<b>Добавить ключ</b>\n"
-            "<blockquote>Выберите провайдера:</blockquote>"
+        "fetch_models_error": (
+            "<b>Не удалось получить модели</b>\n"
+            "<blockquote>{error}</blockquote>"
         ),
 
-        "add_key": (
+        "providers_list": (
+            "<b>Провайдеры</b>\n"
+            "<blockquote>Страница {page}/{total_pages}\n"
+            "Всего: {total}</blockquote>"
+        ),
+        "provider_menu": (
+            "<b>{name}</b>\n"
+            "<blockquote>URL: <code>{url}</code>\n"
+            "Модель: <code>{model}</code>\n"
+            "Ключей: {keys}</blockquote>"
+        ),
+        "btn_add_key": "Добавить ключ",
+        "btn_list_keys": "Ключи",
+        "btn_validate_provider": "Проверить все",
+        "btn_export_provider": "Экспорт",
+        "btn_change_model": "Сменить модель",
+        "btn_delete_provider": "Удалить провайдера",
+
+        "add_key_input": (
             "<b>Добавить ключ</b>\n"
-            "<blockquote>Провайдер: <b>{provider}</b>\n"
+            "<blockquote>Провайдер: <b>{name}</b>\n"
             "Введите API ключ:</blockquote>"
         ),
-
-        "validating": "<b>Проверка ключа...</b>",
-
-        "key_valid_comment": (
+        "validating": "<b>Проверяем...</b>",
+        "key_valid": (
             "<b>Ключ валиден</b>\n"
-            "<blockquote>"
-            "Ключ: <code>{key}</code>\n"
-            "Статус: {status}\n"
-            "Добавьте комментарий или пропустите:</blockquote>"
+            "<blockquote>Статус: {status}\n"
+            "Сохрани с комментарием или без:</blockquote>"
         ),
-
         "key_invalid": (
             "<b>Ключ невалиден</b>\n"
-            "<blockquote>"
-            "Ключ: <code>{key}</code>\n"
-            "Причина: {reason}"
-            "</blockquote>"
+            "<blockquote>Причина: {reason}</blockquote>"
         ),
-
-        "key_saved": (
-            "<b>Ключ сохранён</b>\n"
-            "<blockquote>Провайдер: <b>{provider}</b>\n"
-            "<code>{key}</code></blockquote>"
+        "key_duplicate": (
+            "<b>Дубликат</b>\n"
+            "<blockquote>Такой ключ уже есть</blockquote>"
         ),
+        "btn_save_key": "Сохранить",
+        "btn_save_comment": "Сохранить с комментарием",
+        "input_key": "API ключ:",
+        "input_comment": "Комментарий:",
+        "input_new_model": "Новая тестовая модель:",
 
-        "manage_select_provider": (
-            "<b>Управление</b>\n"
-            "<blockquote>Выберите провайдера:</blockquote>"
+        "keys_list": (
+            "<b>{name} - Ключи</b>\n"
+            "<blockquote>Страница {page}/{total_pages}\n"
+            "Всего: {total}</blockquote>"
         ),
-
-        "manage_provider": (
-            "<b>{provider}</b>\n"
-            "<blockquote>Ключей: {keys}</blockquote>"
-        ),
-
-        "provider_settings": (
-            "<b>Настройки {provider}</b>\n"
-            "<blockquote>URL: <code>{url}</code>\n"
-            "Модель: <code>{model}</code></blockquote>"
-        ),
-
-        "provider_settings_model": (
-            "<b>{provider}</b>\n"
-            "<blockquote>Введите новую тестовую модель:</blockquote>"
-        ),
-
-        "provider_model_updated": (
-            "<b>Модель обновлена</b>\n"
-            "<blockquote>Провайдер: <b>{provider}</b>\n"
-            "Модель: <code>{model}</code></blockquote>"
-        ),
-
-        "provider_deleted": "<b>Провайдер <b>{name}</b> удалён</b>",
-
-        "keys_list": "<b>{provider} - Ключи</b>",
-
         "no_keys": (
             "<b>Нет ключей</b>\n"
             "<blockquote>Сначала добавьте ключи</blockquote>"
         ),
-
-        "validate_all_running": "<b>Проверка всех ключей...</b>",
-
-        "validate_all_results": (
-            "<b>Результаты проверки</b>\n"
-            "<blockquote>"
-            "Провайдер: <b>{provider}</b>\n"
-            "Всего: {total}\n"
-            "Валидных: {valid}\n"
-            "Лимит запросов: {rate_limited}\n"
-            "Невалидных: {invalid}"
-            "</blockquote>"
-        ),
-
-        "export_done": (
-            "<b>Экспорт завершён</b>\n"
-            "<blockquote>keys.json отправлен в чат</blockquote>"
-        ),
-
-        "logs_sent": (
-            "<b>Логи отправлены</b>\n"
-            "<blockquote>Провайдер: <b>{provider}</b></blockquote>"
-        ),
-
-        "no_logs": (
-            "<b>Нет логов</b>\n"
-            "<blockquote>Сначала проверьте ключи</blockquote>"
-        ),
-
         "key_detail": (
-            "<b>Ключ #{num}</b>\n"
-            "<blockquote>"
-            "Маска: <code>{masked}</code>\n"
-            "Комментарий: {comment}\n"
+            "<b>Ключ #{num} - {name}</b>\n"
+            "<blockquote>Маска: <code>{masked}</code>\n"
             "Статус: {status}\n"
-            "Проверен: {date}"
-            "</blockquote>"
+            "Комментарий: {comment}\n"
+            "Проверен: {date}</blockquote>"
         ),
-
+        "btn_show_key": "Показать ключ",
+        "btn_check_key": "Проверить",
+        "btn_models_key": "Модели",
+        "btn_delete_key": "Удалить",
         "key_full": (
             "<b>Ключ #{num}</b>\n"
             "<blockquote><code>{value}</code></blockquote>"
         ),
-
         "key_deleted": "<b>Ключ #{num} удалён</b>",
-
-        "clean_done": (
-            "<b>Очистка завершена</b>\n"
-            "<blockquote>Удалено {count} невалидных ключей</blockquote>"
+        "key_saved": (
+            "<b>Ключ сохранён</b>\n"
+            "<blockquote>Провайдер: <b>{name}</b>\n"
+            "Номер: {num}</blockquote>"
         ),
 
-        "key_duplicate": (
-            "<b>Дубликат ключа</b>\n"
-            "<blockquote>Этот ключ уже есть в базе</blockquote>"
+        "validate_provider_running": "<b>Проверяем {name}...</b>",
+        "validate_provider_done": (
+            "<b>Проверка завершена - {name}</b>\n"
+            "<blockquote>Всего: {total}\n"
+            "Валидных: {valid}\n"
+            "Лимит: {rate_limited}\n"
+            "Невалидных: {invalid}</blockquote>"
         ),
-
-        "fetching_models": "<b>Получение списка моделей...</b>",
-
-        "models_list": (
-            "<b>Модели - Ключ #{num}</b>\n"
-            "<blockquote>Отправлено в чат ({total} моделей)</blockquote>"
+        "validate_all_running": "<b>Проверяем все ключи...</b>",
+        "validate_all_done": (
+            "<b>Проверка завершена - все</b>\n"
+            "<blockquote>Всего: {total}\n"
+            "Валидных: {valid}\n"
+            "Лимит: {rate_limited}\n"
+            "Невалидных: {invalid}\n"
+            "Результаты отправлены в JSON</blockquote>"
         ),
-
+        "models_sent": (
+            "<b>Модели</b>\n"
+            "<blockquote>Ключ #{num}\n"
+            "Всего: {total}\n"
+            "Отправлено в чат</blockquote>"
+        ),
         "models_error": (
-            "<b>Не удалось получить модели</b>\n"
-            "<blockquote>{reason}</blockquote>"
+            "<b>Ошибка моделей</b>\n"
+            "<blockquote>{error}</blockquote>"
         ),
-
-        "btn_models": "Список моделей",
-
-        "btn_add_provider": "Добавить провайдера",
-        "btn_add_key": "Добавить ключ",
-        "btn_manage": "Управление",
-        "btn_back": "Назад",
-        "btn_save": "Сохранить ключ",
-        "btn_skip_comment": "Пропустить",
-        "btn_validate_all": "Проверить все",
-        "btn_export": "Экспорт ключей",
-        "btn_send_logs": "Отправить логи",
-        "btn_list": "Список ключей",
-        "btn_show": "Показать ключ",
-        "btn_check": "Проверить ключ",
-        "btn_delete": "Удалить ключ",
-        "btn_clean": "Очистить невалидные",
-        "btn_settings": "Настройки провайдера",
-        "btn_delete_provider": "Удалить провайдера",
-        "btn_change_model": "Сменить модель",
-        "btn_left": "<",
-        "btn_right": ">",
-
-        "input_url": "Введите base URL:",
-        "input_name": "Введите отображаемое имя провайдера:",
-        "input_model": "Введите название тестовой модели:",
-        "input_key": "Введите API ключ:",
-        "input_comment": "Введите комментарий:",
-        "input_new_model": "Введите новую тестовую модель:",
+        "export_sent": (
+            "<b>Экспорт отправлен</b>\n"
+            "<blockquote>{count} ключей</blockquote>"
+        ),
+        "provider_deleted": "<b>Провайдер {name} удалён</b>",
+        "model_updated": (
+            "<b>Модель обновлена</b>\n"
+            "<blockquote>Провайдер: <b>{name}</b>\n"
+            "Модель: <code>{model}</code></blockquote>"
+        ),
+        "change_model_menu": (
+            "<b>Сменить модель - {name}</b>\n"
+            "<blockquote>Текущая: <code>{model}</code>\n"
+            "Страница {page}/{total_pages}</blockquote>"
+        ),
 
         "status_valid": "Валиден",
-        "status_rate_limited": "Лимит запросов",
+        "status_rate_limited": "Лимит",
         "status_invalid": "Невалиден",
         "status_unknown": "Не проверен",
+        "no_comment": "-",
     }
 
     def __init__(self):
@@ -546,776 +467,667 @@ class KeyKeeper(loader.Module):
             loader.ConfigValue(
                 "timezone",
                 3,
-                "Timezone offset (UTC), e.g. 3 for UTC+3",
+                "Timezone offset (UTC)",
                 validator=loader.validators.Integer(minimum=-12, maximum=12),
             ),
             loader.ConfigValue(
                 "timeout",
                 30,
-                "Request timeout in seconds for key validation",
-                validator=loader.validators.Integer(minimum=10, maximum=3600),
+                "Request timeout in seconds",
+                validator=loader.validators.Integer(minimum=5, maximum=300),
             ),
         )
         self._providers: list = []
-        self._keys: list = []
-        self._logs: dict = {}
+        self._pending: dict = {}
 
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
-        self._providers = self._db.get("KeyKeeper", "providers", [])
-        raw_keys = self._db.get("KeyKeeper", "keys", [])
-        self._keys = self._migrate_keys(raw_keys)
-        self._logs = self._db.get("KeyKeeper", "logs", {})
-        self._save_all()
+        self._providers = self.get("providers", [])
 
-    def _migrate_keys(self, raw: list) -> list:
-        normalized = []
-        for entry in raw:
-            if isinstance(entry, dict):
-                if "comment" not in entry:
-                    entry["comment"] = ""
-                if "provider_id" not in entry:
-                    entry["provider_id"] = 0
-                normalized.append(entry)
-        return normalized
+    def _save(self):
+        self.set("providers", self._providers)
 
-    def _next_key_num(self) -> int:
-        used = {e.get("key") for e in self._keys}
-        num = 1
-        while num in used:
-            num += 1
-        return num
-
-    def _save_all(self):
-        self._db.set("KeyKeeper", "providers", self._providers)
-        self._db.set("KeyKeeper", "keys", self._keys)
-        self._db.set("KeyKeeper", "logs", self._logs)
-
-    def _status_label(self, status: str) -> str:
-        mapping = {
-            "valid": self.strings["status_valid"],
-            "rate-limited": self.strings["status_rate_limited"],
-            "invalid": self.strings["status_invalid"],
-        }
-        return mapping.get(status, self.strings["status_unknown"])
-
-    def _find_key_index(self, num: int) -> int:
-        for i, entry in enumerate(self._keys):
-            if entry.get("key") == num:
-                return i
-        return -1
-
-    def _find_provider(self, pid: int) -> dict:
+    def _find_provider(self, pid: int) -> dict | None:
         for p in self._providers:
             if p.get("id") == pid:
                 return p
-        return {}
+        return None
 
-    def _keys_for_provider(self, pid: int) -> list:
-        return [e for e in self._keys if e.get("provider_id") == pid]
+    def _status_label(self, status: str) -> str:
+        return {
+            "valid": self.strings["status_valid"],
+            "rate-limited": self.strings["status_rate_limited"],
+            "invalid": self.strings["status_invalid"],
+        }.get(status, self.strings["status_unknown"])
 
     def _total_keys(self) -> int:
-        return len(self._keys)
+        return sum(len(p.get("keys", [])) for p in self._providers)
 
-    async def _cb_main_menu(self, call: InlineCall):
-        await call.edit(
-            self.strings["main_menu"].format(
-                providers=len(self._providers),
-                keys=self._total_keys(),
-            ),
-            reply_markup=[
-                [{"text": self.strings["btn_add_provider"], "callback": self._cb_add_provider_start, "style": "primary"}],
-                [{"text": self.strings["btn_add_key"], "callback": self._cb_select_provider_for_key, "style": "primary"}],
-                [{"text": self.strings["btn_manage"], "callback": self._cb_manage_select_provider, "style": "primary"}],
-            ],
+    def _next_key_num(self, provider: dict) -> int:
+        existing = {k.get("num") for k in provider.get("keys", [])}
+        n = 1
+        while n in existing:
+            n += 1
+        return n
+
+    async def _send_json(self, chat_id, data: dict | list, filename: str):
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
         )
+        json.dump(data, tmp, indent=2, ensure_ascii=False)
+        tmp.close()
+        try:
+            await self._client.send_file(
+                chat_id,
+                tmp.name,
+                force_document=True,
+                file_name=filename,
+            )
+        finally:
+            os.unlink(tmp.name)
+
+    def _fmt_main(self) -> str:
+        return self.strings["main_menu"].format(
+            providers=len(self._providers),
+            keys=self._total_keys(),
+        )
+
+    def _markup_main(self) -> list:
+        return [
+            [
+                {"text": self.strings["btn_providers"], "callback": self._cb_providers_list, "args": (0,), "style": "primary"},
+                {"text": self.strings["btn_add_provider"], "callback": self._cb_add_provider_start, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_validate_all"], "callback": self._cb_validate_all, "style": "success"},
+                {"text": self.strings["btn_export_all"], "callback": self._cb_export_all, "style": "primary"},
+            ],
+            [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
+        ]
+
+    async def _cb_close(self, call: InlineCall):
+        await call.delete()
+
+    async def _cb_main(self, call: InlineCall):
+        await call.edit(self._fmt_main(), reply_markup=self._markup_main())
 
     async def _cb_add_provider_start(self, call: InlineCall):
         await call.edit(
-            self.strings["add_provider_url"],
-            reply_markup=[[{
-                "text": self.strings["input_url"],
-                "input": self.strings["input_url"],
-                "handler": self._cb_add_provider_got_url,
-                "style": "primary",
-            }]],
+            self.strings["add_url"],
+            reply_markup=[
+                [{"text": self.strings["input_key"], "input": self.strings["add_url"], "handler": self._ih_add_url, "style": "primary"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_main, "style": "danger"}],
+            ],
         )
 
-    async def _cb_add_provider_got_url(self, call: InlineCall, url: str):
+    async def _ih_add_url(self, call: InlineCall, url: str):
         url = url.strip().rstrip("/")
         await call.edit(
-            self.strings["add_provider_name"].format(url=_escape(url)),
-            reply_markup=[[{
-                "text": self.strings["input_name"],
-                "input": self.strings["input_name"],
-                "handler": self._cb_add_provider_got_name,
-                "args": (url,),
-                "style": "primary",
-            }]],
+            self.strings["add_key"].format(url=_escape(url)),
+            reply_markup=[
+                [{"text": self.strings["input_key"], "input": self.strings["input_key"], "handler": self._ih_add_api_key, "args": (url,), "style": "primary"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_add_provider_start, "style": "danger"}],
+            ],
         )
 
-    async def _cb_add_provider_got_name(self, call: InlineCall, name: str, url: str):
-        name = name.strip()
-        await call.edit(
-            self.strings["add_provider_model"].format(url=_escape(url), name=_escape(name)),
-            reply_markup=[[{
-                "text": self.strings["input_model"],
-                "input": self.strings["input_model"],
-                "handler": self._cb_add_provider_got_model,
-                "args": (url, name),
-                "style": "primary",
-            }]],
-        )
+    async def _ih_add_api_key(self, call: InlineCall, api_key: str, url: str):
+        api_key = api_key.strip()
+        await call.edit(self.strings["fetching_models"].format(url=_escape(url)), reply_markup=[])
+        ok, models, err = await _fetch_models(url, api_key, self.config["timeout"])
+        if not ok:
+            await call.edit(
+                self.strings["fetch_models_error"].format(error=_escape(err)),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_add_provider_start, "style": "danger"}],
+                ],
+            )
+            return
+        name = _domain_from_url(url)
+        pending_id = utils.rand(12)
+        self._pending[pending_id] = {"url": url, "api_key": api_key, "name": name, "models": models}
+        await self._show_model_select(call, pending_id, 0, mode="add_provider")
 
-    async def _cb_add_provider_got_model(self, call: InlineCall, model: str, url: str, name: str):
-        model = model.strip()
+    async def _show_model_select(self, call: InlineCall, pending_id: str, page: int, mode: str):
+        pending = self._pending.get(pending_id)
+        if not pending:
+            await call.answer()
+            return
+        models = pending["models"]
+        name = pending["name"]
+        total = len(models)
+        total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+        page = max(0, min(page, total_pages - 1))
+        start = page * ITEMS_PER_PAGE
+        chunk = models[start:start + ITEMS_PER_PAGE]
+
+        if mode == "add_provider":
+            text = self.strings["select_model"].format(name=_escape(name), page=page + 1, total_pages=total_pages)
+            handler = self._cb_model_selected_add
+        else:
+            pid = pending.get("pid")
+            provider = self._find_provider(pid)
+            text = self.strings["change_model_menu"].format(
+                name=_escape(provider["name"] if provider else name),
+                model=_escape(provider["model"] if provider else ""),
+                page=page + 1,
+                total_pages=total_pages,
+            )
+            handler = self._cb_model_selected_change
+
+        rows = []
+        for m in chunk:
+            rows.append([{"text": m, "callback": handler, "args": (pending_id, m), "style": "primary"}])
+
+        nav_row = []
+        if page > 0:
+            nav_row.append({"text": self.strings["btn_left"], "callback": self._cb_model_page, "args": (pending_id, page - 1, mode), "style": "primary"})
+        if page < total_pages - 1:
+            nav_row.append({"text": self.strings["btn_right"], "callback": self._cb_model_page, "args": (pending_id, page + 1, mode), "style": "primary"})
+        if nav_row:
+            rows.append(nav_row)
+
+        rows.append([{"text": self.strings["btn_back"], "callback": self._cb_main, "style": "danger"}])
+        await call.edit(text, reply_markup=rows)
+
+    async def _cb_model_page(self, call: InlineCall, pending_id: str, page: int, mode: str):
+        await self._show_model_select(call, pending_id, page, mode)
+
+    async def _cb_model_selected_add(self, call: InlineCall, pending_id: str, model: str):
+        pending = self._pending.pop(pending_id, None)
+        if not pending:
+            await call.answer()
+            return
         pid = (max((p.get("id", 0) for p in self._providers), default=0)) + 1
         self._providers.append({
             "id": pid,
-            "name": name,
-            "url": url,
+            "name": pending["name"],
+            "url": pending["url"],
+            "api_key": pending["api_key"],
             "model": model,
+            "keys": [],
         })
-        self._save_all()
-
+        self._save()
         await call.edit(
             self.strings["provider_saved"].format(
-                name=_escape(name),
-                url=_escape(url),
+                name=_escape(pending["name"]),
+                url=_escape(pending["url"]),
                 model=_escape(model),
             ),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main, "style": "danger"}]],
         )
 
-    async def _cb_select_provider_for_key(self, call: InlineCall):
-        if not self._providers:
-            await call.edit(
-                self.strings["no_provider_for_key"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
+    async def _cb_model_selected_change(self, call: InlineCall, pending_id: str, model: str):
+        pending = self._pending.pop(pending_id, None)
+        if not pending:
+            await call.answer()
             return
-
-        rows = []
-        for p in self._providers:
-            rows.append([{
-                "text": p["name"],
-                "callback": self._cb_add_key_for_provider,
-                "args": (p["id"],),
-                "style": "primary",
-            }])
-        rows.append([{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}])
-
-        await call.edit(
-            self.strings["select_provider_for_key"],
-            reply_markup=rows,
-        )
-
-    async def _cb_add_key_for_provider(self, call: InlineCall, pid: int):
+        pid = pending.get("pid")
         provider = self._find_provider(pid)
-        if not provider:
-            await call.answer("Provider not found", show_alert=True)
-            return
-
+        if provider:
+            provider["model"] = model
+            self._save()
         await call.edit(
-            self.strings["add_key"].format(provider=_escape(provider["name"])),
-            reply_markup=[[{
-                "text": self.strings["input_key"],
-                "input": self.strings["input_key"],
-                "handler": self._cb_validate_key_for_provider,
-                "args": (pid,),
-                "style": "primary",
-            }]],
-        )
-
-    async def _cb_validate_key_for_provider(self, call: InlineCall, key: str, pid: int):
-        key = key.strip()
-        masked = _mask(key)
-        provider = self._find_provider(pid)
-        if not provider:
-            await call.answer("Provider not found", show_alert=True)
-            return
-
-        all_values = [e.get("value") for e in self._keys]
-        if key in all_values:
-            await call.edit(
-                self.strings["key_duplicate"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
-            return
-
-        await call.edit(self.strings["validating"], reply_markup=[])
-
-        result = await _validate_key(key, provider["url"], provider["model"], self.config["timeout"])
-
-        if result["valid"]:
-            status_str = self._status_label(result["status"])
-            await call.edit(
-                self.strings["key_valid_comment"].format(
-                    key=_escape(masked),
-                    status=status_str,
-                ),
-                reply_markup=[
-                    [{
-                        "text": self.strings["input_comment"],
-                        "input": self.strings["input_comment"],
-                        "handler": self._cb_save_key_with_comment,
-                        "args": (key, result["status"], pid, result["logs"]),
-                        "style": "primary",
-                    }],
-                    [{"text": self.strings["btn_skip_comment"], "callback": self._cb_save_key_no_comment, "args": (key, result["status"], pid, result["logs"]), "style": "success"}],
-                    [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}],
-                ],
-            )
-        else:
-            await call.edit(
-                self.strings["key_invalid"].format(
-                    key=_escape(masked),
-                    reason=_escape(result["message"]),
-                ),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
-
-    async def _do_save_key(self, call: InlineCall, key: str, status: str, pid: int, logs: list, comment: str):
-        existing_values = [e.get("value") for e in self._keys if e.get("provider_id") == pid]
-        provider = self._find_provider(pid)
-        if not provider:
-            await call.answer("Provider not found", show_alert=True)
-            return
-
-        if key not in existing_values:
-            num = self._next_key_num()
-            self._keys.append({
-                "key": num,
-                "value": key,
-                "status": status,
-                "comment": comment,
-                "date": _now(self.config["timezone"]),
-                "provider_id": pid,
-            })
-            log_key = f"{pid}:{num}"
-            self._logs[log_key] = logs
-            self._save_all()
-
-        masked = _mask(key)
-        await call.edit(
-            self.strings["key_saved"].format(
-                provider=_escape(provider["name"]),
-                key=_escape(masked),
+            self.strings["model_updated"].format(
+                name=_escape(provider["name"] if provider else ""),
+                model=_escape(model),
             ),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}]],
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}]],
         )
 
-    async def _cb_save_key_with_comment(self, call: InlineCall, comment: str, key: str, status: str, pid: int, logs: list):
-        await self._do_save_key(call, key, status, pid, logs, comment.strip())
-
-    async def _cb_save_key_no_comment(self, call: InlineCall, key: str, status: str, pid: int, logs: list):
-        await self._do_save_key(call, key, status, pid, logs, "")
-
-    async def _cb_manage_select_provider(self, call: InlineCall):
-        if not self._providers:
+    async def _cb_providers_list(self, call: InlineCall, page: int):
+        total = len(self._providers)
+        if total == 0:
             await call.edit(
-                self.strings["no_provider_for_key"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
+                self._fmt_main(),
+                reply_markup=self._markup_main(),
             )
             return
+        total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+        page = max(0, min(page, total_pages - 1))
+        start = page * ITEMS_PER_PAGE
+        chunk = self._providers[start:start + ITEMS_PER_PAGE]
 
         rows = []
-        for p in self._providers:
-            key_count = len(self._keys_for_provider(p["id"]))
+        for p in chunk:
+            key_count = len(p.get("keys", []))
             rows.append([{
                 "text": f"{p['name']} ({key_count})",
-                "callback": self._cb_manage_provider,
+                "callback": self._cb_provider_menu,
                 "args": (p["id"],),
                 "style": "primary",
             }])
-        rows.append([{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}])
+
+        nav_row = []
+        if page > 0:
+            nav_row.append({"text": self.strings["btn_left"], "callback": self._cb_providers_list, "args": (page - 1,), "style": "primary"})
+        if page < total_pages - 1:
+            nav_row.append({"text": self.strings["btn_right"], "callback": self._cb_providers_list, "args": (page + 1,), "style": "primary"})
+        if nav_row:
+            rows.append(nav_row)
+
+        rows.append([{"text": self.strings["btn_back"], "callback": self._cb_main, "style": "danger"}])
 
         await call.edit(
-            self.strings["manage_select_provider"],
+            self.strings["providers_list"].format(page=page + 1, total_pages=total_pages, total=total),
             reply_markup=rows,
         )
 
-    async def _cb_manage_provider(self, call: InlineCall, pid: int):
+    async def _cb_provider_menu(self, call: InlineCall, pid: int):
         provider = self._find_provider(pid)
         if not provider:
-            await call.answer("Provider not found", show_alert=True)
+            await call.answer()
             return
-
-        pkeys = self._keys_for_provider(pid)
-        rows = [
-            [{"text": self.strings["btn_settings"], "callback": self._cb_provider_settings, "args": (pid,), "style": "primary"}],
-            [{"text": self.strings["btn_list"], "callback": self._cb_list_keys, "args": (pid,), "style": "primary"}],
-            [{"text": self.strings["btn_validate_all"], "callback": self._cb_validate_all, "args": (pid,), "style": "success"}],
-            [{"text": self.strings["btn_send_logs"], "callback": self._cb_send_logs, "args": (pid,), "style": "primary"}],
-            [{"text": self.strings["btn_clean"], "callback": self._cb_clean_invalid, "args": (pid,), "style": "danger"}],
-            [{"text": self.strings["btn_export"], "callback": self._cb_export, "args": (pid,), "style": "success"}],
-            [{"text": self.strings["btn_back"], "callback": self._cb_manage_select_provider, "style": "danger"}],
-        ]
-
         await call.edit(
-            self.strings["manage_provider"].format(
-                provider=_escape(provider["name"]),
-                keys=len(pkeys),
-            ),
-            reply_markup=rows,
-        )
-
-    async def _cb_provider_settings(self, call: InlineCall, pid: int):
-        provider = self._find_provider(pid)
-        if not provider:
-            await call.answer("Provider not found", show_alert=True)
-            return
-
-        await call.edit(
-            self.strings["provider_settings"].format(
-                provider=_escape(provider["name"]),
+            self.strings["provider_menu"].format(
+                name=_escape(provider["name"]),
                 url=_escape(provider["url"]),
                 model=_escape(provider["model"]),
+                keys=len(provider.get("keys", [])),
             ),
             reply_markup=[
-                [{"text": self.strings["btn_change_model"], "callback": self._cb_change_model_start, "args": (pid,), "style": "primary"}],
-                [{"text": self.strings["btn_delete_provider"], "callback": self._cb_delete_provider, "args": (pid,), "style": "danger"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_manage_provider, "args": (pid,), "style": "danger"}],
+                [
+                    {"text": self.strings["btn_add_key"], "callback": self._cb_add_key_start, "args": (pid,), "style": "primary"},
+                    {"text": self.strings["btn_list_keys"], "callback": self._cb_keys_list, "args": (pid, 0), "style": "primary"},
+                ],
+                [
+                    {"text": self.strings["btn_validate_provider"], "callback": self._cb_validate_provider, "args": (pid,), "style": "success"},
+                    {"text": self.strings["btn_export_provider"], "callback": self._cb_export_provider, "args": (pid,), "style": "primary"},
+                ],
+                [
+                    {"text": self.strings["btn_change_model"], "callback": self._cb_change_model_start, "args": (pid,), "style": "primary"},
+                    {"text": self.strings["btn_delete_provider"], "callback": self._cb_delete_provider, "args": (pid,), "style": "danger"},
+                ],
+                [{"text": self.strings["btn_back"], "callback": self._cb_providers_list, "args": (0,), "style": "danger"}],
             ],
         )
 
     async def _cb_change_model_start(self, call: InlineCall, pid: int):
         provider = self._find_provider(pid)
         if not provider:
-            await call.answer("Provider not found", show_alert=True)
+            await call.answer()
             return
-
-        await call.edit(
-            self.strings["provider_settings_model"].format(provider=_escape(provider["name"])),
-            reply_markup=[[{
-                "text": self.strings["input_new_model"],
-                "input": self.strings["input_new_model"],
-                "handler": self._cb_change_model_save,
-                "args": (pid,),
-                "style": "primary",
-            }]],
-        )
-
-    async def _cb_change_model_save(self, call: InlineCall, model: str, pid: int):
-        model = model.strip()
-        for p in self._providers:
-            if p.get("id") == pid:
-                p["model"] = model
-                break
-        self._save_all()
-
-        provider = self._find_provider(pid)
-        await call.edit(
-            self.strings["provider_model_updated"].format(
-                provider=_escape(provider.get("name", "")),
-                model=_escape(model),
-            ),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_provider_settings, "args": (pid,), "style": "danger"}]],
-        )
+        await call.edit(self.strings["fetching_models"].format(url=_escape(provider["url"])), reply_markup=[])
+        ok, models, err = await _fetch_models(provider["url"], provider["api_key"], self.config["timeout"])
+        if not ok:
+            await call.edit(
+                self.strings["fetch_models_error"].format(error=_escape(err)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}]],
+            )
+            return
+        pending_id = utils.rand(12)
+        self._pending[pending_id] = {"pid": pid, "name": provider["name"], "models": models}
+        await self._show_model_select(call, pending_id, 0, mode="change_model")
 
     async def _cb_delete_provider(self, call: InlineCall, pid: int):
         provider = self._find_provider(pid)
-        name = provider.get("name", str(pid)) if provider else str(pid)
-
+        name = provider["name"] if provider else str(pid)
         self._providers = [p for p in self._providers if p.get("id") != pid]
-        self._keys = [e for e in self._keys if e.get("provider_id") != pid]
-
-        self._save_all()
-
+        self._save()
         await call.edit(
             self.strings["provider_deleted"].format(name=_escape(name)),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main, "style": "danger"}]],
         )
 
-    async def _cb_noop(self, call: InlineCall):
-        await call.answer()
-
-    async def _cb_keys_page(self, call: InlineCall, pid: int, page: int):
-        await self._render_keys_page(call, pid, page)
-
-    async def _render_keys_page(self, call: InlineCall, pid: int, page: int):
+    async def _cb_add_key_start(self, call: InlineCall, pid: int):
         provider = self._find_provider(pid)
         if not provider:
-            await call.answer("Provider not found", show_alert=True)
+            await call.answer()
             return
-
-        pkeys = self._keys_for_provider(pid)
-        if not pkeys:
-            await call.edit(
-                self.strings["no_keys"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_manage_provider, "args": (pid,), "style": "danger"}]],
-            )
-            return
-
-        total_pages = max(1, (len(pkeys) + KEYS_PER_PAGE - 1) // KEYS_PER_PAGE)
-        page = max(0, min(page, total_pages - 1))
-        start = page * KEYS_PER_PAGE
-        page_keys = pkeys[start:start + KEYS_PER_PAGE]
-
-        markup = []
-        for entry in page_keys:
-            num = entry.get("key")
-            masked = _mask(entry.get("value", ""))
-            markup.append([{
-                "text": f"{num}. {masked}",
-                "callback": self._cb_key_detail,
-                "args": (num, pid),
-                "style": "primary",
-            }])
-
-        left_btn = {"text": self.strings["btn_left"], "callback": self._cb_keys_page, "args": (pid, page - 1)}
-        right_btn = {"text": self.strings["btn_right"], "callback": self._cb_keys_page, "args": (pid, page + 1)}
-        if page > 0:
-            left_btn["style"] = "primary"
-        if page < total_pages - 1:
-            right_btn["style"] = "primary"
-
-        if total_pages > 1:
-            markup.append([{"text": f"{page + 1}/{total_pages}", "callback": self._cb_noop, "style": "primary"}])
-            markup.append([left_btn, right_btn])
-
-        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_manage_provider, "args": (pid,), "style": "danger"}])
-
         await call.edit(
-            self.strings["keys_list"].format(provider=_escape(provider["name"])),
-            reply_markup=markup,
-        )
-
-    async def _cb_list_keys(self, call: InlineCall, pid: int):
-        await self._render_keys_page(call, pid, 0)
-
-    async def _cb_key_detail(self, call: InlineCall, num: int, pid: int):
-        idx = self._find_key_index(num)
-        if idx == -1:
-            await call.answer("Key not found", show_alert=True)
-            return
-
-        entry = self._keys[idx]
-        masked = _mask(entry.get("value", ""))
-        status = self._status_label(entry.get("status", ""))
-        date = entry.get("date", "-")
-        comment = entry.get("comment", "") or "-"
-
-        await call.edit(
-            self.strings["key_detail"].format(
-                num=num,
-                masked=_escape(masked),
-                comment=_escape(comment),
-                status=status,
-                date=date,
-            ),
+            self.strings["add_key_input"].format(name=_escape(provider["name"])),
             reply_markup=[
-                [{"text": self.strings["btn_show"], "callback": self._cb_show_key, "args": (num, pid), "style": "primary"}],
-                [{"text": self.strings["btn_check"], "callback": self._cb_check_single, "args": (num, pid), "style": "success"}],
-                [{"text": self.strings["btn_models"], "callback": self._cb_list_models, "args": (num, pid), "style": "primary"}],
-                [{"text": self.strings["btn_delete"], "callback": self._cb_delete_key, "args": (num, pid), "style": "danger"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_list_keys, "args": (pid,), "style": "danger"}],
+                [{"text": self.strings["input_key"], "input": self.strings["input_key"], "handler": self._ih_validate_new_key, "args": (pid,), "style": "primary"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}],
             ],
         )
 
-    async def _cb_show_key(self, call: InlineCall, num: int, pid: int):
-        idx = self._find_key_index(num)
-        if idx == -1:
-            await call.answer("Key not found", show_alert=True)
-            return
-
-        entry = self._keys[idx]
-        await call.edit(
-            self.strings["key_full"].format(
-                num=num,
-                value=_escape(entry.get("value", "")),
-            ),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_key_detail, "args": (num, pid), "style": "danger"}]],
-        )
-
-    async def _cb_list_models(self, call: InlineCall, num: int, pid: int):
-        idx = self._find_key_index(num)
-        if idx == -1:
-            await call.answer("Key not found", show_alert=True)
-            return
-
+    async def _ih_validate_new_key(self, call: InlineCall, key: str, pid: int):
+        key = key.strip()
         provider = self._find_provider(pid)
         if not provider:
-            await call.answer("Provider not found", show_alert=True)
+            await call.answer()
             return
 
-        await call.edit(self.strings["fetching_models"], reply_markup=[])
-
-        entry = self._keys[idx]
-        key = entry.get("value", "")
-        result = await _fetch_models(key, provider["url"], self.config["timeout"])
-
-        if result["ok"]:
-            export = {
-                "provider": provider["name"],
-                "base_url": provider["url"],
-                "key_num": num,
-                "masked": _mask(key),
-                "models": result["models"],
-                "total": len(result["models"]),
-            }
-            tmp = tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".json",
-                prefix=f"kk_models_{provider['name'].lower()}_",
-                delete=False,
-            )
-            json.dump(export, tmp, indent=2, ensure_ascii=False)
-            tmp.close()
-            try:
-                await self._client.send_file(
-                    call.form["chat"],
-                    tmp.name,
-                    force_document=True,
-                    file_name=f"models_{provider['name']}_key{num}.json",
-                )
-            except Exception as e:
-                logger.exception("send_file failed: %s", e)
-            finally:
-                os.unlink(tmp.name)
-
+        all_values = [k.get("value") for k in provider.get("keys", [])]
+        if key in all_values:
             await call.edit(
-                self.strings["models_list"].format(num=num, total=len(result["models"])),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_key_detail, "args": (num, pid), "style": "danger"}]],
+                self.strings["key_duplicate"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}]],
             )
-        else:
-            await call.edit(
-                self.strings["models_error"].format(reason=_escape(result["message"])),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_key_detail, "args": (num, pid), "style": "danger"}]],
-            )
-
-    async def _cb_check_single(self, call: InlineCall, num: int, pid: int):
-        idx = self._find_key_index(num)
-        if idx == -1:
-            await call.answer("Key not found", show_alert=True)
-            return
-
-        provider = self._find_provider(pid)
-        if not provider:
-            await call.answer("Provider not found", show_alert=True)
             return
 
         await call.edit(self.strings["validating"], reply_markup=[])
+        result = await _validate_key(provider["url"], key, provider["model"], self.config["timeout"])
 
-        entry = self._keys[idx]
-        key = entry.get("value", "")
-        result = await _validate_key(key, provider["url"], provider["model"], self.config["timeout"])
+        if result["status"] in ("valid", "rate-limited"):
+            await call.edit(
+                self.strings["key_valid"].format(status=self._status_label(result["status"])),
+                reply_markup=[
+                    [{"text": self.strings["btn_save_key"], "callback": self._cb_save_key, "args": (pid, key, result["status"], ""), "style": "success"}],
+                    [{"text": self.strings["btn_save_comment"], "input": self.strings["input_comment"], "handler": self._ih_save_key_comment, "args": (pid, key, result["status"]), "style": "primary"}],
+                    [{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}],
+                ],
+            )
+        else:
+            await call.edit(
+                self.strings["key_invalid"].format(reason=_escape(result["message"])),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}],
+                ],
+            )
 
-        self._keys[idx]["status"] = result["status"]
-        self._keys[idx]["date"] = _now(self.config["timezone"])
-
-        log_key = f"{pid}:{num}"
-        self._logs[log_key] = result["logs"]
-        self._save_all()
-
-        await self._cb_key_detail(call, num, pid)
-
-    async def _cb_delete_key(self, call: InlineCall, num: int, pid: int):
-        idx = self._find_key_index(num)
-        if idx == -1:
-            await call.answer("Key not found", show_alert=True)
-            return
-
-        self._keys.pop(idx)
-        self._save_all()
-
-        await call.edit(
-            self.strings["key_deleted"].format(num=num),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_list_keys, "args": (pid,), "style": "danger"}]],
-        )
-
-    async def _cb_validate_all(self, call: InlineCall, pid: int):
+    async def _cb_save_key(self, call: InlineCall, pid: int, key: str, status: str, comment: str):
         provider = self._find_provider(pid)
         if not provider:
-            await call.answer("Provider not found", show_alert=True)
+            await call.answer()
             return
+        num = self._next_key_num(provider)
+        provider.setdefault("keys", []).append({
+            "num": num,
+            "value": key,
+            "status": status,
+            "comment": comment,
+            "date": _now_str(self.config["timezone"]),
+        })
+        self._save()
+        await call.edit(
+            self.strings["key_saved"].format(name=_escape(provider["name"]), num=num),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}]],
+        )
 
-        pkeys = self._keys_for_provider(pid)
-        if not pkeys:
+    async def _ih_save_key_comment(self, call: InlineCall, comment: str, pid: int, key: str, status: str):
+        await self._cb_save_key(call, pid, key, status, comment.strip())
+
+    async def _cb_keys_list(self, call: InlineCall, pid: int, page: int):
+        provider = self._find_provider(pid)
+        if not provider:
+            await call.answer()
+            return
+        keys = provider.get("keys", [])
+        if not keys:
             await call.edit(
                 self.strings["no_keys"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_manage_provider, "args": (pid,), "style": "danger"}]],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}]],
             )
             return
+        total = len(keys)
+        total_pages = max(1, (total + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
+        page = max(0, min(page, total_pages - 1))
+        start = page * ITEMS_PER_PAGE
+        chunk = keys[start:start + ITEMS_PER_PAGE]
 
-        await call.edit(self.strings["validate_all_running"], reply_markup=[])
+        rows = []
+        for k in chunk:
+            num = k.get("num")
+            masked = _mask(k.get("value", ""))
+            status = self._status_label(k.get("status", ""))
+            rows.append([{
+                "text": f"#{num} {masked} [{status}]",
+                "callback": self._cb_key_detail,
+                "args": (pid, num),
+                "style": "primary",
+            }])
 
-        tasks = [_validate_key(e.get("value", ""), provider["url"], provider["model"], self.config["timeout"]) for e in pkeys]
+        nav_row = []
+        if page > 0:
+            nav_row.append({"text": self.strings["btn_left"], "callback": self._cb_keys_list, "args": (pid, page - 1), "style": "primary"})
+        if page < total_pages - 1:
+            nav_row.append({"text": self.strings["btn_right"], "callback": self._cb_keys_list, "args": (pid, page + 1), "style": "primary"})
+        if nav_row:
+            rows.append(nav_row)
+
+        rows.append([{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}])
+
+        await call.edit(
+            self.strings["keys_list"].format(
+                name=_escape(provider["name"]),
+                page=page + 1,
+                total_pages=total_pages,
+                total=total,
+            ),
+            reply_markup=rows,
+        )
+
+    async def _cb_key_detail(self, call: InlineCall, pid: int, num: int):
+        provider = self._find_provider(pid)
+        if not provider:
+            await call.answer()
+            return
+        key_entry = next((k for k in provider.get("keys", []) if k.get("num") == num), None)
+        if not key_entry:
+            await call.answer()
+            return
+        comment = key_entry.get("comment") or self.strings["no_comment"]
+        await call.edit(
+            self.strings["key_detail"].format(
+                num=num,
+                name=_escape(provider["name"]),
+                masked=_escape(_mask(key_entry.get("value", ""))),
+                status=self._status_label(key_entry.get("status", "")),
+                comment=_escape(comment),
+                date=key_entry.get("date", "-"),
+            ),
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_show_key"], "callback": self._cb_show_key, "args": (pid, num), "style": "primary"},
+                    {"text": self.strings["btn_check_key"], "callback": self._cb_check_key, "args": (pid, num), "style": "success"},
+                ],
+                [
+                    {"text": self.strings["btn_models_key"], "callback": self._cb_models_key, "args": (pid, num), "style": "primary"},
+                    {"text": self.strings["btn_delete_key"], "callback": self._cb_delete_key, "args": (pid, num), "style": "danger"},
+                ],
+                [{"text": self.strings["btn_back"], "callback": self._cb_keys_list, "args": (pid, 0), "style": "danger"}],
+            ],
+        )
+
+    async def _cb_show_key(self, call: InlineCall, pid: int, num: int):
+        provider = self._find_provider(pid)
+        if not provider:
+            await call.answer()
+            return
+        key_entry = next((k for k in provider.get("keys", []) if k.get("num") == num), None)
+        if not key_entry:
+            await call.answer()
+            return
+        await call.edit(
+            self.strings["key_full"].format(num=num, value=_escape(key_entry.get("value", ""))),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_key_detail, "args": (pid, num), "style": "danger"}]],
+        )
+
+    async def _cb_check_key(self, call: InlineCall, pid: int, num: int):
+        provider = self._find_provider(pid)
+        if not provider:
+            await call.answer()
+            return
+        key_entry = next((k for k in provider.get("keys", []) if k.get("num") == num), None)
+        if not key_entry:
+            await call.answer()
+            return
+        await call.edit(self.strings["validating"], reply_markup=[])
+        result = await _validate_key(provider["url"], key_entry["value"], provider["model"], self.config["timeout"])
+        key_entry["status"] = result["status"]
+        key_entry["date"] = _now_str(self.config["timezone"])
+        self._save()
+        await self._cb_key_detail(call, pid, num)
+
+    async def _cb_models_key(self, call: InlineCall, pid: int, num: int):
+        provider = self._find_provider(pid)
+        if not provider:
+            await call.answer()
+            return
+        key_entry = next((k for k in provider.get("keys", []) if k.get("num") == num), None)
+        if not key_entry:
+            await call.answer()
+            return
+        await call.edit(self.strings["fetching_models"].format(url=_escape(provider["url"])), reply_markup=[])
+        ok, models, err = await _fetch_models(provider["url"], key_entry["value"], self.config["timeout"])
+        if not ok:
+            await call.edit(
+                self.strings["models_error"].format(error=_escape(err)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_key_detail, "args": (pid, num), "style": "danger"}]],
+            )
+            return
+        export = {
+            "provider": provider["name"],
+            "base_url": provider["url"],
+            "key_num": num,
+            "masked": _mask(key_entry.get("value", "")),
+            "total": len(models),
+            "models": models,
+        }
+        await self._send_json(call.form["chat"], export, f"models_{provider['name']}_key{num}.json")
+        await call.edit(
+            self.strings["models_sent"].format(num=num, total=len(models)),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_key_detail, "args": (pid, num), "style": "danger"}]],
+        )
+
+    async def _cb_delete_key(self, call: InlineCall, pid: int, num: int):
+        provider = self._find_provider(pid)
+        if not provider:
+            await call.answer()
+            return
+        provider["keys"] = [k for k in provider.get("keys", []) if k.get("num") != num]
+        self._save()
+        await call.edit(
+            self.strings["key_deleted"].format(num=num),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_keys_list, "args": (pid, 0), "style": "danger"}]],
+        )
+
+    async def _cb_validate_provider(self, call: InlineCall, pid: int):
+        provider = self._find_provider(pid)
+        if not provider:
+            await call.answer()
+            return
+        keys = provider.get("keys", [])
+        if not keys:
+            await call.edit(
+                self.strings["no_keys"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}]],
+            )
+            return
+        await call.edit(self.strings["validate_provider_running"].format(name=_escape(provider["name"])), reply_markup=[])
+        tasks = [_validate_key(provider["url"], k["value"], provider["model"], self.config["timeout"]) for k in keys]
         results = await asyncio.gather(*tasks)
-
-        valid = 0
-        rate_limited = 0
-        invalid = 0
-
-        for entry, result in zip(pkeys, results):
-            idx = self._find_key_index(entry["key"])
-            if idx != -1:
-                self._keys[idx]["status"] = result["status"]
-                self._keys[idx]["date"] = _now(self.config["timezone"])
-                log_key = f"{pid}:{entry['key']}"
-                self._logs[log_key] = result["logs"]
-
-            if result["status"] == "valid":
+        valid = rate_limited = invalid = 0
+        now = _now_str(self.config["timezone"])
+        for k, r in zip(keys, results):
+            k["status"] = r["status"]
+            k["date"] = now
+            if r["status"] == "valid":
                 valid += 1
-            elif result["status"] == "rate-limited":
+            elif r["status"] == "rate-limited":
                 rate_limited += 1
             else:
                 invalid += 1
-
-        self._save_all()
-
+        self._save()
         await call.edit(
-            self.strings["validate_all_results"].format(
-                provider=_escape(provider["name"]),
-                total=len(pkeys),
+            self.strings["validate_provider_done"].format(
+                name=_escape(provider["name"]),
+                total=len(keys),
                 valid=valid,
                 rate_limited=rate_limited,
                 invalid=invalid,
             ),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_manage_provider, "args": (pid,), "style": "danger"}]],
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}]],
         )
 
-    async def _cb_clean_invalid(self, call: InlineCall, pid: int):
-        before = len(self._keys_for_provider(pid))
-        self._keys = [
-            e for e in self._keys
-            if not (e.get("provider_id") == pid and e.get("status") == "invalid")
-        ]
-        self._save_all()
-
-        after = len(self._keys_for_provider(pid))
-        removed = before - after
-
-        await call.edit(
-            self.strings["clean_done"].format(count=removed),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_manage_provider, "args": (pid,), "style": "danger"}]],
-        )
-
-    async def _cb_send_logs(self, call: InlineCall, pid: int):
-        provider = self._find_provider(pid)
-        if not provider:
-            await call.answer("Provider not found", show_alert=True)
+    async def _cb_validate_all(self, call: InlineCall):
+        await call.edit(self.strings["validate_all_running"], reply_markup=[])
+        all_tasks = []
+        key_refs = []
+        for p in self._providers:
+            for k in p.get("keys", []):
+                all_tasks.append(_validate_key(p["url"], k["value"], p["model"], self.config["timeout"]))
+                key_refs.append((p, k))
+        if not all_tasks:
+            await call.edit(self._fmt_main(), reply_markup=self._markup_main())
             return
-
-        pkeys = self._keys_for_provider(pid)
-        has_logs = any(f"{pid}:{e['key']}" in self._logs for e in pkeys)
-
-        if not pkeys or not has_logs:
-            await call.edit(
-                self.strings["no_logs"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_manage_provider, "args": (pid,), "style": "danger"}]],
-            )
-            return
-
-        export = {
-            "provider": provider["name"],
-            "base_url": provider["url"],
-            "test_model": provider["model"],
-            "keys": [],
-        }
-
-        for entry in pkeys:
-            log_key = f"{pid}:{entry['key']}"
-            export["keys"].append({
-                "key_num": entry["key"],
-                "masked": _mask(entry.get("value", "")),
-                "status": entry.get("status", "unknown"),
-                "comment": entry.get("comment", ""),
-                "date": entry.get("date", "-"),
-                "full_request_logs": self._logs.get(log_key, []),
+        results = await asyncio.gather(*all_tasks)
+        valid = rate_limited = invalid = 0
+        now = _now_str(self.config["timezone"])
+        export_rows = []
+        for (p, k), r in zip(key_refs, results):
+            k["status"] = r["status"]
+            k["date"] = now
+            if r["status"] == "valid":
+                valid += 1
+            elif r["status"] == "rate-limited":
+                rate_limited += 1
+            else:
+                invalid += 1
+            export_rows.append({
+                "provider": p["name"],
+                "base_url": p["url"],
+                "key_num": k["num"],
+                "masked": _mask(k.get("value", "")),
+                "status": r["status"],
+                "date": now,
             })
-
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".json",
-            prefix=f"kk_logs_{provider['name'].lower()}_",
-            delete=False,
-        )
-        json.dump(export, tmp, indent=2, ensure_ascii=False)
-        tmp.close()
-
-        try:
-            await self._client.send_file(
-                call.form["chat"],
-                tmp.name,
-                force_document=True,
-                file_name=f"logs_{provider['name']}.json",
-            )
-        except Exception as e:
-            logger.exception("send_file failed: %s", e)
-        finally:
-            os.unlink(tmp.name)
-
+        self._save()
+        await self._send_json(call.form["chat"], export_rows, "validate_all_results.json")
         await call.edit(
-            self.strings["logs_sent"].format(provider=_escape(provider["name"])),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_manage_provider, "args": (pid,), "style": "danger"}]],
+            self.strings["validate_all_done"].format(
+                total=len(all_tasks),
+                valid=valid,
+                rate_limited=rate_limited,
+                invalid=invalid,
+            ),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main, "style": "danger"}]],
         )
 
-    async def _cb_export(self, call: InlineCall, pid: int):
+    async def _cb_export_provider(self, call: InlineCall, pid: int):
         provider = self._find_provider(pid)
         if not provider:
-            await call.answer("Provider not found", show_alert=True)
+            await call.answer()
             return
-
-        pkeys = self._keys_for_provider(pid)
-        if not pkeys:
-            await call.answer(self.strings["no_keys"], show_alert=True)
-            return
-
-        export_data = []
-        for entry in pkeys:
-            export_data.append({
-                "key": entry.get("key"),
-                "value": entry.get("value", ""),
-                "status": entry.get("status", "unknown"),
-                "comment": entry.get("comment", ""),
-                "date": entry.get("date", "-"),
+        keys = provider.get("keys", [])
+        export = [
+            {
+                "num": k.get("num"),
+                "value": k.get("value"),
+                "base_url": provider["url"],
                 "provider": provider["name"],
-            })
-
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".json",
-            prefix=f"kk_keys_{provider['name'].lower()}_",
-            delete=False,
-        )
-        json.dump(export_data, tmp, indent=2, ensure_ascii=False)
-        tmp.close()
-
-        try:
-            await self._client.send_file(
-                call.form["chat"],
-                tmp.name,
-                force_document=True,
-                file_name=f"keys_{provider['name']}.json",
-            )
-        except Exception as e:
-            logger.exception("send_file failed: %s", e)
-        finally:
-            os.unlink(tmp.name)
-
+                "status": k.get("status", "unknown"),
+                "comment": k.get("comment", ""),
+                "date": k.get("date", "-"),
+            }
+            for k in keys
+        ]
+        await self._send_json(call.form["chat"], export, f"keys_{provider['name']}.json")
         await call.edit(
-            self.strings["export_done"],
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_manage_provider, "args": (pid,), "style": "danger"}]],
+            self.strings["export_sent"].format(count=len(export)),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}]],
+        )
+
+    async def _cb_export_all(self, call: InlineCall):
+        export = []
+        for p in self._providers:
+            for k in p.get("keys", []):
+                export.append({
+                    "num": k.get("num"),
+                    "value": k.get("value"),
+                    "base_url": p["url"],
+                    "provider": p["name"],
+                    "status": k.get("status", "unknown"),
+                    "comment": k.get("comment", ""),
+                    "date": k.get("date", "-"),
+                })
+        await self._send_json(call.form["chat"], export, "keys_all.json")
+        await call.edit(
+            self.strings["export_sent"].format(count=len(export)),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main, "style": "danger"}]],
         )
 
     @loader.command(
-        ru_doc="Менеджер API ключей для OpenAI-совместимых провайдеров",
-        en_doc="API key manager for OpenAI-compatible providers",
+        ru_doc="Менеджер API ключей",
+        en_doc="API key manager",
     )
-    async def kk(self, message: Message):
-        """API key manager for OpenAI-compatible providers"""
+    async def kk(self, message):
+        """API key manager"""
         await self.inline.form(
-            text=self.strings["main_menu"].format(
-                providers=len(self._providers),
-                keys=self._total_keys(),
-            ),
+            text=self._fmt_main(),
             message=message,
-            reply_markup=[
-                [{"text": self.strings["btn_add_provider"], "callback": self._cb_add_provider_start, "style": "primary"}],
-                [{"text": self.strings["btn_add_key"], "callback": self._cb_select_provider_for_key, "style": "primary"}],
-                [{"text": self.strings["btn_manage"], "callback": self._cb_manage_select_provider, "style": "primary"}],
-            ],
+            reply_markup=self._markup_main(),
             silent=True,
         )
