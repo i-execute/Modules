@@ -39,6 +39,7 @@ StickerClone
 Stories
 SwiftQR
 Telega
+TelegaKeeper
 TeleScan
 TGS2Json
 Token
