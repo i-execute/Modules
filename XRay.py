@@ -3408,9 +3408,13 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
     async def _cb_close(self, call: InlineCall):
         await call.delete()
 
-    @loader.command()
+    @loader.command(
+        ru_doc="- XRay многопользовательский VPN менеджер",
+        en_doc="- XRay multi-user VPN manager",
+    )
+
     async def xr(self, message):
-        """XRay multi-user VPN manager"""
+        """- XRay multi-user VPN manager"""
         await self._reattach_processes()
         active_cnt = await self._get_active_count()
         await self.inline.form(
