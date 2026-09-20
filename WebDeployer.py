@@ -20,7 +20,6 @@ import tarfile
 import tempfile
 import zipfile
 
-from telethon.tl.functions.channels import EditForumTopicRequest
 from telethon.tl.functions.messages import EditMessageRequest
 from telethon.tl.types import InputMediaWebPage, Message
 
@@ -385,7 +384,7 @@ class WebDeployer(loader.Module):
 
         await self._reattach_sites()
 
-    async def _send_with_preview(self, chat_id, text, _retry=True):
+    async def _send_with_preview(self, chat_id, text):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
             msg = await self.inline.bot.send_message(
@@ -417,44 +416,21 @@ class WebDeployer(loader.Module):
                 except Exception as e:
                     logger.error(f"[WD] Failed to add preview: {e}")
         except Exception as e:
-            if "TOPIC_CLOSED" in str(e) and _retry and await self._reopen_topic_if_closed():
-                await self._send_with_preview(chat_id, text, _retry=False)
-                return
             logger.error(f"[WD] Failed to send message with preview: {e}")
-
-    async def _reopen_topic_if_closed(self):
-        if not self._logger_topic or not self._asset_channel:
-            return False
-        try:
-            peer = await self.inline.bot.get_input_entity(int(f"-100{self._asset_channel}"))
-            await self.inline.bot(EditForumTopicRequest(
-                channel=peer,
-                topic_id=self._logger_topic.id,
-                closed=False,
-            ))
-            return True
-        except Exception as e:
-            logger.error(f"[WD] Failed to reopen topic: {e}")
-            return False
 
     async def _notify(self, text: str):
         if not self._logger_topic or not self._asset_channel:
             return
         chat_id = int(f"-100{self._asset_channel}")
-        for attempt in range(2):
-            try:
-                await self.inline.bot.send_message(
-                    chat_id,
-                    text,
-                    parse_mode="html",
-                    message_thread_id=self._logger_topic.id,
-                )
-                return
-            except Exception as e:
-                if "TOPIC_CLOSED" in str(e) and attempt == 0 and await self._reopen_topic_if_closed():
-                    continue
-                logger.error(f"[WD] Failed to send topic notification: {e}")
-                return
+        try:
+            await self.inline.bot.send_message(
+                chat_id,
+                text,
+                parse_mode="html",
+                message_thread_id=self._logger_topic.id,
+            )
+        except Exception as e:
+            logger.error(f"[WD] Failed to send topic notification: {e}")
 
     @property
     def _is_root(self) -> bool:

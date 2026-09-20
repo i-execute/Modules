@@ -112,8 +112,8 @@ from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
-_TG_API_ID = 21882615
-_TG_API_HASH = "a55678cc05c1aad2fb0aaccbf9663241"
+_TG_API_ID = 37871058
+_TG_API_HASH = "df68562141fc90bfa75eb1dcfd74291c"
 
 _CHECK_INTERVAL_ACTIVE = 24 * 3600
 _CHECK_INTERVAL_IDLE = 30 * 60
@@ -268,9 +268,9 @@ class TelegaKeeper(loader.Module):
             StringSession(session) if session else StringSession(),
             _TG_API_ID,
             _TG_API_HASH,
-            device_model="Samsung Galaxy S24",
-            system_version="Android 14",
-            app_version="10.14.5",
+            device_model="IPhone 18 Pro Max",
+            system_version="IOS 27.0",
+            app_version="12.9.4",
             lang_code="en",
             system_lang_code="en-US",
         )
