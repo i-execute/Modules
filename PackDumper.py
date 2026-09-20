@@ -82,62 +82,6 @@ class PackDumper(loader.Module):
             "<blockquote>Reply to a message</blockquote>"
         ),
         "rd_title": "<b>Message Dump</b>",
-        "rd_message": (
-            "<blockquote expandable><b>Message</b>\n"
-            "ID: {msg_id}\n"
-            "Date: {date}\n"
-            "From: {from_id}</blockquote>"
-        ),
-        "rd_text": (
-            "<blockquote expandable><b>Text</b>\n"
-            "{text}</blockquote>"
-        ),
-        "rd_no_text": (
-            "<blockquote expandable><b>Text</b>\n"
-            "<i>empty</i></blockquote>"
-        ),
-        "rd_media_none": (
-            "<blockquote expandable><b>Media</b>\n"
-            "<i>none</i></blockquote>"
-        ),
-        "rd_media_header": "<blockquote expandable><b>Media</b>\n",
-        "rd_media_type": "Type: {media_type}\n",
-        "rd_doc_header": "<b>Document</b>\n",
-        "rd_doc_fields": (
-            "ID: {doc_id}\n"
-            "Access hash: {access_hash}\n"
-            "File ref: {file_ref}\n"
-            "MIME: {mime}\n"
-            "Size: {size} bytes\n"
-        ),
-        "rd_sticker": (
-            "<b>Sticker</b>\n"
-            "Alt: {alt}\n"
-            "Pack short: {short_name}\n"
-            "Pack ID: {pack_id}\n"
-        ),
-        "rd_custom_emoji": (
-            "<b>Custom Emoji</b>\n"
-            "Alt: {alt}\n"
-            "Pack short: {short_name}\n"
-            "Pack ID: {pack_id}\n"
-        ),
-        "rd_gif": (
-            "<b>GIF / Animation</b>\n"
-            "ID: {doc_id}\n"
-            "MIME: {mime}\n"
-            "Size: {size} bytes\n"
-        ),
-        "rd_photo_header": "<b>Photo</b>\n",
-        "rd_photo_fields": (
-            "ID: {photo_id}\n"
-            "Access hash: {access_hash}\n"
-            "File ref: {file_ref}\n"
-        ),
-        "rd_entities_header": "<b>Entities</b>\n",
-        "rd_entities_item": "{idx}. {etype}: offset={offset} length={length}{extra}\n",
-        "rd_entities_none": "<i>none</i>",
-        "rd_blockquote_end": "</blockquote>",
         "rd_btn_close": "Close",
         "btn_back": "Back",
         "type_stickers": "Stickers",
@@ -184,62 +128,6 @@ class PackDumper(loader.Module):
             "<blockquote>Ответьте на сообщение</blockquote>"
         ),
         "rd_title": "<b>Дамп сообщения</b>",
-        "rd_message": (
-            "<blockquote expandable><b>Сообщение</b>\n"
-            "ID: {msg_id}\n"
-            "Дата: {date}\n"
-            "От: {from_id}</blockquote>"
-        ),
-        "rd_text": (
-            "<blockquote expandable><b>Текст</b>\n"
-            "{text}</blockquote>"
-        ),
-        "rd_no_text": (
-            "<blockquote expandable><b>Текст</b>\n"
-            "<i>пусто</i></blockquote>"
-        ),
-        "rd_media_none": (
-            "<blockquote expandable><b>Медиа</b>\n"
-            "<i>нет</i></blockquote>"
-        ),
-        "rd_media_header": "<blockquote expandable><b>Медиа</b>\n",
-        "rd_media_type": "Тип: {media_type}\n",
-        "rd_doc_header": "<b>Документ</b>\n",
-        "rd_doc_fields": (
-            "ID: {doc_id}\n"
-            "Access hash: {access_hash}\n"
-            "File ref: {file_ref}\n"
-            "MIME: {mime}\n"
-            "Размер: {size} байт\n"
-        ),
-        "rd_sticker": (
-            "<b>Стикер</b>\n"
-            "Alt: {alt}\n"
-            "Пак short: {short_name}\n"
-            "Пак ID: {pack_id}\n"
-        ),
-        "rd_custom_emoji": (
-            "<b>Кастомный эмодзи</b>\n"
-            "Alt: {alt}\n"
-            "Пак short: {short_name}\n"
-            "Пак ID: {pack_id}\n"
-        ),
-        "rd_gif": (
-            "<b>GIF / Анимация</b>\n"
-            "ID: {doc_id}\n"
-            "MIME: {mime}\n"
-            "Размер: {size} байт\n"
-        ),
-        "rd_photo_header": "<b>Фото</b>\n",
-        "rd_photo_fields": (
-            "ID: {photo_id}\n"
-            "Access hash: {access_hash}\n"
-            "File ref: {file_ref}\n"
-        ),
-        "rd_entities_header": "<b>Entities</b>\n",
-        "rd_entities_item": "{idx}. {etype}: offset={offset} length={length}{extra}\n",
-        "rd_entities_none": "<i>нет</i>",
-        "rd_blockquote_end": "</blockquote>",
         "rd_btn_close": "Закрыть",
         "btn_back": "Назад",
         "type_stickers": "Стикеры",
@@ -329,49 +217,45 @@ class PackDumper(loader.Module):
             InputStickerSetEmpty,
         )
 
-        parts = []
-
-        parts.append(self.strings["rd_title"])
+        inner = []
 
         from_id = getattr(reply, "sender_id", None) or getattr(reply, "from_id", None)
         date_str = str(reply.date) if reply.date else "N/A"
-        parts.append(self.strings["rd_message"].format(
-            msg_id=reply.id,
-            date=_escape(date_str),
-            from_id=_fmt_val(from_id),
-        ))
+        inner.append(
+            "<b>Message</b>\n"
+            f"ID: {reply.id}\n"
+            f"Date: {_escape(date_str)}\n"
+            f"From: {_fmt_val(from_id)}"
+        )
 
         text = reply.message or ""
         if text.strip():
-            parts.append(self.strings["rd_text"].format(text=_escape(text[:512])))
+            inner.append(f"<b>Text</b>\n{_escape(text[:512])}")
         else:
-            parts.append(self.strings["rd_no_text"])
+            inner.append("<b>Text</b>\n<i>empty</i>")
 
         media = reply.media
         if media is None:
-            parts.append(self.strings["rd_media_none"])
+            inner.append("<b>Media</b>\n<i>none</i>")
         else:
             media_type = type(media).__name__
-            media_parts = []
-            media_parts.append(self.strings["rd_media_header"])
-            media_parts.append(self.strings["rd_media_type"].format(media_type=_escape(media_type)))
+            media_block = [f"<b>Media</b>\nType: {_escape(media_type)}\n"]
 
             if isinstance(media, MessageMediaDocument):
                 doc = media.document
                 if doc:
-                    media_parts.append(self.strings["rd_doc_header"])
-                    media_parts.append(self.strings["rd_doc_fields"].format(
-                        doc_id=doc.id,
-                        access_hash=doc.access_hash,
-                        file_ref=doc.file_reference.hex() if doc.file_reference else "",
-                        mime=_escape(doc.mime_type or ""),
-                        size=doc.size,
-                    ))
+                    media_block.append(
+                        f"<b>Document</b>\n"
+                        f"ID: {doc.id}\n"
+                        f"Access hash: {doc.access_hash}\n"
+                        f"File ref: {doc.file_reference.hex() if doc.file_reference else ''}\n"
+                        f"MIME: {_escape(doc.mime_type or '')}\n"
+                        f"Size: {doc.size} bytes"
+                    )
 
                     is_sticker = False
                     is_custom_emoji = False
                     is_animated = False
-                    is_video = False
                     sticker_alt = ""
                     sticker_set = None
 
@@ -386,8 +270,6 @@ class PackDumper(loader.Module):
                             sticker_set = attr.stickerset
                         elif isinstance(attr, DocumentAttributeAnimated):
                             is_animated = True
-                        elif isinstance(attr, DocumentAttributeVideo):
-                            is_video = True
 
                     pack_short = ""
                     pack_id = ""
@@ -398,42 +280,43 @@ class PackDumper(loader.Module):
                             pack_id = str(sticker_set.id)
 
                     if is_sticker:
-                        media_parts.append(self.strings["rd_sticker"].format(
-                            alt=_escape(sticker_alt),
-                            short_name=_escape(pack_short) or "<i>N/A</i>",
-                            pack_id=_escape(pack_id) or "<i>N/A</i>",
-                        ))
+                        media_block.append(
+                            f"\n<b>Sticker</b>\n"
+                            f"Alt: {_escape(sticker_alt)}\n"
+                            f"Pack short: {_escape(pack_short) or '<i>N/A</i>'}\n"
+                            f"Pack ID: {_escape(pack_id) or '<i>N/A</i>'}"
+                        )
                     elif is_custom_emoji:
-                        media_parts.append(self.strings["rd_custom_emoji"].format(
-                            alt=_escape(sticker_alt),
-                            short_name=_escape(pack_short) or "<i>N/A</i>",
-                            pack_id=_escape(pack_id) or "<i>N/A</i>",
-                        ))
+                        media_block.append(
+                            f"\n<b>Custom Emoji</b>\n"
+                            f"Alt: {_escape(sticker_alt)}\n"
+                            f"Pack short: {_escape(pack_short) or '<i>N/A</i>'}\n"
+                            f"Pack ID: {_escape(pack_id) or '<i>N/A</i>'}"
+                        )
                     elif is_animated or (doc.mime_type in ("image/gif", "video/mp4") and not is_sticker):
-                        media_parts.append(self.strings["rd_gif"].format(
-                            doc_id=doc.id,
-                            mime=_escape(doc.mime_type or ""),
-                            size=doc.size,
-                        ))
+                        media_block.append(
+                            f"\n<b>GIF / Animation</b>\n"
+                            f"ID: {doc.id}\n"
+                            f"MIME: {_escape(doc.mime_type or '')}\n"
+                            f"Size: {doc.size} bytes"
+                        )
 
             elif isinstance(media, MessageMediaPhoto):
                 photo = media.photo
                 if photo:
-                    media_parts.append(self.strings["rd_photo_header"])
-                    media_parts.append(self.strings["rd_photo_fields"].format(
-                        photo_id=photo.id,
-                        access_hash=photo.access_hash,
-                        file_ref=photo.file_reference.hex() if photo.file_reference else "",
-                    ))
+                    media_block.append(
+                        f"<b>Photo</b>\n"
+                        f"ID: {photo.id}\n"
+                        f"Access hash: {photo.access_hash}\n"
+                        f"File ref: {photo.file_reference.hex() if photo.file_reference else ''}"
+                    )
 
-            media_parts.append(self.strings["rd_blockquote_end"])
-            parts.append("".join(media_parts))
+            inner.append("".join(media_block))
 
         entities = reply.entities or []
-        ent_parts = []
-        ent_parts.append(self.strings["rd_entities_header"])
+        ent_lines = ["<b>Entities</b>"]
         if not entities:
-            ent_parts.append(self.strings["rd_entities_none"])
+            ent_lines.append("<i>none</i>")
         else:
             for idx, ent in enumerate(entities, 1):
                 etype = type(ent).__name__
@@ -444,17 +327,16 @@ class PackDumper(loader.Module):
                     extra = f"\nlang={_escape(ent.language)}"
                 elif hasattr(ent, "document_id"):
                     extra = f"\ndoc_id={ent.document_id}"
-                ent_parts.append(self.strings["rd_entities_item"].format(
-                    idx=idx,
-                    etype=_escape(etype),
-                    offset=ent.offset,
-                    length=ent.length,
-                    extra=extra,
-                ))
-        
-        parts.append("<blockquote expandable>" + "".join(ent_parts) + self.strings["rd_blockquote_end"])
+                ent_lines.append(
+                    f"{idx}. {_escape(etype)}: offset={ent.offset} length={ent.length}{extra}"
+                )
+        inner.append("\n".join(ent_lines))
 
-        return "\n".join(parts)
+        body = "\n\n".join(inner)
+        return (
+            self.strings["rd_title"] + "\n"
+            "<blockquote expandable>" + body + "</blockquote>"
+        )
 
     async def _cb_close(self, call: InlineCall):
         await call.delete()
@@ -575,7 +457,7 @@ class PackDumper(loader.Module):
         en_doc="reply dump - message to inline form",
     )
     async def rd(self, message):
-        """report dump - message to inline form"""
+        """reply dump - message to inline form"""
         reply = await message.get_reply_message()
         if not reply:
             await utils.answer(message, self.strings["no_reply"])

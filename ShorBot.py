@@ -6,7 +6,6 @@ __version__ = (1, 0, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/ShorBot/MetaBanner.jpeg
 
-import sys
 import time
 import math
 import random
@@ -17,6 +16,7 @@ import logging
 from .. import loader, utils
 
 logger = logging.getLogger(__name__)
+
 
 def _escape_html(t):
     if not t:
@@ -129,7 +129,7 @@ REPO_LINKS = (
 
 RSA_DETAILS = (
     "<details><summary>Why this won't break RSA tomorrow</summary>"
-    "<p>This module runs a <b>classical simulation</b> of Shor's period-finding algorithm — "
+    "<p>This module runs a <b>classical simulation</b> of Shor's period-finding algorithm -- "
     "there is no quantum speedup here. A real quantum implementation would require "
     "thousands of logical qubits (and millions of physical ones with error correction), "
     "which does not exist yet. RSA is safe for now.</p>"
@@ -337,10 +337,6 @@ class ShorBot(loader.Module):
             "<blockquote>Paste the token you received from @BotFather</blockquote>"
         ),
         "input_token": "Bot token:",
-        "installing": (
-            "<b>Installing dependencies</b>\n"
-            "<blockquote>Please wait...</blockquote>"
-        ),
         "token_started": (
             "<b>Bot started</b>\n"
             "<blockquote><code>{log}</code></blockquote>"
@@ -391,10 +387,6 @@ class ShorBot(loader.Module):
             "<blockquote>Вставь токен, полученный от @BotFather</blockquote>"
         ),
         "input_token": "Токен бота:",
-        "installing": (
-            "<b>Установка зависимостей</b>\n"
-            "<blockquote>Пожалуйста, подождите...</blockquote>"
-        ),
         "token_started": (
             "<b>Бот запущен</b>\n"
             "<blockquote><code>{log}</code></blockquote>"
@@ -414,7 +406,7 @@ class ShorBot(loader.Module):
         ),
         "number_too_large": (
             "<b>Число слишком большое</b>\n"
-            "<blockquote>Максимум — 14 цифр (99 999 999 999 999)</blockquote>"
+            "<blockquote>Максимум -- 14 цифр (99 999 999 999 999)</blockquote>"
         ),
         "invalid_number": (
             "<b>Некорректный ввод</b>\n"
@@ -423,14 +415,6 @@ class ShorBot(loader.Module):
     }
 
     def __init__(self):
-        self.config = loader.ModuleConfig(
-            loader.ConfigValue(
-                "BOT_TOKEN",
-                "",
-                "Bot token for ShorBot (from @BotFather)",
-                validator=loader.validators.Hidden(),
-            ),
-        )
         self._bot = None
         self._running = False
         self._poll_task = None
@@ -438,9 +422,10 @@ class ShorBot(loader.Module):
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
-        if self.config["BOT_TOKEN"]:
+        token = self.get("token", "")
+        if token:
             try:
-                await self._launch(self.config["BOT_TOKEN"])
+                await self._launch(token)
             except Exception as e:
                 logger.error(f"[SHORBOT] autorun failed: {e}")
 
@@ -585,9 +570,10 @@ class ShorBot(loader.Module):
             logger.warning(f"[SHORBOT] draft exception: {e}")
 
     def _fmt_menu(self):
+        token = self.get("token", "")
         return self.strings["main_menu"].format(
             status=self.strings["status_running"] if self._running else self.strings["status_stopped"],
-            token="set" if self.config["BOT_TOKEN"] else "not set",
+            token="set" if token else "not set",
         )
 
     def _main_markup(self):
@@ -631,11 +617,13 @@ class ShorBot(loader.Module):
     async def _cb_toggle(self, call):
         if self._running:
             await self._stop()
-        elif self.config["BOT_TOKEN"]:
-            try:
-                await self._launch(self.config["BOT_TOKEN"])
-            except Exception as e:
-                await call.answer(str(e)[:200], show_alert=True)
+        else:
+            token = self.get("token", "")
+            if token:
+                try:
+                    await self._launch(token)
+                except Exception as e:
+                    await call.answer(str(e)[:200], show_alert=True)
         await call.edit(text=self._fmt_menu(), reply_markup=self._main_markup())
 
     async def _cb_token_menu(self, call):
@@ -659,10 +647,9 @@ class ShorBot(loader.Module):
         if ":" not in token:
             await call.answer(self.strings["need_token"], show_alert=True)
             return
-        await call.edit(text=self.strings["installing"])
-        self.config["BOT_TOKEN"] = token
         try:
             me = await self._launch(token)
+            self.set("token", token)
             await call.edit(
                 text=self.strings["token_started"].format(
                     log=f"@{me['username']} ({me['id']}): OK"
