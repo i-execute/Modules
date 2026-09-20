@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 # meta developer: Execute_forge.t.me
 
 try:
@@ -102,6 +102,8 @@ from telethon.sessions import StringSession
 from telethon.errors import (
     SessionPasswordNeededError,
     FloodWaitError,
+    PhoneCodeInvalidError,
+    PhoneCodeExpiredError,
 )
 from telethon.tl.functions.account import UpdateStatusRequest
 
@@ -150,13 +152,14 @@ class TelegaKeeper(loader.Module):
         ),
         "creating_code": (
             "<b>Creating Session</b>\n"
-            "<blockquote>Status: waiting for code</blockquote>"
+            "<blockquote>Status: waiting for code\n"
+            "Check SMS or Telegram app</blockquote>"
         ),
         "creating_password": (
             "<b>Creating Session</b>\n"
             "<blockquote>Status: waiting for 2FA password</blockquote>"
         ),
-        "input_phone": "Phone number:",
+        "input_phone": "Phone number (e.g. +79001234567):",
         "input_code": "Verification code:",
         "input_password": "2FA password:",
         "session_created": (
@@ -202,13 +205,14 @@ class TelegaKeeper(loader.Module):
         ),
         "creating_code": (
             "<b>Создание сессии</b>\n"
-            "<blockquote>Статус: ожидание кода</blockquote>"
+            "<blockquote>Статус: ожидание кода\n"
+            "Проверьте SMS или приложение Telegram</blockquote>"
         ),
         "creating_password": (
             "<b>Создание сессии</b>\n"
             "<blockquote>Статус: ожидание 2FA пароля</blockquote>"
         ),
-        "input_phone": "Номер телефона:",
+        "input_phone": "Номер телефона (например +79001234567):",
         "input_code": "Код подтверждения:",
         "input_password": "2FA пароль:",
         "session_created": (
@@ -259,14 +263,16 @@ class TelegaKeeper(loader.Module):
         dt = datetime.fromtimestamp(ts, tz=timezone.utc)
         return dt.strftime("%Y-%m-%d %H:%M UTC")
 
-    async def _make_keeper_client(self, session_str: str) -> TelegramClient:
+    def _make_client(self, session=None) -> TelegramClient:
         return TelegramClient(
-            StringSession(session_str),
+            StringSession(session) if session else StringSession(),
             _TG_API_ID,
             _TG_API_HASH,
-            device_model="TelegaKeeper",
-            system_version="By @Execute_forge",
-            app_version=f"v{'.'.join(map(str, __version__))}",
+            device_model="Samsung Galaxy S24",
+            system_version="Android 14",
+            app_version="10.14.5",
+            lang_code="en",
+            system_lang_code="en-US",
         )
 
     async def _get_authorizations(self):
@@ -297,8 +303,8 @@ class TelegaKeeper(loader.Module):
             return False
         client = None
         try:
-            client = await self._make_keeper_client(session_str)
-            await asyncio.wait_for(client.connect(), timeout=15)
+            client = self._make_client(session_str)
+            await asyncio.wait_for(client.connect(), timeout=20)
             await client(UpdateStatusRequest(offline=False))
             await asyncio.sleep(2)
             await client(UpdateStatusRequest(offline=True))
@@ -320,10 +326,8 @@ class TelegaKeeper(loader.Module):
             try:
                 if not self._get_session():
                     break
-
                 auths = await self._get_authorizations()
                 had_activity = self._had_recent_activity(auths)
-
                 if had_activity:
                     logger.info("[TelegaKeeper] Activity detected, touching online")
                     await self._touch_online()
@@ -331,9 +335,7 @@ class TelegaKeeper(loader.Module):
                 else:
                     logger.info("[TelegaKeeper] No recent activity, next check in 30 min")
                     sleep_secs = _CHECK_INTERVAL_IDLE
-
                 await asyncio.sleep(sleep_secs)
-
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -356,7 +358,7 @@ class TelegaKeeper(loader.Module):
             self._loop_task = None
         logger.info("[TelegaKeeper] Loop stopped")
 
-    def _fmt_menu(self):
+    def _fmt_menu(self) -> str:
         session_str = self._get_session()
         last_str = self._fmt_last_online()
         if not session_str:
@@ -366,9 +368,8 @@ class TelegaKeeper(loader.Module):
             return self.strings["menu_active"].format(last_online=last_str)
         return self.strings["menu_inactive"].format(last_online=last_str)
 
-    def _main_markup(self):
-        session_str = self._get_session()
-        if not session_str:
+    def _main_markup(self) -> list:
+        if not self._get_session():
             return [
                 [{"text": self.strings["btn_create"], "callback": self._cb_create, "style": "success"}],
                 [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
@@ -395,76 +396,140 @@ class TelegaKeeper(loader.Module):
         await call.edit(
             self.strings["creating_phone"],
             reply_markup=[
-                [{"text": self.strings["input_phone"], "input": self.strings["input_phone"], "handler": self._input_phone, "args": (pending_id,), "style": "primary"}],
+                [{
+                    "text": self.strings["input_phone"],
+                    "input": self.strings["input_phone"],
+                    "handler": self._input_phone,
+                    "args": (pending_id,),
+                    "style": "primary",
+                }],
                 [{"text": self.strings["btn_kill"], "callback": self._cb_kill_pending, "args": (pending_id,), "style": "danger"}],
             ],
         )
 
     async def _cb_kill_pending(self, call: InlineCall, pending_id: str):
         pending = self._pending.pop(pending_id, None)
-        if pending and pending.get("client"):
-            try:
-                await pending["client"].disconnect()
-            except Exception:
-                pass
+        if pending:
+            client = pending.get("client")
+            if client:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
         await call.edit(self.strings["process_killed"], reply_markup=[])
 
     async def _input_phone(self, call: InlineCall, phone: str, pending_id: str):
         pending = self._pending.get(pending_id)
         if not pending:
             return
+
+        phone = phone.strip()
+        if not phone.startswith("+"):
+            phone = "+" + phone
+
+        client = None
         try:
-            client = TelegramClient(
-                StringSession(),
-                _TG_API_ID,
-                _TG_API_HASH,
-                device_model="TelegaKeeper",
-                system_version="By @Execute_forge",
-                app_version=f"v{'.'.join(map(str, __version__))}",
-            )
-            await client.connect()
-            result = await client.send_code_request(phone.strip())
+            client = self._make_client()
+            await asyncio.wait_for(client.connect(), timeout=20)
+
+            result = await client.send_code_request(phone)
+
             pending["client"] = client
-            pending["phone"] = phone.strip()
+            pending["phone"] = phone
             pending["phone_code_hash"] = result.phone_code_hash
+
+            logger.info(f"[TelegaKeeper] Code sent to {phone}, type={result.type}")
+
             await call.edit(
                 self.strings["creating_code"],
                 reply_markup=[
-                    [{"text": self.strings["input_code"], "input": self.strings["input_code"], "handler": self._input_code, "args": (pending_id,), "style": "primary"}],
+                    [{
+                        "text": self.strings["input_code"],
+                        "input": self.strings["input_code"],
+                        "handler": self._input_code,
+                        "args": (pending_id,),
+                        "style": "primary",
+                    }],
                     [{"text": self.strings["btn_kill"], "callback": self._cb_kill_pending, "args": (pending_id,), "style": "danger"}],
                 ],
             )
         except Exception as e:
-            logger.error(f"[TelegaKeeper] send_code_request: {e}")
+            logger.error(f"[TelegaKeeper] send_code_request error: {e}")
+            if client:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+            pending.pop("client", None)
             await call.edit(
-                self.strings["error"].format(error=str(e)[:200]),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"}]],
+                self.strings["error"].format(error=str(e)[:300]),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"}],
+                ],
             )
 
     async def _input_code(self, call: InlineCall, code: str, pending_id: str):
         pending = self._pending.get(pending_id)
         if not pending:
             return
+
+        code = code.strip().replace(" ", "")
+        client = pending.get("client")
+        if not client:
+            await call.edit(
+                self.strings["error"].format(error="Session expired, start over"),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"}]],
+            )
+            return
+
         try:
-            client = pending["client"]
             await client.sign_in(
-                pending["phone"],
-                code.strip(),
+                phone=pending["phone"],
+                code=code,
                 phone_code_hash=pending["phone_code_hash"],
             )
             await self._finalize(call, pending_id)
+
+        except PhoneCodeInvalidError:
+            await call.edit(
+                self.strings["error"].format(error="Invalid code, try again"),
+                reply_markup=[
+                    [{
+                        "text": self.strings["input_code"],
+                        "input": self.strings["input_code"],
+                        "handler": self._input_code,
+                        "args": (pending_id,),
+                        "style": "primary",
+                    }],
+                    [{"text": self.strings["btn_kill"], "callback": self._cb_kill_pending, "args": (pending_id,), "style": "danger"}],
+                ],
+            )
+
+        except PhoneCodeExpiredError:
+            await call.edit(
+                self.strings["error"].format(error="Code expired, start over"),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"}]],
+            )
+
         except SessionPasswordNeededError:
             await call.edit(
                 self.strings["creating_password"],
                 reply_markup=[
-                    [{"text": self.strings["input_password"], "input": self.strings["input_password"], "handler": self._input_password, "args": (pending_id,), "style": "primary"}],
+                    [{
+                        "text": self.strings["input_password"],
+                        "input": self.strings["input_password"],
+                        "handler": self._input_password,
+                        "args": (pending_id,),
+                        "style": "primary",
+                    }],
                     [{"text": self.strings["btn_kill"], "callback": self._cb_kill_pending, "args": (pending_id,), "style": "danger"}],
                 ],
             )
+
         except Exception as e:
-            logger.error(f"[TelegaKeeper] sign_in code: {e}")
+            logger.error(f"[TelegaKeeper] sign_in code error: {e}")
             await call.edit(
-                self.strings["error"].format(error=str(e)[:200]),
+                self.strings["error"].format(error=str(e)[:300]),
                 reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"}]],
             )
 
@@ -472,21 +537,39 @@ class TelegaKeeper(loader.Module):
         pending = self._pending.get(pending_id)
         if not pending:
             return
+
+        client = pending.get("client")
+        if not client:
+            await call.edit(
+                self.strings["error"].format(error="Session expired, start over"),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"}]],
+            )
+            return
+
         try:
-            client = pending["client"]
             await client.sign_in(password=password.strip())
             await self._finalize(call, pending_id)
         except Exception as e:
-            logger.error(f"[TelegaKeeper] sign_in password: {e}")
+            logger.error(f"[TelegaKeeper] sign_in password error: {e}")
             await call.edit(
-                self.strings["error"].format(error=str(e)[:200]),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"}]],
+                self.strings["error"].format(error=str(e)[:300]),
+                reply_markup=[
+                    [{
+                        "text": self.strings["input_password"],
+                        "input": self.strings["input_password"],
+                        "handler": self._input_password,
+                        "args": (pending_id,),
+                        "style": "primary",
+                    }],
+                    [{"text": self.strings["btn_kill"], "callback": self._cb_kill_pending, "args": (pending_id,), "style": "danger"}],
+                ],
             )
 
     async def _finalize(self, call: InlineCall, pending_id: str):
         pending = self._pending.pop(pending_id, None)
         if not pending:
             return
+
         client = pending.get("client")
         try:
             session_str = client.session.save()
@@ -507,14 +590,16 @@ class TelegaKeeper(loader.Module):
             self.set("session_hash", session_hash)
             self._set_last_online(0.0)
             await self._start_loop()
+
             await call.edit(
                 self.strings["session_created"],
                 reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
             )
+
         except Exception as e:
-            logger.error(f"[TelegaKeeper] finalize: {e}")
+            logger.error(f"[TelegaKeeper] finalize error: {e}")
             await call.edit(
-                self.strings["error"].format(error=str(e)[:200]),
+                self.strings["error"].format(error=str(e)[:300]),
                 reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_back_main, "style": "danger"}]],
             )
         finally:
@@ -526,13 +611,14 @@ class TelegaKeeper(loader.Module):
 
     async def _cb_kill_session(self, call: InlineCall):
         await self._stop_loop()
+
         session_str = self._get_session()
         session_hash = self.get("session_hash", 0)
 
         if session_str and session_hash:
             client = None
             try:
-                client = await self._make_keeper_client(session_str)
+                client = self._make_client(session_str)
                 await asyncio.wait_for(client.connect(), timeout=15)
                 auths = await client(functions.account.GetAuthorizationsRequest())
                 killed = 0
@@ -545,7 +631,7 @@ class TelegaKeeper(loader.Module):
                             logger.warning(f"[TelegaKeeper] ResetAuthorization hash={auth.hash}: {e}")
                 logger.info(f"[TelegaKeeper] Killed {killed} sessions")
             except Exception as e:
-                logger.warning(f"[TelegaKeeper] kill_session connect/reset error: {e}")
+                logger.warning(f"[TelegaKeeper] kill_session error: {e}")
             finally:
                 if client:
                     try:
@@ -556,6 +642,7 @@ class TelegaKeeper(loader.Module):
         self._set_session("")
         self._set_last_online(0.0)
         self.set("session_hash", 0)
+
         await call.edit(
             self.strings["session_killed"],
             reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
