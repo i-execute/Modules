@@ -707,7 +707,7 @@ class StickerClone(loader.Module):
                 "style": "primary",
             })
 
-        rows = [pack_buttons]
+        rows = [[b] for b in pack_buttons]
 
         nav_row = []
         if page > 0:
