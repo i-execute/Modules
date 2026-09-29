@@ -2,15 +2,17 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 # meta developer: Execute_forge.t.me
 
 import asyncio
+import gzip
 import json
 import logging
 import os
 import platform
 import re
+import secrets
 import shutil
 import socket
 import stat
@@ -30,9 +32,21 @@ logger = logging.getLogger(__name__)
 
 CF_REPO = "cloudflare/cloudflared"
 VERSIONS_PER_PAGE = 5
-ARCHIVE_SUFFIXES = (".tar.gz", ".tgz", ".tar", ".zip")
-PREFERRED_ROOT_NAMES = ("dist", "build", "public", "out", "www")
-SKIP_DIR_NAMES = {"node_modules", "__pycache__", ".git", ".svn", ".hg"}
+ARCHIVE_SUFFIXES = (
+    ".tar.gz",
+    ".tgz",
+    ".tar",
+    ".tar.bz2",
+    ".tbz2",
+    ".tar.xz",
+    ".txz",
+    ".zip",
+    ".gz",
+    ".bz2",
+    ".xz",
+)
+PREFERRED_ROOT_NAMES = ("dist", "build", "public", "out", "www", ".output/public")
+SKIP_DIR_NAMES = {"node_modules", "__pycache__", ".git", ".svn", ".hg", ".next", ".cache"}
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/WebDeployer/Reloading.jpeg"
 TOPIC_ICON_EMOJI_ID = 5463122435425448565
 
@@ -54,7 +68,18 @@ def _archive_kind(filename: str):
     lower = filename.lower()
     if lower.endswith(".zip"):
         return "zip"
-    if lower.endswith(".tar.gz") or lower.endswith(".tgz") or lower.endswith(".tar"):
+    if (
+        lower.endswith(".tar.gz")
+        or lower.endswith(".tgz")
+        or lower.endswith(".tar")
+        or lower.endswith(".tar.bz2")
+        or lower.endswith(".tbz2")
+        or lower.endswith(".tar.xz")
+        or lower.endswith(".txz")
+        or lower.endswith(".gz")
+        or lower.endswith(".bz2")
+        or lower.endswith(".xz")
+    ):
         return "tar"
     return None
 
@@ -70,12 +95,25 @@ def _safe_extract(archive_path: str, dest_dir: str, kind: str):
                     raise ValueError(f"Unsafe path in archive: {member.filename}")
             zf.extractall(dest_dir)
     else:
-        with tarfile.open(archive_path, "r:*") as tf:
-            for member in tf.getmembers():
-                target = os.path.abspath(os.path.join(dest_dir, member.name))
-                if target != abs_dest and not target.startswith(abs_dest + os.sep):
-                    raise ValueError(f"Unsafe path in archive: {member.name}")
-            tf.extractall(dest_dir)
+        try:
+            with tarfile.open(archive_path, "r:*") as tf:
+                for member in tf.getmembers():
+                    target = os.path.abspath(os.path.join(dest_dir, member.name))
+                    if target != abs_dest and not target.startswith(abs_dest + os.sep):
+                        raise ValueError(f"Unsafe path in archive: {member.name}")
+                tf.extractall(dest_dir)
+        except (tarfile.ReadError, tarfile.CompressionError):
+            # Fallback if it is a single compressed file (e.g. gzip)
+            base = os.path.basename(archive_path)
+            out_name = base
+            for ext in (".gz", ".bz2", ".xz"):
+                if out_name.lower().endswith(ext):
+                    out_name = out_name[: -len(ext)]
+                    break
+            out_path = os.path.join(dest_dir, out_name)
+            with gzip.open(archive_path, "rb") as f_in:
+                with open(out_path, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
 
 
 def _find_site_index(root_dir: str):
@@ -99,9 +137,135 @@ def _find_site_index(root_dir: str):
     return candidates[0]
 
 
+def _generate_node_runner():
+    return r"""import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+
+const PORT = parseInt(process.env.PORT || '5173', 10);
+const BACKEND_PORT = parseInt(process.env.BACKEND_PORT || '8787', 10);
+const STATIC_DIR = process.env.STATIC_DIR || '';
+const BACKEND_DIR = process.env.BACKEND_DIR || '';
+const BACKEND_CMD = process.env.BACKEND_CMD || '';
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.webp': 'image/webp',
+  '.wasm': 'application/wasm',
+};
+
+let backendProcess = null;
+if (BACKEND_DIR && BACKEND_CMD) {
+  const parts = BACKEND_CMD.split(' ');
+  const cmd = parts[0];
+  const args = parts.slice(1);
+  console.log(`Starting backend in ${BACKEND_DIR}: ${cmd} ${args.join(' ')}`);
+  backendProcess = spawn(cmd, args, {
+    cwd: BACKEND_DIR,
+    env: { ...process.env, PORT: String(BACKEND_PORT) },
+    stdio: 'inherit',
+  });
+  backendProcess.on('exit', (code) => {
+    console.log(`Backend process exited with code ${code}`);
+  });
+}
+
+function serveStatic(req, res, pathname) {
+  if (!STATIC_DIR) {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
+    return;
+  }
+  let safePath = path.normalize(pathname).replace(/^[\\/]+/, '');
+  let filePath = path.join(STATIC_DIR, safePath);
+
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+    filePath = path.join(filePath, 'index.html');
+  }
+
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    const fallback = path.join(STATIC_DIR, 'index.html');
+    if (fs.existsSync(fallback)) {
+      filePath = fallback;
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('404 Not Found');
+      return;
+    }
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+  res.writeHead(200, { 'Content-Type': contentType });
+  fs.createReadStream(filePath).pipe(res);
+}
+
+const server = http.createServer((req, res) => {
+  const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const pathname = parsedUrl.pathname;
+
+  if (BACKEND_DIR && pathname.startsWith('/api')) {
+    const proxyReq = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: BACKEND_PORT,
+        path: req.url,
+        method: req.method,
+        headers: {
+          ...req.headers,
+          host: `127.0.0.1:${BACKEND_PORT}`,
+          'x-forwarded-for': req.socket.remoteAddress,
+          'x-forwarded-proto': 'http',
+        },
+      },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        proxyRes.pipe(res);
+      }
+    );
+    proxyReq.on('error', (err) => {
+      console.error('Proxy error:', err.message);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Backend unreachable', details: err.message }));
+    });
+    req.pipe(proxyReq);
+  } else {
+    serveStatic(req, res, pathname);
+  }
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server listening on 0.0.0.0:${PORT}`);
+});
+
+process.on('SIGTERM', () => {
+  if (backendProcess) backendProcess.kill('SIGTERM');
+  server.close(() => process.exit(0));
+});
+process.on('SIGINT', () => {
+  if (backendProcess) backendProcess.kill('SIGINT');
+  server.close(() => process.exit(0));
+});
+"""
+
+
 @loader.tds
 class WebDeployer(loader.Module):
-    """Deploy .js/.jsx/.ts/.tsx/.html files or .zip/.tar.gz archives to temporary Cloudflare domains"""
+    """Deploy .js/.jsx/.ts/.tsx/.html files or archives (.zip, .tar.gz, .tgz, .gz, full-stack Node/Vite) to temporary Cloudflare domains"""
 
     strings = {
         "name": "WebDeployer",
@@ -140,8 +304,8 @@ class WebDeployer(loader.Module):
             "<blockquote>{error}</blockquote>"
         ),
         "collecting_versions": "<b>Collecting versions...</b>",
-        "no_reply": "<b>Reply to a .js, .jsx, .ts, .tsx, .html, .zip or .tar.gz file</b>",
-        "wrong_type": "<b>File must be .js, .jsx, .ts, .tsx, .html, .zip, .tar.gz or .tgz</b>",
+        "no_reply": "<b>Reply to a .js, .jsx, .ts, .tsx, .html, .zip, .tar.gz or .gz file</b>",
+        "wrong_type": "<b>File must be .js, .jsx, .ts, .tsx, .html, .zip, .tar.gz, .tgz or .gz</b>",
         "no_cf": (
             "<b>cloudflared not installed</b>\n"
             "<blockquote>Use .wd to open Setup</blockquote>"
@@ -154,8 +318,12 @@ class WebDeployer(loader.Module):
             "<b>Extracting archive</b>\n"
             "<blockquote><code>{name}</code></blockquote>"
         ),
+        "building": (
+            "<b>Building project</b>\n"
+            "<blockquote><code>{name}</code>\n{step}</blockquote>"
+        ),
         "no_index": (
-            "<b>No index.html found in archive</b>"
+            "<b>No index.html or launchable server found in archive</b>"
         ),
         "deploying": (
             "<b>Deploying</b>\n"
@@ -181,7 +349,7 @@ class WebDeployer(loader.Module):
         ),
         "no_sites": (
             "<b>No active sites</b>\n"
-            "<blockquote>Reply to .js/.jsx/.ts/.tsx/.html file with .wd to deploy</blockquote>"
+            "<blockquote>Reply to .js/.jsx/.ts/.tsx/.html/archive file with .wd to deploy</blockquote>"
         ),
         "site_detail": (
             "<b>Site Info</b>\n"
@@ -258,8 +426,8 @@ class WebDeployer(loader.Module):
             "<blockquote>{error}</blockquote>"
         ),
         "collecting_versions": "<b>Сбор версий...</b>",
-        "no_reply": "<b>Ответьте на .js, .jsx, .ts, .tsx, .html, .zip или .tar.gz файл</b>",
-        "wrong_type": "<b>Файл должен быть .js, .jsx, .ts, .tsx, .html, .zip, .tar.gz или .tgz</b>",
+        "no_reply": "<b>Ответьте на .js, .jsx, .ts, .tsx, .html, .zip, .tar.gz или .gz файл</b>",
+        "wrong_type": "<b>Файл должен быть .js, .jsx, .ts, .tsx, .html, .zip, .tar.gz, .tgz или .gz</b>",
         "no_cf": (
             "<b>cloudflared не установлен</b>\n"
             "<blockquote>Используйте .wd для Setup</blockquote>"
@@ -272,8 +440,12 @@ class WebDeployer(loader.Module):
             "<b>Распаковка архива</b>\n"
             "<blockquote><code>{name}</code></blockquote>"
         ),
+        "building": (
+            "<b>Сборка проекта</b>\n"
+            "<blockquote><code>{name}</code>\n{step}</blockquote>"
+        ),
         "no_index": (
-            "<b>В архиве не найден index.html</b>"
+            "<b>В архиве не найден index.html или исполняемый сервер</b>"
         ),
         "deploying": (
             "<b>Деплой</b>\n"
@@ -299,7 +471,7 @@ class WebDeployer(loader.Module):
         ),
         "no_sites": (
             "<b>Нет активных сайтов</b>\n"
-            "<blockquote>Ответьте на .js/.jsx/.ts/.tsx/.html файл командой .wd для деплоя</blockquote>"
+            "<blockquote>Ответьте на .js/.jsx/.ts/.tsx/.html или архив командой .wd для деплоя</blockquote>"
         ),
         "site_detail": (
             "<b>Информация о сайте</b>\n"
@@ -458,15 +630,29 @@ class WebDeployer(loader.Module):
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", site_id)
         return f"wd-{safe}-{kind}.service"
 
-    def _write_unit(self, unit: str, description: str, command: list, work_dir: str, log_path: str):
+    def _write_unit(
+        self,
+        unit: str,
+        description: str,
+        command: list,
+        work_dir: str,
+        log_path: str,
+        env_vars: dict = None,
+    ):
         os.makedirs(self._systemd_dir, mode=0o700, exist_ok=True)
         quoted = " ".join(subprocess.list2cmdline([part]) for part in command)
+        env_lines = ""
+        if env_vars:
+            for k, v in env_vars.items():
+                env_lines += f'Environment="{k}={v}"\n'
+
         content = (
             "[Unit]\n"
             f"Description={description}\n"
             "After=network-online.target\nWants=network-online.target\n\n"
             "[Service]\nType=simple\n"
             f"WorkingDirectory={work_dir}\n"
+            f"{env_lines}"
             f"ExecStart={quoted}\n"
             "Restart=on-failure\nRestartSec=3\n"
             f"StandardOutput=append:{log_path}\nStandardError=append:{log_path}\n\n"
@@ -609,6 +795,20 @@ class WebDeployer(loader.Module):
                 return port
         raise RuntimeError("could not find a free port")
 
+    async def _run_command(self, cmd: list, cwd: str, timeout: int = 180):
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            return proc.returncode, (out + err).decode(errors="replace")
+        except asyncio.TimeoutError:
+            proc.kill()
+            return -1, "Command timed out"
+
     async def _curl(self, *args, timeout=15):
         p = await asyncio.create_subprocess_exec(
             "curl", "-sL", "--max-time", str(timeout), *args,
@@ -714,6 +914,125 @@ if (typeof App !== 'undefined') {{
 </script>
 </body>
 </html>"""
+
+    async def _setup_project(self, site_dir: str, extract_dir: str, port: int, m: Message, filename: str):
+        pkg_dirs = []
+        for dirpath, dirnames, filenames_in_dir in os.walk(extract_dir):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_NAMES and not d.startswith(".")]
+            if "package.json" in filenames_in_dir:
+                pkg_dirs.append(dirpath)
+
+        backend_dir = None
+        frontend_dir = None
+        for p in pkg_dirs:
+            base = os.path.basename(p).lower()
+            if base in ("backend", "server", "api"):
+                backend_dir = p
+            elif base in ("frontend", "client", "web", "app", "ui"):
+                frontend_dir = p
+
+        has_node = shutil.which("node") and shutil.which("npm")
+
+        if backend_dir and frontend_dir and has_node:
+            await m.edit(
+                self.strings["building"].format(name=_escape(filename), step="npm install (backend & frontend)..."),
+                parse_mode="html",
+            )
+            env_example = os.path.join(backend_dir, ".env.example")
+            env_file = os.path.join(backend_dir, ".env")
+            if os.path.exists(env_example) and not os.path.exists(env_file):
+                shutil.copy2(env_example, env_file)
+
+            if os.path.exists(env_file):
+                with open(env_file, "r", encoding="utf-8", errors="replace") as f:
+                    env_content = f.read()
+                if "SESSION_JWT_SECRET=" in env_content and not re.search(r"SESSION_JWT_SECRET=\S+", env_content):
+                    secret = secrets.token_hex(32)
+                    env_content = re.sub(r"SESSION_JWT_SECRET=.*", f"SESSION_JWT_SECRET={secret}", env_content)
+                if "DEV_MODE=" in env_content:
+                    env_content = re.sub(r"DEV_MODE=.*", "DEV_MODE=true", env_content)
+                with open(env_file, "w", encoding="utf-8") as f:
+                    f.write(env_content)
+
+            rc, out = await self._run_command(["npm", "install", "--no-audit", "--no-fund"], backend_dir)
+            if rc != 0:
+                raise RuntimeError(f"npm install (backend) failed:\n{out[-400:]}")
+
+            rc, out = await self._run_command(["npm", "install", "--no-audit", "--no-fund"], frontend_dir)
+            if rc != 0:
+                raise RuntimeError(f"npm install (frontend) failed:\n{out[-400:]}")
+
+            with open(os.path.join(frontend_dir, "package.json"), "r", encoding="utf-8", errors="replace") as f:
+                fe_pkg = json.load(f)
+            static_dir = frontend_dir
+            if "scripts" in fe_pkg and "build" in fe_pkg["scripts"]:
+                await m.edit(
+                    self.strings["building"].format(name=_escape(filename), step="npm run build (frontend)..."),
+                    parse_mode="html",
+                )
+                rc, out = await self._run_command(["npm", "run", "build"], frontend_dir)
+                if rc != 0:
+                    raise RuntimeError(f"npm run build (frontend) failed:\n{out[-400:]}")
+                for cand in ("dist", "build", "out", "public"):
+                    cd = os.path.join(frontend_dir, cand)
+                    if os.path.isdir(cd) and os.path.exists(os.path.join(cd, "index.html")):
+                        static_dir = cd
+                        break
+
+            backend_port = self._next_port()
+            runner_file = os.path.join(site_dir, "_runner.mjs")
+            with open(runner_file, "w", encoding="utf-8") as f:
+                f.write(_generate_node_runner())
+
+            env_vars = {
+                "PORT": str(port),
+                "BACKEND_PORT": str(backend_port),
+                "STATIC_DIR": static_dir,
+                "BACKEND_DIR": backend_dir,
+                "BACKEND_CMD": "node server.js",
+            }
+            return ["node", runner_file], site_dir, env_vars
+
+        if len(pkg_dirs) == 1 and has_node:
+            p_dir = pkg_dirs[0]
+            with open(os.path.join(p_dir, "package.json"), "r", encoding="utf-8", errors="replace") as f:
+                pkg_data = json.load(f)
+
+            await m.edit(
+                self.strings["building"].format(name=_escape(filename), step="npm install..."),
+                parse_mode="html",
+            )
+            rc, out = await self._run_command(["npm", "install", "--no-audit", "--no-fund"], p_dir)
+            if rc != 0:
+                raise RuntimeError(f"npm install failed:\n{out[-400:]}")
+
+            scripts = pkg_data.get("scripts", {})
+            if "build" in scripts:
+                await m.edit(
+                    self.strings["building"].format(name=_escape(filename), step="npm run build..."),
+                    parse_mode="html",
+                )
+                rc, out = await self._run_command(["npm", "run", "build"], p_dir)
+                if rc != 0:
+                    raise RuntimeError(f"npm run build failed:\n{out[-400:]}")
+
+                for cand in ("dist", "build", "out", "public"):
+                    cd = os.path.join(p_dir, cand)
+                    if os.path.isdir(cd) and os.path.exists(os.path.join(cd, "index.html")):
+                        return [sys.executable, "-m", "http.server", str(port), "--directory", cd], cd, {}
+
+            if "start" in scripts:
+                return ["npm", "start"], p_dir, {"PORT": str(port)}
+            for entry in ("server.js", "index.js", "app.js", "main.js"):
+                if os.path.exists(os.path.join(p_dir, entry)):
+                    return ["node", entry], p_dir, {"PORT": str(port)}
+
+        index_path = _find_site_index(extract_dir)
+        if not index_path:
+            return None, None, None
+
+        serve_dir = os.path.dirname(index_path)
+        return [sys.executable, "-m", "http.server", str(port), "--directory", serve_dir], serve_dir, {}
 
     async def _cb_close(self, call: InlineCall):
         await call.delete()
@@ -912,11 +1231,11 @@ if (typeof App !== 'undefined') {{
         )
 
     @loader.command(
-        ru_doc="Реплай на .js/.jsx/.ts/.tsx/.html для деплоя | без реплая — меню",
-        en_doc="Reply to .js/.jsx/.ts/.tsx/.html to deploy | without reply — menu",
+        ru_doc="Реплай на .js/.jsx/.ts/.tsx/.html или архив для деплоя | без реплая — меню",
+        en_doc="Reply to .js/.jsx/.ts/.tsx/.html or archive to deploy | without reply — menu",
     )
     async def wd(self, message: Message):
-        """Reply to .js/.jsx/.ts/.tsx/.html to deploy | without reply — menu"""
+        """Reply to .js/.jsx/.ts/.tsx/.html or archive to deploy | without reply — menu"""
         reply = await message.get_reply_message()
 
         if not reply or not reply.media:
@@ -985,42 +1304,46 @@ if (typeof App !== 'undefined') {{
             )
             return
 
-        if archive_kind:
-            await m.edit(
-                self.strings["extracting"].format(name=_escape(filename)),
-                parse_mode="html",
-            )
-        else:
-            await m.edit(
-                self.strings["deploying"].format(name=_escape(filename)),
-                parse_mode="html",
-            )
+        port = self._next_port()
+        cmd = None
+        work_dir = site_dir
+        env_vars = {}
 
         try:
             if archive_kind:
+                await m.edit(
+                    self.strings["extracting"].format(name=_escape(filename)),
+                    parse_mode="html",
+                )
                 extract_dir = os.path.join(site_dir, "extracted")
                 _safe_extract(file_path, extract_dir, archive_kind)
-                os.remove(file_path)
-                index_path = _find_site_index(extract_dir)
-                if not index_path:
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+
+                cmd, work_dir, env_vars = await self._setup_project(site_dir, extract_dir, port, m, filename)
+                if not cmd:
                     shutil.rmtree(site_dir, ignore_errors=True)
                     await m.edit(self.strings["no_index"], parse_mode="html")
                     return
-                serve_dir = os.path.dirname(index_path)
-                await m.edit(
-                    self.strings["deploying"].format(name=_escape(filename)),
-                    parse_mode="html",
-                )
             elif ext in ("js", "jsx", "ts", "tsx"):
                 html = self._build_html_from_js(file_path, filename, ext)
                 with open(os.path.join(site_dir, "index.html"), "w", encoding="utf-8") as f:
                     f.write(html)
-                serve_dir = site_dir
+                work_dir = site_dir
+                cmd = [sys.executable, "-m", "http.server", str(port), "--directory", site_dir]
             else:
                 dest = os.path.join(site_dir, "index.html")
                 if file_path != dest:
                     shutil.copy2(file_path, dest)
-                serve_dir = site_dir
+                work_dir = site_dir
+                cmd = [sys.executable, "-m", "http.server", str(port), "--directory", site_dir]
+
+            await m.edit(
+                self.strings["deploying"].format(name=_escape(filename)),
+                parse_mode="html",
+            )
         except Exception as e:
             shutil.rmtree(site_dir, ignore_errors=True)
             await m.edit(
@@ -1029,19 +1352,19 @@ if (typeof App !== 'undefined') {{
             )
             return
 
-        port = self._next_port()
         site_id = utils.rand(12)
-        http_unit = self._unit_name(site_id, "http")
+        http_unit = self._unit_name(site_id, "app")
         cf_unit = self._unit_name(site_id, "cf")
-        http_log = os.path.join(site_dir, "http.log")
+        http_log = os.path.join(site_dir, "app.log")
         cf_log = os.path.join(site_dir, "cf.log")
 
         self._write_unit(
             http_unit,
-            f"WebDeployer HTTP server {site_id}",
-            [sys.executable, "-m", "http.server", str(port), "--directory", serve_dir],
-            serve_dir,
+            f"WebDeployer App server {site_id}",
+            cmd,
+            work_dir,
             http_log,
+            env_vars=env_vars,
         )
         ok, out = await self._start_unit(http_unit)
         if not ok:
