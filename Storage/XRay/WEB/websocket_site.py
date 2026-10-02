@@ -5,7 +5,7 @@ from aiohttp import web, ClientSession, WSMsgType
 PATH = "__PATH__"
 BACKEND = "ws://127.0.0.1:__BACKEND_PORT__" + PATH
 GATE_JSX = "__MASK_URL__"
-LOADING_HTML = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Loading.html?v=loading-v4"
+LOADING_HTML = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Loading.html"
 
 async def fetch_text(url, timeout=10):
     def read():

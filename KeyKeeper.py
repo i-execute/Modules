@@ -13,7 +13,6 @@ import tempfile
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 
-import aiohttp
 
 from .. import loader, utils
 from ..inline.types import InlineCall
@@ -53,41 +52,91 @@ def _now_str(tz_offset: int) -> str:
     return f"{now.strftime('%Y-%m-%d %H:%M:%S')} UTC{sign}{abs(tz_offset)}"
 
 
-async def _api_get(url: str, api_key: str, timeout: int) -> dict:
+def _cfg_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
+
+
+async def _curl_once(method: str, url: str, api_key: str, body, timeout: int) -> dict:
+    cfg = [
+        f'url = "{_cfg_escape(url)}"',
+        f'request = "{method}"',
+        f'header = "Authorization: Bearer {_cfg_escape(api_key)}"',
+        'header = "Content-Type: application/json"',
+        'header = "Accept: application/json"',
+        "silent",
+        "show-error",
+        "location",
+        "compressed",
+        "connect-timeout = 15",
+        f"max-time = {int(timeout)}",
+        'write-out = "\\n%{http_code}"',
+    ]
+    if body is not None:
+        cfg.append(f'data-binary = "{_cfg_escape(json.dumps(body))}"')
     try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(
-                url,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as r:
-                data = await r.json(content_type=None)
-                return {"ok": r.status < 400, "status": r.status, "data": data}
+        proc = await asyncio.create_subprocess_exec(
+            "curl", "-K", "-",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except Exception as e:
+        return {"ok": False, "status": 0, "data": {}, "error": f"curl: {e}"}
+    try:
+        out, err = await asyncio.wait_for(proc.communicate("\n".join(cfg).encode()), timeout + 10)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return {"ok": False, "status": 0, "data": {}, "error": "timeout"}
     except Exception as e:
         return {"ok": False, "status": 0, "data": {}, "error": str(e)}
+
+    text = out.decode("utf-8", errors="replace")
+    payload, _, code = text.rpartition("\n")
+    try:
+        status = int(code.strip())
+    except ValueError:
+        status = 0
+    if status == 0:
+        msg = err.decode("utf-8", errors="replace").strip() or "no response"
+        return {"ok": False, "status": 0, "data": {}, "error": msg[:200]}
+    try:
+        data = json.loads(payload) if payload.strip() else {}
+    except Exception:
+        data = {"error": {"message": payload.strip()[:200], "code": ""}}
+    return {"ok": status < 400, "status": status, "data": data}
+
+
+async def _curl(method: str, url: str, api_key: str, body, timeout: int) -> dict:
+    result = {"ok": False, "status": 0, "data": {}, "error": "unknown"}
+    for attempt in range(3):
+        result = await _curl_once(method, url, api_key, body, timeout)
+        if result["status"] != 0 and result["status"] < 500:
+            return result
+        if attempt < 2:
+            await asyncio.sleep(1.5)
+    return result
+
+
+async def _api_get(url: str, api_key: str, timeout: int) -> dict:
+    return await _curl("GET", url, api_key, None, timeout)
 
 
 async def _api_post(url: str, api_key: str, body: dict, timeout: int) -> dict:
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.post(
-                url,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=body,
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as r:
-                data = await r.json(content_type=None)
-                return {"ok": r.status < 400, "status": r.status, "data": data}
-    except Exception as e:
-        return {"ok": False, "status": 0, "data": {}, "error": str(e)}
+    return await _curl("POST", url, api_key, body, timeout)
 
 
 async def _fetch_models(base_url: str, api_key: str, timeout: int) -> tuple[bool, list, str]:
     r = await _api_get(f"{base_url.rstrip('/')}/models", api_key, timeout)
+    data = r["data"] if isinstance(r["data"], dict) else {}
     if not r["ok"]:
-        err = r.get("error") or r["data"].get("error", {}).get("message", str(r["data"]))
+        err = r.get("error")
+        if not err:
+            e = data.get("error")
+            err = e.get("message", str(e)) if isinstance(e, dict) else (e or str(data))
         return False, [], str(err)[:200]
-    data = r["data"]
     if "data" not in data:
         return False, [], str(data)[:200]
     ids = sorted(m.get("id", "") for m in data["data"] if m.get("id"))
@@ -98,23 +147,31 @@ async def _validate_key(base_url: str, api_key: str, model: str, timeout: int) -
     body = {
         "model": model,
         "stream": False,
-        "messages": [{"role": "user", "content": "Hello"}],
+        "max_tokens": 10,
+        "messages": [{"role": "user", "content": "ping"}],
     }
     r = await _api_post(f"{base_url.rstrip('/')}/chat/completions", api_key, body, timeout)
-    data = r["data"]
+    data = r["data"] if isinstance(r["data"], dict) else {}
+    status = r["status"]
 
-    if "error" in data:
-        code = data["error"].get("code", "")
-        msg = data["error"].get("message", "")
-        if code == "rate_limit_exceeded":
-            return {"status": "rate-limited", "message": msg, "raw": r}
-        return {"status": "invalid", "message": msg, "raw": r}
+    err = data.get("error")
+    if isinstance(err, dict):
+        code = str(err.get("code", ""))
+        msg = str(err.get("message", ""))
+    else:
+        code = ""
+        msg = str(err or r.get("error", ""))
 
-    if "choices" in data:
+    if "choices" in data and status < 400:
         return {"status": "valid", "message": "", "raw": r}
 
-    err = r.get("error", str(data)[:200])
-    return {"status": "invalid", "message": str(err)[:200], "raw": r}
+    if status == 429 or code == "rate_limit_exceeded":
+        return {"status": "rate-limited", "message": msg[:200], "raw": r}
+
+    if status == 0 or status == 408 or status >= 500:
+        return {"status": "rate-limited", "message": (msg or "provider unavailable")[:200], "raw": r}
+
+    return {"status": "invalid", "message": (msg or str(data))[:200], "raw": r}
 
 
 @loader.tds
