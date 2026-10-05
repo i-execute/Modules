@@ -75,6 +75,8 @@ def _ensure_all_deps():
         "mutagen": "mutagen",
         "yandex_music": "yandex-music",
         "PIL": "Pillow",
+        "aiofiles": "aiofiles",
+        "curl_cffi": "curl_cffi",
     }.items():
         try:
             __import__(mod)
