@@ -472,39 +472,17 @@ class YMApiClient:
             return []
 
     async def fetch_liked_tracks(self):
-        if not self._client or not self._login:
+        if not self._client:
             return []
-        try:
-            result = await self._client.users_playlists(3, self._login)
-            if not result:
-                return []
-            tracks_short = getattr(result, "tracks", None) or []
-            if not tracks_short:
-                return []
-            ids = []
-            for t in tracks_short:
-                tid = getattr(t, "id", None)
-                if tid is not None:
-                    ids.append(str(tid))
-                else:
-                    raw = getattr(t, "track_id", None)
-                    if raw:
-                        ids.append(str(raw).split(":")[0])
-            if not ids:
-                return []
-            fetched = []
-            for i in range(0, len(ids), 50):
-                chunk = ids[i:i + 50]
-                try:
-                    res = await self._client.tracks(chunk)
-                    if res:
-                        fetched.extend(res)
-                except Exception as e:
-                    _log("LIKED", f"batch {i} error: {e}")
-            return fetched
-        except Exception as e:
-            _log("LIKED", f"fetch_liked_tracks error: {e}")
-            return []
+        for _ in range(3):
+            try:
+                lk = await self._client.users_likes_tracks()
+                shorts = list(getattr(lk, "tracks", None) or []) if lk else []
+                if shorts:
+                    return shorts
+            except Exception as e:
+                _log("LIKED", f"users_likes_tracks error: {e}")
+        return []
 
     async def fetch_liked_albums_books(self):
         if not self._client:
@@ -1914,8 +1892,8 @@ class YNDXMusic(loader.Module):
                     return
                 pl_title = self.strings["ymp_favorites"]
                 self._ymp_sessions[session_id].update({
-                    "tracks_list": tracks,
-                    "tracks_short": None,
+                    "tracks_list": None,
+                    "tracks_short": tracks,
                     "pl_title": pl_title,
                     "count": len(tracks),
                 })
@@ -2033,7 +2011,7 @@ class YNDXMusic(loader.Module):
             return
         pl_title = self.strings["ymp_favorites"]
         count = len(tracks)
-        sess.update({"tracks_list": tracks, "tracks_short": None, "pl_title": pl_title, "count": count})
+        sess.update({"tracks_list": None, "tracks_short": tracks, "pl_title": pl_title, "count": count})
         x0_url = await self._get_x0_cover_url(FAVORITE_COVER_URL, "favorites")
         markup = [[
             {"text": self.strings["ymp_download"], "callback": self._ymp_download, "args": (session_id,), "style": "success"},
@@ -2050,23 +2028,36 @@ class YNDXMusic(loader.Module):
             await call.answer()
             return
         await call.edit(self.strings["ymp_fetching_pl"])
-        all_meta = await self._ym.fetch_all_playlists_meta()
-        liked_tracks = await self._ym.fetch_liked_tracks()
+        all_meta, liked_tracks = await asyncio.gather(
+            self._ym.fetch_all_playlists_meta(),
+            self._ym.fetch_liked_tracks(),
+        )
         liked_count = len(liked_tracks)
         favorites_entry = {"is_favorites": True, "title": self.strings["ymp_favorites"], "tracks_count": liked_count, "tracks_list": liked_tracks}
         all_items = [favorites_entry] + list(all_meta)
+        sem = asyncio.Semaphore(6)
         cover_cache = {}
-        for i, item in enumerate(all_items):
-            if isinstance(item, dict):
-                cover_cache[i] = FAVORITE_COVER_URL
-            else:
-                og = getattr(item, "og_image", None)
-                if og:
-                    best = await _get_best_cover_url(og)
-                    if best:
-                        cover_cache[i] = best
+        x0_cache = {}
+
+        async def _prep(i, item):
+            async with sem:
+                try:
+                    if isinstance(item, dict):
+                        raw = FAVORITE_COVER_URL
+                        title = item["title"]
+                    else:
+                        title = getattr(item, "title", None) or "Playlist"
+                        og = getattr(item, "og_image", None)
+                        raw = await _get_best_cover_url(og) if og else None
+                    if raw:
+                        cover_cache[i] = raw
+                        x0_cache[i] = await self._get_x0_cover_url(raw, title)
+                except Exception as e:
+                    _log("YMP", f"cover prep {i} error: {e}")
+
+        await asyncio.gather(*[_prep(i, it) for i, it in enumerate(all_items)])
         my_sid = session_id + "_my"
-        self._ymp_my_sessions[my_sid] = {"items": all_items, "index": 0, "cover_cache": cover_cache, "x0_cache": {}, "parent_sid": session_id}
+        self._ymp_my_sessions[my_sid] = {"items": all_items, "index": 0, "cover_cache": cover_cache, "x0_cache": x0_cache, "parent_sid": session_id}
         await self._ymp_my_render(call, my_sid)
 
     async def _ymp_my_render(self, call, my_sid: str):
@@ -2141,7 +2132,7 @@ class YNDXMusic(loader.Module):
         if isinstance(item, dict) and item.get("is_favorites"):
             tracks = item["tracks_list"]
             pl_title = item["title"]
-            parent_sess.update({"tracks_list": tracks, "tracks_short": None, "pl_title": pl_title, "count": len(tracks)})
+            parent_sess.update({"tracks_list": None, "tracks_short": tracks, "pl_title": pl_title, "count": len(tracks)})
             await self._ymp_download(call, parent_sid)
             return
         owner = getattr(item, "owner", None)
