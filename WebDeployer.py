@@ -48,7 +48,7 @@ ARCHIVE_SUFFIXES = (
 PREFERRED_ROOT_NAMES = ("dist", "build", "public", "out", "www", ".output/public")
 SKIP_DIR_NAMES = {"node_modules", "__pycache__", ".git", ".svn", ".hg", ".next", ".cache"}
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/WebDeployer/Reloading.jpeg"
-TOPIC_ICON_EMOJI_ID = 5463122435425448565
+TOPIC_ICON_EMOJI_ID = 5361553253513340256
 
 
 def _escape(text):
