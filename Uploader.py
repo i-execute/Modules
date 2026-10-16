@@ -2,10 +2,11 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 2, 5)
+__version__ = (1, 3, 0)
 # meta developer: I_execute.t.me
 
 import os
+import json
 import asyncio
 import logging
 import time
@@ -17,6 +18,35 @@ from ..inline.types import InlineCall
 logger = logging.getLogger(__name__)
 
 MAX_FILE_SIZE = 512 * 1024 * 1024
+
+UA = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0"
+
+PROVIDERS = {
+    "tempsh": {"label": "temp.sh", "btn": "btn_tempsh"},
+    "uguu": {"label": "uguu.se", "btn": "btn_uguu"},
+    "tmpfiles": {"label": "tmpfiles.org", "btn": "btn_tmpfiles"},
+    "x0.at": {"label": "x0.at", "btn": "btn_x0"},
+    "litterbox": {"label": "litterbox.catbox.moe", "btn": "btn_litter"},
+}
+
+
+def _parse_url(host, text):
+    text = (text or "").strip()
+    if not text:
+        return None
+    if host == "tmpfiles":
+        try:
+            url = json.loads(text)["data"]["url"]
+        except Exception:
+            return None
+        url = url.replace("http://", "https://", 1)
+        if "tmpfiles.org/dl/" not in url:
+            url = url.replace("tmpfiles.org/", "tmpfiles.org/dl/", 1)
+        return url
+    first = text.splitlines()[0].strip()
+    if first.startswith("http") and " " not in first:
+        return first
+    return None
 
 
 def _escape(text):
@@ -141,7 +171,7 @@ ALLOWED_EXTENSIONS = {
 
 @loader.tds
 class Uploader(loader.Module):
-    """Upload files to x0.at or litterbox.catbox.moe"""
+    """Upload files to temp.sh, uguu.se, tmpfiles.org, x0.at or litterbox"""
 
     strings = {
         "name": "Uploader",
@@ -221,6 +251,9 @@ class Uploader(loader.Module):
         ),
         "killed": "<b>Upload cancelled</b>",
         "btn_close": "Close",
+        "btn_tempsh": "temp.sh (3d)",
+        "btn_uguu": "uguu.se",
+        "btn_tmpfiles": "tmpfiles.org",
         "btn_x0": "x0.at",
         "btn_litter": "litterbox (72h)",
         "btn_kill": "Kill",
@@ -303,6 +336,9 @@ class Uploader(loader.Module):
         ),
         "killed": "<b>Загрузка отменена</b>",
         "btn_close": "Закрыть",
+        "btn_tempsh": "temp.sh (3d)",
+        "btn_uguu": "uguu.se",
+        "btn_tmpfiles": "tmpfiles.org",
         "btn_x0": "x0.at",
         "btn_litter": "litterbox (72h)",
         "btn_kill": "Kill",
@@ -400,7 +436,28 @@ class Uploader(loader.Module):
             pass
 
     def _make_curl_args(self, host, tmp_path):
-        ua = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0"
+        ua = UA
+        if host == "tempsh":
+            return [
+                "curl", "-sL", "--max-time", "120",
+                "-A", ua,
+                "-F", f"file=@{tmp_path}",
+                "https://temp.sh/upload",
+            ]
+        if host == "uguu":
+            return [
+                "curl", "-sL", "--max-time", "120",
+                "-A", ua,
+                "-F", f"files[]=@{tmp_path}",
+                "https://uguu.se/upload?output=text",
+            ]
+        if host == "tmpfiles":
+            return [
+                "curl", "-sL", "--max-time", "120",
+                "-A", ua,
+                "-F", f"file=@{tmp_path}",
+                "https://tmpfiles.org/api/v1/upload",
+            ]
         if host == "x0.at":
             return [
                 "curl", "-sL", "--max-time", "120",
@@ -441,19 +498,26 @@ class Uploader(loader.Module):
             reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
         )
 
-    async def _cb_upload_x0(self, call: InlineCall, uid):
-        data = self._pending_files.get(uid)
-        if not data:
-            return
-        tmp_path, filename, file_type, file_size, dl_elapsed = data
-        await self._do_upload(call, uid, tmp_path, filename, file_type, file_size, dl_elapsed, "x0.at")
+    def _host_rows(self, uid):
+        buttons = [
+            {
+                "text": self.strings[prov["btn"]],
+                "callback": self._cb_upload,
+                "args": (uid, key),
+                "style": "primary",
+            }
+            for key, prov in PROVIDERS.items()
+        ]
+        rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+        rows.append([{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}])
+        return rows
 
-    async def _cb_upload_litter(self, call: InlineCall, uid):
+    async def _cb_upload(self, call: InlineCall, uid, host):
         data = self._pending_files.get(uid)
-        if not data:
+        if not data or host not in PROVIDERS:
             return
         tmp_path, filename, file_type, file_size, dl_elapsed = data
-        await self._do_upload(call, uid, tmp_path, filename, file_type, file_size, dl_elapsed, "litterbox")
+        await self._do_upload(call, uid, tmp_path, filename, file_type, file_size, dl_elapsed, host)
 
     async def _do_upload(self, form, uid, tmp_path, filename, file_type, file_size, dl_elapsed, host):
         if not os.path.exists(tmp_path):
@@ -465,7 +529,7 @@ class Uploader(loader.Module):
 
         stop_event = asyncio.Event()
         ul_start = time.time()
-        host_label = "x0.at" if host == "x0.at" else "litterbox.catbox.moe"
+        host_label = PROVIDERS.get(host, {}).get("label", host)
 
         async def _timer():
             while not stop_event.is_set():
@@ -539,14 +603,13 @@ class Uploader(loader.Module):
                 )
                 return
 
-            if not stdout_text.startswith("http"):
+            url = _parse_url(host, stdout_text)
+            if not url:
                 await form.edit(
                     self._s("upload_fail", error=_escape(stdout_text[:300])),
                     reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
                 )
                 return
-
-            url = stdout_text
             total_elapsed = dl_elapsed + ul_elapsed
 
             await form.edit(
@@ -584,11 +647,11 @@ class Uploader(loader.Module):
             )
 
     @loader.command(
-        ru_doc="Реплай на фото/видео/файл - загрузить на x0.at или litterbox.catbox.moe",
-        en_doc="Reply to photo/video/file - upload to x0.at or litterbox.catbox.moe",
+        ru_doc="Реплай на фото/видео/файл - загрузить на temp.sh, uguu, tmpfiles, x0.at или litterbox",
+        en_doc="Reply to photo/video/file - upload to temp.sh, uguu, tmpfiles, x0.at or litterbox",
     )
     async def upl(self, message):
-        """Reply to photo/video/file - upload to x0.at or litterbox.catbox.moe"""
+        """Reply to photo/video/file - upload to temp.sh, uguu, tmpfiles, x0.at or litterbox"""
         reply = await message.get_reply_message()
 
         if not reply or not reply.media:
@@ -673,23 +736,7 @@ class Uploader(loader.Module):
 
             await form.edit(
                 self._s("choose_host", name=_escape(filename), size=_format_bytes(file_size)),
-                reply_markup=[
-                    [
-                        {
-                            "text": self.strings["btn_x0"],
-                            "callback": self._cb_upload_x0,
-                            "args": (uid,),
-                            "style": "primary",
-                        },
-                        {
-                            "text": self.strings["btn_litter"],
-                            "callback": self._cb_upload_litter,
-                            "args": (uid,),
-                            "style": "primary",
-                        },
-                    ],
-                    [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
-                ],
+                reply_markup=self._host_rows(uid),
             )
 
         except Exception as e:
