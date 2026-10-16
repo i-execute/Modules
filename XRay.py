@@ -858,6 +858,10 @@ class XRay(loader.Module):
         self._logger_topic = None
         self._asset_channel = None
 
+    def _ensure_root(self):
+        os.makedirs(self._root, mode=0o700, exist_ok=True)
+        os.makedirs(os.path.join(self._root, "users"), mode=0o700, exist_ok=True)
+
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
@@ -868,8 +872,7 @@ class XRay(loader.Module):
         self._xray_path = os.path.join(self._root, "xray")
         self._cloudflared_path = os.path.join(self._root, "cloudflared")
         
-        os.makedirs(self._root, mode=0o700, exist_ok=True)
-        os.makedirs(os.path.join(self._root, "users"), mode=0o700, exist_ok=True)
+        self._ensure_root()
 
         self._users = self._db.get("XR", "users", {})
         self._external_ip = await self._detect_external_ip()
@@ -1434,6 +1437,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         }.get(arch)
         if not asset:
             return False, f"Unsupported arch: {arch}"
+        self._ensure_root()
         tmp_path = f"{self._cloudflared_path}.tmp"
         try:
             process = await asyncio.create_subprocess_exec(

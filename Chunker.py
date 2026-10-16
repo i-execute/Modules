@@ -257,6 +257,9 @@ class Chunker(loader.Module):
         self._sessions: dict = {}
         self._versions_cache = None
 
+    def _ensure_root(self):
+        os.makedirs(self._root, mode=0o700, exist_ok=True)
+
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
@@ -264,7 +267,7 @@ class Chunker(loader.Module):
         tg_user_id = self._me.id
         self._root = os.path.join(os.path.expanduser("~"), ".chunker_on_userbot", str(tg_user_id))
         self._chunker_path = os.path.join(self._root, "chunker-cli.jar")
-        os.makedirs(self._root, mode=0o700, exist_ok=True)
+        self._ensure_root()
 
     def _chunker_installed(self):
         return bool(self._chunker_path and os.path.isfile(self._chunker_path) and os.access(self._chunker_path, os.X_OK))
@@ -399,6 +402,7 @@ class Chunker(loader.Module):
             names = [a.get("name", "") for a in data.get("assets", [])]
             return False, f"No CLI jar in assets: {names}"
 
+        self._ensure_root()
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".jar", prefix="chunker_", dir=self._root)
         os.close(tmp_fd)
         try:

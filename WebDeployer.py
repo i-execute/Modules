@@ -522,6 +522,9 @@ class WebDeployer(loader.Module):
         self._logger_topic = None
         self._asset_channel = None
 
+    def _ensure_root(self):
+        os.makedirs(self._root, mode=0o700, exist_ok=True)
+
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
@@ -529,7 +532,7 @@ class WebDeployer(loader.Module):
         tg_user_id = me.id
         self._root = os.path.join(os.path.expanduser("~"), ".cloudflared_on_userbot", str(tg_user_id))
         self._cf_bin = os.path.join(self._root, "cloudflared")
-        os.makedirs(self._root, mode=0o700, exist_ok=True)
+        self._ensure_root()
 
         self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
         if self._asset_channel:
@@ -862,6 +865,7 @@ class WebDeployer(loader.Module):
             names = [a.get("name", "") for a in data.get("assets", [])]
             return False, f"No binary '{asset_name}' in assets: {names}"
 
+        self._ensure_root()
         tmp_fd, tmp_path = tempfile.mkstemp(prefix="cloudflared_", dir=self._root)
         os.close(tmp_fd)
         try:
