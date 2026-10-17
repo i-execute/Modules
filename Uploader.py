@@ -2,8 +2,8 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 3, 0)
-# meta developer: I_execute.t.me
+__version__ = (1, 3, 1)
+# meta developer: Execute_forge.t.me
 
 import os
 import json
@@ -251,6 +251,7 @@ class Uploader(loader.Module):
         ),
         "killed": "<b>Upload cancelled</b>",
         "btn_close": "Close",
+        "btn_back": "Back",
         "btn_tempsh": "temp.sh (3d)",
         "btn_uguu": "uguu.se",
         "btn_tmpfiles": "tmpfiles.org",
@@ -336,6 +337,7 @@ class Uploader(loader.Module):
         ),
         "killed": "<b>Загрузка отменена</b>",
         "btn_close": "Закрыть",
+        "btn_back": "Назад",
         "btn_tempsh": "temp.sh (3d)",
         "btn_uguu": "uguu.se",
         "btn_tmpfiles": "tmpfiles.org",
@@ -476,7 +478,15 @@ class Uploader(loader.Module):
             ]
         return []
 
-    async def _cb_close(self, call: InlineCall):
+    async def _cb_close(self, call: InlineCall, uid=None):
+        if uid is not None:
+            data = self._pending_files.pop(uid, None)
+            self._upload_procs.pop(uid, None)
+            if data:
+                try:
+                    os.remove(data[0])
+                except Exception:
+                    pass
         await call.delete()
 
     async def _cb_kill(self, call: InlineCall, uid):
@@ -509,8 +519,36 @@ class Uploader(loader.Module):
             for key, prov in PROVIDERS.items()
         ]
         rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-        rows.append([{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}])
+        rows.append([{"text": self.strings["btn_close"], "callback": self._cb_close, "args": (uid,), "style": "danger"}])
         return rows
+
+    def _fail_rows(self, uid):
+        return [
+            [{"text": self.strings["btn_back"], "callback": self._cb_back, "args": (uid,), "style": "primary"}],
+            [{"text": self.strings["btn_close"], "callback": self._cb_close, "args": (uid,), "style": "danger"}],
+        ]
+
+    async def _fail(self, form, uid, error):
+        self._upload_procs.pop(uid, None)
+        await form.edit(
+            self._s("upload_fail", error=error),
+            reply_markup=self._fail_rows(uid),
+        )
+
+    async def _cb_back(self, call: InlineCall, uid):
+        data = self._pending_files.get(uid)
+        if not data or not os.path.exists(data[0]):
+            self._pending_files.pop(uid, None)
+            await call.edit(
+                self._s("upload_fail", error="temp file not found"),
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            )
+            return
+        tmp_path, filename, file_type, file_size, dl_elapsed = data
+        await call.edit(
+            self._s("choose_host", name=_escape(filename), size=_format_bytes(file_size)),
+            reply_markup=self._host_rows(uid),
+        )
 
     async def _cb_upload(self, call: InlineCall, uid, host):
         data = self._pending_files.get(uid)
@@ -571,11 +609,7 @@ class Uploader(loader.Module):
             except asyncio.TimeoutError:
                 stop_event.set()
                 await timer_task
-                self._cleanup(uid, tmp_path)
-                await form.edit(
-                    self._s("upload_fail", error="timeout"),
-                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-                )
+                await self._fail(form, uid, "timeout")
                 return
 
             ul_elapsed = time.time() - ul_start
@@ -585,31 +619,25 @@ class Uploader(loader.Module):
             stdout_text = out.decode("utf-8", errors="replace").strip()
             stderr_text = err.decode("utf-8", errors="replace").strip()
 
-            self._cleanup(uid, tmp_path)
+            if uid not in self._pending_files:
+                return
 
             if proc.returncode != 0:
                 error = stderr_text or stdout_text or f"exit code {proc.returncode}"
-                await form.edit(
-                    self._s("upload_fail", error=_escape(error[:300])),
-                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-                )
+                await self._fail(form, uid, _escape(error[:300]))
                 return
 
             if not stdout_text:
                 error = stderr_text or "empty response"
-                await form.edit(
-                    self._s("upload_fail", error=_escape(error[:300])),
-                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-                )
+                await self._fail(form, uid, _escape(error[:300]))
                 return
 
             url = _parse_url(host, stdout_text)
             if not url:
-                await form.edit(
-                    self._s("upload_fail", error=_escape(stdout_text[:300])),
-                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-                )
+                await self._fail(form, uid, _escape(stdout_text[:300]))
                 return
+
+            self._cleanup(uid, tmp_path)
             total_elapsed = dl_elapsed + ul_elapsed
 
             await form.edit(
@@ -640,11 +668,7 @@ class Uploader(loader.Module):
                 await timer_task
             except Exception:
                 pass
-            self._cleanup(uid, tmp_path)
-            await form.edit(
-                self._s("upload_fail", error=_escape(str(e)[:300])),
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-            )
+            await self._fail(form, uid, _escape(str(e)[:300]))
 
     @loader.command(
         ru_doc="Реплай на фото/видео/файл - загрузить на temp.sh, uguu, tmpfiles, x0.at или litterbox",
