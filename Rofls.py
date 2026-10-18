@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 1, 0)
+__version__ = (1, 1, 2)
 # meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Rofls/MetaBanner.jpeg
 
@@ -11,9 +11,11 @@ import os
 import sys
 import asyncio
 import aiohttp
+import shutil
 import tempfile
 import subprocess
 import logging
+import importlib.resources
 
 from PIL import Image, ImageDraw, ImageFont
 from telethon.tl.functions.messages import UploadMediaRequest, GetStickerSetRequest
@@ -27,7 +29,12 @@ from telethon.tl.types import (
     InputStickerSetItem,
     InputStickerSetShortName,
 )
-from telethon.errors import StickersetInvalidError
+from telethon.errors import (
+    StickersetInvalidError,
+    ShortNameOccupiedError,
+    PackShortNameOccupiedError,
+    ShortnameOccupyFailedError,
+)
 from telethon.utils import get_input_document
 
 from .. import loader, utils
@@ -36,6 +43,19 @@ logger = logging.getLogger(__name__)
 
 BASE_IMAGE_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Rofls/Down.jpeg"
 AVATAR_BOX = (607, 148, 1080, 581)
+PETPET_FRAMES = 10
+PETPET_SIZE = 512
+PETPET_FPS = 50
+PACK_TITLE = "PetPet by @Execute_forge"
+PACK_NAME_ATTEMPTS = 10
+
+def _as_list(value):
+    if value is None or isinstance(value, (str, bytes, bytearray)):
+        return []
+    try:
+        return list(value)
+    except TypeError:
+        return []
 
 TG_COLORS = [
     (255, 80, 80),
@@ -68,11 +88,6 @@ def _ensure_all_deps():
         __import__("petpetgif")
     except ImportError:
         subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "setuptools<81", "-q"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        subprocess.check_call(
             [
                 sys.executable, "-m", "pip", "install",
                 "git+https://github.com/camprevail/pet-pet-gif.git", "-q",
@@ -83,8 +98,6 @@ def _ensure_all_deps():
 
 
 _ensure_all_deps()
-
-from petpetgif import petpet as ppg
 
 
 def _jpeg_shakalize(img, quality):
@@ -162,28 +175,56 @@ def _apply_circle_mask(src_buf):
     return result
 
 
+def _load_pet_hands():
+    root = importlib.resources.files("petpetgif") / "img"
+    hands = []
+    for i in range(PETPET_FRAMES):
+        hand = Image.open(io.BytesIO((root / f"pet{i}.gif").read_bytes())).convert("RGBA")
+        hands.append(hand.resize((PETPET_SIZE, PETPET_SIZE), Image.LANCZOS))
+    return hands
+
+
+def _render_petpet_frames(src_buf, folder):
+    base = Image.open(src_buf).convert("RGBA")
+    size = PETPET_SIZE
+    for i, hand in enumerate(_load_pet_hands()):
+        squeeze = i if i < PETPET_FRAMES / 2 else PETPET_FRAMES - i
+        width = 0.8 + squeeze * 0.02
+        height = 0.8 - squeeze * 0.05
+        offset_x = (1 - width) * 0.5 + 0.1
+        offset_y = (1 - height) - 0.08
+        canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        body = base.resize((round(width * size), round(height * size)), Image.LANCZOS)
+        canvas.paste(body, (round(offset_x * size), round(offset_y * size)))
+        canvas = Image.alpha_composite(canvas, hand)
+        canvas.save(os.path.join(folder, f"frame{i:02d}.png"))
+
+
 def _make_petpet_webm(src_buf, circle=False):
     if circle:
         src_buf = _apply_circle_mask(src_buf)
-    g = io.BytesIO()
-    ppg.make(src_buf, g)
-    g.seek(0)
-    f = tempfile.NamedTemporaryFile(suffix=".gif", delete=False)
-    f.write(g.read())
-    f.close()
-    w = f.name[:-4] + ".webm"
-    q = subprocess.run(
-        [
-            "ffmpeg", "-y", "-i", f.name,
-            "-vf", "scale=512:512:flags=lanczos",
-            "-r", "30", "-t", "2.99", "-an",
-            "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p",
-            "-b:v", "350K", w,
-        ],
-        capture_output=True,
-    )
-    os.unlink(f.name)
+    folder = tempfile.mkdtemp(prefix="petpet_")
+    try:
+        _render_petpet_frames(src_buf, folder)
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
+            w = f.name
+        q = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-framerate", str(PETPET_FPS),
+                "-i", os.path.join(folder, "frame%02d.png"),
+                "-vf", "scale=512:512:flags=lanczos",
+                "-r", "30", "-t", "2.99", "-an",
+                "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p",
+                "-b:v", "350K", w,
+            ],
+            capture_output=True,
+        )
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
     if q.returncode:
+        logger.error("ffmpeg failed: %s", q.stderr.decode(errors="ignore")[-500:])
+        os.unlink(w)
         return None
     return w
 
@@ -308,24 +349,50 @@ class RoflsMod(loader.Module):
         )
 
     async def _get_sn(self, client):
+        stored = self.get("short_name")
+        if stored:
+            return stored
         me = await client.get_me()
         return f"petpetpackby_{me.id}"
+
+    async def _create_pack(self, client, me, sticker):
+        base = f"petpetpackby_{me.id}"
+        last_error = None
+        for attempt in range(1, PACK_NAME_ATTEMPTS + 1):
+            sn = base if attempt == 1 else f"{base}_{attempt}"
+            try:
+                res = await client(
+                    CreateStickerSetRequest(
+                        user_id=me,
+                        title=PACK_TITLE,
+                        short_name=sn,
+                        stickers=[sticker],
+                    )
+                )
+            except (ShortNameOccupiedError, PackShortNameOccupiedError, ShortnameOccupyFailedError) as e:
+                last_error = e
+                continue
+            self.set("short_name", sn)
+            self.set("sticker_ids", [])
+            return sn, res
+        raise last_error
 
     @loader.command(
         ru_doc="Ответьте на пользователя для petpet стикера, или без реплая для управления паком",
         en_doc="Reply to user for petpet sticker, or send without reply for management",
     )
-    async def petcmd(self, message):
+    async def pet(self, message):
         """Reply to user for petpet sticker, or send without reply for management"""
         reply = await message.get_reply_message()
 
         if not reply:
             sn = await self._get_sn(message.client)
-            sticker_ids = self.get("sticker_ids", [])
+            sticker_ids = _as_list(self.get("sticker_ids", []))
             try:
                 ss = InputStickerSetShortName(sn)
                 sticker_set = await message.client(GetStickerSetRequest(ss, 0))
-                count = len(sticker_set.documents)
+                documents = _as_list(sticker_set.documents)
+                count = len(documents)
                 link = f"https://t.me/addstickers/{sn}"
                 text = self.strings["pack_info"].format(
                     count=count,
@@ -390,7 +457,7 @@ class RoflsMod(loader.Module):
                 return
 
             me = await message.client.get_me()
-            sn = f"petpetpackby_{me.id}"
+            sn = await self._get_sn(message.client)
 
             u = await message.client.upload_file(w, file_name="sticker.webm")
             d = get_input_document(
@@ -403,26 +470,20 @@ class RoflsMod(loader.Module):
 
             try:
                 old = await message.client(GetStickerSetRequest(ss, 0))
-                old_ids = [x.id for x in old.documents]
+                old_ids = [x.id for x in _as_list(old.documents)]
                 res = await message.client(AddStickerToSetRequest(ss, sticker))
-                new_docs = [x for x in res.documents if x.id not in old_ids]
+                new_docs = [x for x in _as_list(res.documents) if x.id not in old_ids]
                 if new_docs:
                     new_doc_id = new_docs[0]
             except StickersetInvalidError:
-                res = await message.client(
-                    CreateStickerSetRequest(
-                        user_id=me,
-                        title="PetPet by @Execute_forge",
-                        short_name=sn,
-                        stickers=[sticker],
-                    )
-                )
-                if res.documents:
-                    new_doc_id = res.documents[0]
+                sn, res = await self._create_pack(message.client, me, sticker)
+                created_documents = _as_list(res.documents)
+                if created_documents:
+                    new_doc_id = created_documents[0]
 
             os.unlink(w)
 
-            sticker_ids = self.get("sticker_ids", [])
+            sticker_ids = _as_list(self.get("sticker_ids", []))
             if new_doc_id:
                 sticker_ids.append(new_doc_id.id)
                 self.set("sticker_ids", sticker_ids)
@@ -451,7 +512,7 @@ class RoflsMod(loader.Module):
         ru_doc="Ответьте на пользователя для down мема",
         en_doc="Reply to user for down meme",
     )
-    async def dncmd(self, message):
+    async def dn(self, message):
         """Reply to user for down meme"""
         reply = await message.get_reply_message()
         if not reply:
@@ -504,7 +565,7 @@ class RoflsMod(loader.Module):
 
         try:
             sticker_set = await client(GetStickerSetRequest(ss, 0))
-            for doc in sticker_set.documents:
+            for doc in _as_list(sticker_set.documents):
                 try:
                     inp = get_input_document(doc)
                     await client(RemoveStickerFromSetRequest(inp))
@@ -526,7 +587,7 @@ class RoflsMod(loader.Module):
 
     async def _cb_delete_last(self, call):
         client = self._client
-        sticker_ids = self.get("sticker_ids", [])
+        sticker_ids = _as_list(self.get("sticker_ids", []))
         if not sticker_ids:
             await call.edit(
                 self.strings["no_stickers"],
@@ -541,14 +602,24 @@ class RoflsMod(loader.Module):
 
         try:
             sticker_set = await client(GetStickerSetRequest(ss, 0))
+            documents = _as_list(sticker_set.documents)
+            if not documents:
+                self.set("sticker_ids", [])
+                await call.edit(
+                    self.strings["no_stickers"],
+                    reply_markup=[
+                        [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "primary"}],
+                    ],
+                )
+                return
             last_id = sticker_ids[-1]
             target_doc = None
-            for doc in sticker_set.documents:
+            for doc in documents:
                 if doc.id == last_id:
                     target_doc = doc
                     break
             if not target_doc:
-                target_doc = sticker_set.documents[-1]
+                target_doc = documents[-1]
 
             inp = get_input_document(target_doc)
             await client(RemoveStickerFromSetRequest(inp))
