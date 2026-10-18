@@ -2,18 +2,24 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (2, 2, 2)
+__version__ = (2, 4, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/MetaBanner.jpeg
 
 import asyncio
 import logging
+import os
 import random
+import shutil
+import tempfile
+import time
+from array import array
 from datetime import timedelta, timezone, datetime
 
+from telethon.errors import FloodWaitError
 from telethon.tl.functions.channels import LeaveChannelRequest
-from telethon.tl.functions.messages import EditMessageRequest
-from telethon.tl.types import Message, User, InputMediaWebPage
+from telethon.tl.functions.messages import EditMessageRequest, GetHistoryRequest
+from telethon.tl.types import Message, MessageEmpty, User, InputMediaWebPage
 
 from .. import loader, utils
 from ..inline.types import InlineCall
@@ -22,6 +28,60 @@ logger = logging.getLogger(__name__)
 
 SAYONARA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/Sayonara.mp4"
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/Reloading.jpeg"
+
+WIPE_PREFIX = "deleter_wipe_"
+WIPE_CHUNK = 10000
+WIPE_BATCH = 100
+WIPE_PARALLEL = 8
+WIPE_DELAY = 0.2
+WIPE_PROGRESS_EVERY = 3
+
+
+def _rss_bytes():
+    try:
+        with open("/proc/self/statm") as fh:
+            return int(fh.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+    except Exception:
+        return 0
+
+
+class _IdSpool:
+    def __init__(self, ram_limit):
+        self.dir = tempfile.mkdtemp(prefix=WIPE_PREFIX, dir=tempfile.gettempdir())
+        self.limit = ram_limit
+        self.queue = asyncio.Queue()
+        self.mem = 0
+        self.on_disk = 0
+        self.spilled = 0
+        self.seq = 0
+
+    def push(self, ids):
+        size = len(ids) * ids.itemsize
+        if self.mem + size > self.limit or _rss_bytes() > self.limit:
+            self.seq += 1
+            path = os.path.join(self.dir, f"{self.seq:07d}.bin")
+            with open(path, "wb") as fh:
+                ids.tofile(fh)
+            self.on_disk += 1
+            self.spilled += 1
+            self.queue.put_nowait(path)
+        else:
+            self.mem += size
+            self.queue.put_nowait(ids)
+
+    def load(self, item):
+        if isinstance(item, str):
+            ids = array("q")
+            with open(item, "rb") as fh:
+                ids.frombytes(fh.read())
+            os.remove(item)
+            self.on_disk -= 1
+            return ids
+        self.mem -= len(item) * item.itemsize
+        return item
+
+    def close(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
 
 
 @loader.tds
@@ -46,7 +106,12 @@ class Deleter(loader.Module):
             "<blockquote>"
             "<code>{prefix}del @username</code> - delete all messages from specified user\n"
             "<code>{prefix}del before</code> (reply) - delete all messages from everyone before replied message\n"
-            "<code>{prefix}del after</code> (reply) - delete all messages from everyone after replied message"
+            "<code>{prefix}del after</code> (reply) - delete all messages from everyone after replied message\n"
+            "<code>{prefix}del</code> - <b>Wipe Entire Chat</b> button: delete all messages from all members, streaming ids to /tmp in chunks"
+            "</blockquote>\n"
+            "<b>Purger:</b>\n"
+            "<blockquote>"
+            "<code>{prefix}purge</code> - enable auto-delete of all new messages in current chat, survives restarts, disabled only via its inline form"
             "</blockquote>"
         ),
         "main_menu": (
@@ -54,18 +119,13 @@ class Deleter(loader.Module):
             "<blockquote>Select action:</blockquote>"
         ),
         "btn_usage": "Usage",
-        "btn_purger": "Purger",
         "btn_del_today": "Delete All Today",
+        "btn_wipe": "Wipe Entire Chat",
         "btn_back": "Back",
         "btn_confirm": "Confirm",
         "btn_cancel": "Cancel",
         "btn_stop": "Stop",
-        "purger_menu": (
-            "<b>Purger Mode</b>\n"
-            "<blockquote>Delete all new messages in this chat automatically.</blockquote>"
-        ),
-        "btn_enable_purger": "Enable Auto-Delete",
-        "btn_stop_all": "Stop All Active",
+        "btn_close": "Close",
         "purger_activated": (
             "<b>Purger Mode Activated</b>\n"
             "<blockquote>All new messages in this chat will be deleted.</blockquote>"
@@ -74,7 +134,6 @@ class Deleter(loader.Module):
             "<b>Purger Stopped</b>\n"
             "<blockquote>Auto-delete disabled for this chat.</blockquote>"
         ),
-        "all_purgers_stopped": "<b>All Active Purgers Stopped</b>",
         "del_today_confirm": (
             "<b>Are you sure?</b>\n"
             "<blockquote>This will delete ALL messages from everyone in this chat since 00:00 today.</blockquote>"
@@ -87,6 +146,37 @@ class Deleter(loader.Module):
             "<b>Done</b>\n"
             "<blockquote>Deleted {count} messages from today.</blockquote>"
         ),
+        "wipe_confirm": (
+            "<b>Wipe the entire chat?</b>\n"
+            "<blockquote>ALL messages from ALL members will be deleted, from the newest to the very first one. "
+            "This cannot be undone. In groups you need the right to delete messages of others.</blockquote>"
+        ),
+        "wipe_progress": (
+            "<b>Wiping chat...</b>\n"
+            "<blockquote>Collected: <code>{collected}</code>\n"
+            "Deleted: <code>{deleted}</code>\n"
+            "Failed: <code>{failed}</code>\n"
+            "Chunks on disk: <code>{disk}</code> (spilled total: <code>{spilled}</code>)\n"
+            "Speed: <code>{speed}</code> msg/s\n"
+            "Elapsed: <code>{elapsed}</code></blockquote>"
+        ),
+        "wipe_done": (
+            "<b>Chat wiped</b>\n"
+            "<blockquote>Chat: {chat}\n"
+            "Collected: <code>{collected}</code>\n"
+            "Deleted: <code>{deleted}</code>\n"
+            "Failed: <code>{failed}</code>\n"
+            "Chunks spilled to disk: <code>{spilled}</code>\n"
+            "Time: <code>{elapsed}</code></blockquote>"
+        ),
+        "wipe_stopped": (
+            "<b>Wipe stopped</b>\n"
+            "<blockquote>Deleted: <code>{deleted}</code>\n"
+            "Temporary chunks removed.</blockquote>"
+        ),
+        "wipe_running": "Wipe is already running in this chat",
+        "wipe_no_rights": "<b>Error:</b>\n<blockquote>No right to delete messages of other members in this chat</blockquote>",
+        "wipe_last_error": "\n<b>Last error:</b> <code>{error}</code>",
         "no_count": "<b>Error:</b> Provide a valid number of messages",
         "no_reply": "<b>Error:</b> Reply to a message",
         "no_user": "<b>Error:</b> User not found",
@@ -123,7 +213,12 @@ class Deleter(loader.Module):
             "<blockquote>"
             "<code>{prefix}del @username</code> - удалить все сообщения указанного пользователя\n"
             "<code>{prefix}del before</code> (реплай) - удалить все сообщения от всех до указанного сообщения\n"
-            "<code>{prefix}del after</code> (реплай) - удалить все сообщения от всех после указанного сообщения"
+            "<code>{prefix}del after</code> (реплай) - удалить все сообщения от всех после указанного сообщения\n"
+            "<code>{prefix}del</code> - кнопка <b>Полная очистка чата</b>: удалить все сообщения от всех участников, id сбрасываются чанками в /tmp"
+            "</blockquote>\n"
+            "<b>Purger:</b>\n"
+            "<blockquote>"
+            "<code>{prefix}purge</code> - включить авто-удаление всех новых сообщений в текущем чате, переживает перезагрузки, выключается только через инлайн форму"
             "</blockquote>"
         ),
         "main_menu": (
@@ -131,18 +226,13 @@ class Deleter(loader.Module):
             "<blockquote>Выберите действие:</blockquote>"
         ),
         "btn_usage": "Инструкция",
-        "btn_purger": "Purger",
         "btn_del_today": "Удалить все за сегодня",
+        "btn_wipe": "Полная очистка чата",
         "btn_back": "Назад",
         "btn_confirm": "Подтвердить",
         "btn_cancel": "Отмена",
         "btn_stop": "Остановить",
-        "purger_menu": (
-            "<b>Режим Purger</b>\n"
-            "<blockquote>Автоматическое удаление всех новых сообщений в этом чате.</blockquote>"
-        ),
-        "btn_enable_purger": "Включить авто-удаление",
-        "btn_stop_all": "Остановить все активные",
+        "btn_close": "Закрыть",
         "purger_activated": (
             "<b>Режим Purger активирован</b>\n"
             "<blockquote>Все новые сообщения в этом чате будут удалены.</blockquote>"
@@ -151,7 +241,6 @@ class Deleter(loader.Module):
             "<b>Purger остановлен</b>\n"
             "<blockquote>Авто-удаление отключено для этого чата.</blockquote>"
         ),
-        "all_purgers_stopped": "<b>Все активные Purger'ы остановлены</b>",
         "del_today_confirm": (
             "<b>Вы уверены?</b>\n"
             "<blockquote>Будут удалены ВСЕ сообщения от всех в этом чате с 00:00 сегодня.</blockquote>"
@@ -164,6 +253,37 @@ class Deleter(loader.Module):
             "<b>Готово</b>\n"
             "<blockquote>Удалено {count} сообщений за сегодня.</blockquote>"
         ),
+        "wipe_confirm": (
+            "<b>Полностью очистить чат?</b>\n"
+            "<blockquote>Будут удалены ВСЕ сообщения от ВСЕХ участников, от последнего до самого первого. "
+            "Отменить нельзя. В группах нужно право удалять чужие сообщения.</blockquote>"
+        ),
+        "wipe_progress": (
+            "<b>Очистка чата...</b>\n"
+            "<blockquote>Собрано: <code>{collected}</code>\n"
+            "Удалено: <code>{deleted}</code>\n"
+            "Ошибок: <code>{failed}</code>\n"
+            "Чанков на диске: <code>{disk}</code> (всего выгружено: <code>{spilled}</code>)\n"
+            "Скорость: <code>{speed}</code> сообщ/с\n"
+            "Прошло: <code>{elapsed}</code></blockquote>"
+        ),
+        "wipe_done": (
+            "<b>Чат очищен</b>\n"
+            "<blockquote>Чат: {chat}\n"
+            "Собрано: <code>{collected}</code>\n"
+            "Удалено: <code>{deleted}</code>\n"
+            "Ошибок: <code>{failed}</code>\n"
+            "Чанков выгружено на диск: <code>{spilled}</code>\n"
+            "Время: <code>{elapsed}</code></blockquote>"
+        ),
+        "wipe_stopped": (
+            "<b>Очистка остановлена</b>\n"
+            "<blockquote>Удалено: <code>{deleted}</code>\n"
+            "Временные чанки удалены.</blockquote>"
+        ),
+        "wipe_running": "Очистка уже идет в этом чате",
+        "wipe_no_rights": "<b>Ошибка:</b>\n<blockquote>Нет права удалять сообщения других участников в этом чате</blockquote>",
+        "wipe_last_error": "\n<b>Последняя ошибка:</b> <code>{error}</code>",
         "no_count": "<b>Ошибка:</b> Укажите корректное количество сообщений",
         "no_reply": "<b>Ошибка:</b> Ответьте на сообщение",
         "no_user": "<b>Ошибка:</b> Пользователь не найден",
@@ -191,15 +311,38 @@ class Deleter(loader.Module):
                 doc="UTC timezone offset. Used for .del today command",
                 validator=loader.validators.Integer(),
             ),
+            loader.ConfigValue(
+                "WIPE_RAM_LIMIT_MB",
+                256,
+                doc="RAM limit in MB for chat wipe. When the userbot process or the collected id buffer exceeds it, id chunks are written to /tmp instead of memory",
+                validator=loader.validators.Integer(minimum=16, maximum=2048),
+            ),
         )
+        self._wipe_tasks = {}
         self._deleter_topic = None
         self._asset_channel = None
         self._purger_tasks = {}
         self._purger_chats = set()
+        self._purger_locks = {}
+        self._purger_protected = {}
 
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
+
+        tmp = tempfile.gettempdir()
+        try:
+            for name in os.listdir(tmp):
+                if name.startswith(WIPE_PREFIX):
+                    shutil.rmtree(os.path.join(tmp, name), ignore_errors=True)
+        except Exception as e:
+            logger.error("[Deleter] Failed to clean stale wipe chunks: %s", e)
+
+        for key in list(self.get("purger_chats", {}) or {}):
+            try:
+                self._start_purger(int(key))
+            except Exception as e:
+                logger.error("[Deleter] Failed to restore purger for %s: %s", key, e)
 
         self._asset_channel = db.get("heroku.forums", "channel_id", None)
 
@@ -328,15 +471,15 @@ class Deleter(loader.Module):
 
         return deleted, failed
 
+    def _main_markup(self):
+        return [
+            [{"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"}],
+            [{"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"}],
+            [{"text": self.strings["btn_wipe"], "callback": self._cb_wipe_confirm, "style": "danger"}],
+        ]
+
     async def _cb_main_menu(self, call: InlineCall):
-        await call.edit(
-            self.strings["main_menu"],
-            reply_markup=[
-                [{"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"}],
-                [{"text": self.strings["btn_purger"], "callback": self._cb_purger_menu, "style": "primary"}],
-                [{"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"}],
-            ],
-        )
+        await call.edit(self.strings["main_menu"], reply_markup=self._main_markup())
 
     async def _cb_usage(self, call: InlineCall):
         prefix = self.get_prefix()
@@ -347,88 +490,100 @@ class Deleter(loader.Module):
             ],
         )
 
-    async def _cb_purger_menu(self, call: InlineCall):
-        await call.edit(
-            self.strings["purger_menu"],
-            reply_markup=[
-                [{"text": self.strings["btn_enable_purger"], "callback": self._cb_enable_purger, "style": "success"}],
-                [{"text": self.strings["btn_stop_all"], "callback": self._cb_stop_all_purgers, "style": "danger"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
-            ],
-        )
+    async def on_unload(self):
+        for task in self._purger_tasks.values():
+            task.cancel()
+        self._purger_tasks.clear()
+        self._purger_chats.clear()
+        for task in self._wipe_tasks.values():
+            task.cancel()
+        self._wipe_tasks.clear()
 
-    async def _cb_enable_purger(self, call: InlineCall):
-        chat_id = call.form["chat"]
+    def _purger_lock(self, chat_id: int) -> asyncio.Lock:
+        lock = self._purger_locks.get(chat_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._purger_locks[chat_id] = lock
+        return lock
 
-        if chat_id in self._purger_chats:
-            await call.answer("Purger already active in this chat", show_alert=True)
+    def _purger_save(self, chat_id: int, last_id: int, create: bool = False):
+        chats = dict(self.get("purger_chats", {}) or {})
+        key = str(chat_id)
+        if key not in chats and not create:
             return
+        chats[key] = last_id
+        self.set("purger_chats", chats)
 
+    def _purger_forget(self, chat_id: int):
+        chats = dict(self.get("purger_chats", {}) or {})
+        chats.pop(str(chat_id), None)
+        self.set("purger_chats", chats)
+
+    def _start_purger(self, chat_id: int):
         self._purger_chats.add(chat_id)
+        task = self._purger_tasks.get(chat_id)
+        if task and not task.done():
+            return
+        self._purger_tasks[chat_id] = asyncio.ensure_future(self._purger_worker(chat_id))
 
-        task = asyncio.create_task(self._purger_worker(chat_id))
-        self._purger_tasks[chat_id] = task
-
-        await call.edit(
-            self.strings["purger_activated"],
-            reply_markup=[
-                [{"text": self.strings["btn_stop"], "callback": self._cb_stop_purger, "args": (chat_id,), "style": "danger"}],
-            ],
-        )
+    def _stop_purger(self, chat_id: int):
+        self._purger_chats.discard(chat_id)
+        task = self._purger_tasks.pop(chat_id, None)
+        if task and not task.done():
+            task.cancel()
+        self._purger_protected.pop(chat_id, None)
+        self._purger_forget(chat_id)
 
     async def _cb_stop_purger(self, call: InlineCall, chat_id: int):
-        if chat_id in self._purger_tasks:
-            self._purger_tasks[chat_id].cancel()
-            del self._purger_tasks[chat_id]
-
-        if chat_id in self._purger_chats:
-            self._purger_chats.remove(chat_id)
-
+        self._stop_purger(chat_id)
         await call.edit(
             self.strings["purger_stopped"],
             reply_markup=[
-                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
+                [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
             ],
         )
 
-    async def _cb_stop_all_purgers(self, call: InlineCall):
-        for task in self._purger_tasks.values():
-            task.cancel()
-
-        self._purger_tasks.clear()
-        self._purger_chats.clear()
-
-        await call.edit(
-            self.strings["all_purgers_stopped"],
-            reply_markup=[
-                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
-            ],
-        )
+    async def _cb_close(self, call: InlineCall):
+        await call.delete()
 
     async def _purger_worker(self, chat_id: int):
+        lock = self._purger_lock(chat_id)
         try:
-            last_id = None
+            last_id = (self.get("purger_chats", {}) or {}).get(str(chat_id)) or 0
 
-            async for msg in self._client.iter_messages(chat_id, limit=1):
-                last_id = msg.id
-                break
+            if not last_id:
+                async with lock:
+                    async for msg in self._client.iter_messages(chat_id, limit=1):
+                        last_id = msg.id
+                        break
+                self._purger_save(chat_id, last_id)
 
             while chat_id in self._purger_chats:
                 await asyncio.sleep(2)
 
                 try:
-                    new_msgs = []
-                    async for msg in self._client.iter_messages(chat_id, min_id=last_id or 0):
-                        new_msgs.append(msg.id)
-                        if msg.id > (last_id or 0):
-                            last_id = msg.id
+                    async with lock:
+                        protected = self._purger_protected.get(chat_id, set())
+                        top_id = last_id
+                        new_msgs = []
+                        async for msg in self._client.iter_messages(chat_id, min_id=last_id):
+                            if msg.id > top_id:
+                                top_id = msg.id
+                            if msg.id not in protected:
+                                new_msgs.append(msg.id)
 
-                    if new_msgs:
-                        try:
-                            await self._client.delete_messages(chat_id, new_msgs)
-                        except Exception as e:
-                            logger.error("[Deleter] Purger delete error: %s", e)
+                        if new_msgs:
+                            try:
+                                await self._client.delete_messages(chat_id, new_msgs)
+                            except Exception as e:
+                                logger.error("[Deleter] Purger delete error: %s", e)
 
+                        if top_id != last_id:
+                            last_id = top_id
+                            self._purger_save(chat_id, last_id)
+
+                except asyncio.CancelledError:
+                    raise
                 except Exception as e:
                     logger.error("[Deleter] Purger iter error: %s", e)
                     await asyncio.sleep(5)
@@ -493,6 +648,192 @@ class Deleter(loader.Module):
                 ],
             )
 
+    async def _cb_wipe_confirm(self, call: InlineCall):
+        await call.edit(
+            self.strings["wipe_confirm"],
+            reply_markup=[
+                [
+                    {"text": self.strings["btn_confirm"], "callback": self._cb_wipe_execute, "style": "danger"},
+                    {"text": self.strings["btn_cancel"], "callback": self._cb_main_menu, "style": "primary"},
+                ],
+            ],
+        )
+
+    async def _wipe_allowed(self, chat_id):
+        try:
+            entity = await self._client.get_entity(chat_id)
+        except Exception:
+            return True
+        if isinstance(entity, User):
+            return True
+        try:
+            perms = await self._client.get_permissions(entity, "me")
+            return bool(perms.is_creator or perms.delete_messages)
+        except Exception:
+            return True
+
+    async def _cb_wipe_execute(self, call: InlineCall):
+        chat_id = call.form["chat"]
+        task = self._wipe_tasks.get(chat_id)
+        if task and not task.done():
+            await call.answer(self.strings["wipe_running"], show_alert=True)
+            return
+        if not await self._wipe_allowed(chat_id):
+            await call.edit(
+                self.strings["wipe_no_rights"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}]],
+            )
+            return
+        protected = {call.form.get("message_id")} - {None}
+        self._wipe_tasks[chat_id] = asyncio.ensure_future(self._wipe_run(call, chat_id, protected))
+
+    async def _cb_wipe_stop(self, call: InlineCall, chat_id):
+        task = self._wipe_tasks.get(chat_id)
+        if task and not task.done():
+            task.cancel()
+        else:
+            await call.delete()
+
+    def _wipe_text(self, key, state, spool, chat=""):
+        elapsed = max(time.monotonic() - state["started"], 0.001)
+        text = self.strings[key].format(
+            chat=chat,
+            collected=state["collected"],
+            deleted=state["deleted"],
+            failed=state["failed"],
+            disk=spool.on_disk if spool else 0,
+            spilled=spool.spilled if spool else 0,
+            speed=int(state["deleted"] / elapsed),
+            elapsed=str(timedelta(seconds=int(elapsed))),
+        )
+        if state.get("error") and key != "wipe_stopped":
+            text += self.strings["wipe_last_error"].format(error=utils.escape_html(state["error"][:200]))
+        return text
+
+    async def _wipe_collect(self, peer, spool, protected, state):
+        offset = 0
+        buf = array("q")
+        while True:
+            try:
+                res = await self._client(GetHistoryRequest(
+                    peer=peer,
+                    offset_id=offset,
+                    offset_date=None,
+                    add_offset=0,
+                    limit=WIPE_BATCH,
+                    max_id=0,
+                    min_id=0,
+                    hash=0,
+                ))
+            except FloodWaitError as e:
+                await asyncio.sleep(e.seconds + 1)
+                continue
+            ids = [m.id for m in res.messages if not isinstance(m, MessageEmpty)]
+            del res
+            if not ids:
+                break
+            offset = min(ids)
+            state["collected"] += len(ids)
+            buf.extend(i for i in ids if i not in protected)
+            while len(buf) >= WIPE_CHUNK:
+                spool.push(buf[:WIPE_CHUNK])
+                buf = buf[WIPE_CHUNK:]
+            if offset <= 1:
+                break
+        if buf:
+            spool.push(buf)
+        spool.queue.put_nowait(None)
+
+    async def _wipe_delete_part(self, peer, part, sem, state):
+        async with sem:
+            for _ in range(6):
+                try:
+                    res = await self._client.delete_messages(peer, part, revoke=True)
+                    affected = sum(getattr(r, "pts_count", 0) or 0 for r in (res or []))
+                    state["deleted"] += affected or len(part)
+                    return
+                except FloodWaitError as e:
+                    await asyncio.sleep(e.seconds + 1)
+                except Exception as e:
+                    state["error"] = str(e)
+                    break
+            state["failed"] += len(part)
+
+    async def _wipe_delete(self, peer, spool, state):
+        sem = asyncio.Semaphore(WIPE_PARALLEL)
+        while True:
+            item = await spool.queue.get()
+            if item is None:
+                break
+            ids = spool.load(item)
+            await asyncio.gather(*(
+                self._wipe_delete_part(peer, ids[i:i + WIPE_BATCH].tolist(), sem, state)
+                for i in range(0, len(ids), WIPE_BATCH)
+            ))
+            del ids
+            await asyncio.sleep(WIPE_DELAY)
+
+    async def _wipe_progress(self, call, chat_id, spool, state):
+        markup = [[{"text": self.strings["btn_stop"], "callback": self._cb_wipe_stop, "args": (chat_id,), "style": "danger"}]]
+        while True:
+            try:
+                await call.edit(self._wipe_text("wipe_progress", state, spool), reply_markup=markup)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+            await asyncio.sleep(WIPE_PROGRESS_EVERY)
+
+    async def _wipe_run(self, call, chat_id, protected):
+        state = {"collected": 0, "deleted": 0, "failed": 0, "error": None, "started": time.monotonic()}
+        spool = None
+        ticker = None
+        workers = []
+        back = [[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]]
+        try:
+            peer = await self._client.get_input_entity(chat_id)
+            spool = _IdSpool(int(self.config["WIPE_RAM_LIMIT_MB"]) * 1024 * 1024)
+            ticker = asyncio.ensure_future(self._wipe_progress(call, chat_id, spool, state))
+            workers = [
+                asyncio.ensure_future(self._wipe_collect(peer, spool, protected, state)),
+                asyncio.ensure_future(self._wipe_delete(peer, spool, state)),
+            ]
+            await asyncio.gather(*workers)
+            ticker.cancel()
+            try:
+                chat_name = (await self._client.get_entity(chat_id))
+                chat_name = getattr(chat_name, "title", None) or getattr(chat_name, "first_name", None) or str(chat_id)
+            except Exception:
+                chat_name = str(chat_id)
+            text = self._wipe_text("wipe_done", state, spool, chat=utils.escape_html(chat_name))
+            try:
+                await call.edit(text, reply_markup=back)
+            except Exception:
+                pass
+            await self._send_log(text)
+        except asyncio.CancelledError:
+            for w in workers:
+                w.cancel()
+            try:
+                await call.edit(self._wipe_text("wipe_stopped", state, spool), reply_markup=back)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.error("[Deleter] wipe error: %s", e)
+            for w in workers:
+                w.cancel()
+            try:
+                await call.edit(self.strings["error"].format(error=utils.escape_html(str(e))), reply_markup=back)
+            except Exception:
+                pass
+        finally:
+            if ticker:
+                ticker.cancel()
+            if spool:
+                spool.close()
+            if self._wipe_tasks.get(chat_id) is asyncio.current_task():
+                self._wipe_tasks.pop(chat_id, None)
+
     @loader.command(
         ru_doc="Быстрое удаление сообщений",
         en_doc="Swift message deletion",
@@ -506,11 +847,7 @@ class Deleter(loader.Module):
             await self.inline.form(
                 text=self.strings["main_menu"],
                 message=message,
-                reply_markup=[
-                    [{"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"}],
-                    [{"text": self.strings["btn_purger"], "callback": self._cb_purger_menu, "style": "primary"}],
-                    [{"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"}],
-                ],
+                reply_markup=self._main_markup(),
                 silent=True,
             )
             return
@@ -544,13 +881,34 @@ class Deleter(loader.Module):
             await self.inline.form(
                 text=self.strings["main_menu"],
                 message=message,
+                reply_markup=self._main_markup(),
+                silent=True,
+            )
+
+    @loader.command(
+        ru_doc="Включить Purger в текущем чате",
+        en_doc="Enable Purger in current chat",
+    )
+    async def purgecmd(self, message: Message):
+        """Enable Purger in current chat"""
+        chat_id = message.chat_id
+        async with self._purger_lock(chat_id):
+            if chat_id not in self._purger_chats:
+                self._purger_save(chat_id, 0, create=True)
+            self._start_purger(chat_id)
+
+            form = await self.inline.form(
+                text=self.strings["purger_activated"],
+                message=message,
                 reply_markup=[
-                    [{"text": self.strings["btn_usage"], "callback": self._cb_usage, "style": "primary"}],
-                    [{"text": self.strings["btn_purger"], "callback": self._cb_purger_menu, "style": "primary"}],
-                    [{"text": self.strings["btn_del_today"], "callback": self._cb_del_today_confirm, "style": "danger"}],
+                    [{"text": self.strings["btn_stop"], "callback": self._cb_stop_purger, "args": (chat_id,), "style": "danger"}],
                 ],
                 silent=True,
             )
+
+            form_id = (getattr(form, "form", None) or {}).get("message_id") if form else None
+            if form_id:
+                self._purger_protected.setdefault(chat_id, set()).add(form_id)
 
     async def _get_chat_name(self, message: Message) -> str:
         try:
