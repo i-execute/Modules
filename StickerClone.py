@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 2, 0)
+__version__ = (1, 2, 1)
 # meta developer: Execute_forge.t.me
 
 import asyncio
@@ -189,10 +189,15 @@ class StickerClone(loader.Module):
         "sadd_pack_detail": (
             "<b>Sadd - Pack Selected</b>\n"
             "<blockquote>{title}\n"
-            "@{short}\n"
+            "<a href='{url}'>{short}</a>\n"
             "Stickers: {count}</blockquote>"
         ),
         "sadd_btn_select": "Add Here",
+        "floodwait": "\n<blockquote>Got floodwait, waiting {wait} + {rand} seconds</blockquote>",
+        "source_is_emoji": (
+            "<b>Emoji Pack</b>\n"
+            "<blockquote>This link points to a custom emoji pack. Use EmojiClone for emoji packs.</blockquote>"
+        ),
         "sadd_input_source": "Send source pack link (https://t.me/addstickers/PackName):",
         "sadd_ask_source": (
             "<b>Target Pack: {title}</b>\n"
@@ -359,10 +364,15 @@ class StickerClone(loader.Module):
         "sadd_pack_detail": (
             "<b>Sadd - Пак выбран</b>\n"
             "<blockquote>{title}\n"
-            "@{short}\n"
+            "<a href='{url}'>{short}</a>\n"
             "Стикеров: {count}</blockquote>"
         ),
         "sadd_btn_select": "Добавить сюда",
+        "floodwait": "\n<blockquote>Словил флудвейт, жду {wait} + {rand} секунд</blockquote>",
+        "source_is_emoji": (
+            "<b>Это эмодзи-пак</b>\n"
+            "<blockquote>По ссылке набор кастом-эмодзи. Для эмодзи-паков используйте EmojiClone.</blockquote>"
+        ),
         "sadd_input_source": "Отправьте ссылку на исходный пак (https://t.me/addstickers/PackName):",
         "sadd_ask_source": (
             "<b>Целевой пак: {title}</b>\n"
@@ -412,7 +422,6 @@ class StickerClone(loader.Module):
             "source_documents": None,
             "new_short": None,
             "name": None,
-            "is_emoji": False,
         }
         self._sadd_state = {
             "packs": [],
@@ -438,10 +447,10 @@ class StickerClone(loader.Module):
             from telethon.tl.types import DocumentAttributeSticker, DocumentAttributeCustomEmoji
             for attr in doc.attributes:
                 if isinstance(attr, (DocumentAttributeSticker, DocumentAttributeCustomEmoji)):
-                    return attr.alt or "⭐"
+                    return attr.alt or "\u2b50"
         except Exception:
             pass
-        return "⭐"
+        return "\u2b50"
 
     def _extract_sticker_doc(self, message):
         from telethon.tl.types import MessageMediaDocument, DocumentAttributeSticker, DocumentAttributeCustomEmoji
@@ -453,10 +462,46 @@ class StickerClone(loader.Module):
         doc = getattr(media, "document", None)
         if not doc:
             return None
+        if any(isinstance(attr, DocumentAttributeCustomEmoji) for attr in doc.attributes):
+            return None
         for attr in doc.attributes:
-            if isinstance(attr, (DocumentAttributeSticker, DocumentAttributeCustomEmoji)):
+            if isinstance(attr, DocumentAttributeSticker):
                 return doc
         return None
+
+    def _pack_url(self, pack):
+        kind = "addemoji" if getattr(pack, "emojis", False) else "addstickers"
+        return f"https://t.me/{kind}/{pack.short_name}"
+
+    async def _get_own_packs(self, emojis: bool):
+        from telethon.tl.functions.messages import GetMyStickersRequest
+        packs = []
+        seen = set()
+        offset_id = 0
+        for _ in range(50):
+            result = await self._client(GetMyStickersRequest(offset_id=offset_id, limit=100))
+            sets = [item.set for item in result.sets if item.set.id not in seen]
+            if not sets:
+                break
+            for pack in sets:
+                seen.add(pack.id)
+                if bool(getattr(pack, "emojis", False)) == emojis:
+                    packs.append(pack)
+            offset_id = sets[-1].id
+            if len(seen) >= (getattr(result, "count", 0) or 0):
+                break
+        return packs
+
+    async def _sleep_floodwait(self, call, text, e):
+        wait_secs = e.seconds
+        rand_secs = random.randint(1, 10)
+        total_wait = wait_secs + rand_secs
+        try:
+            await call.edit(text + self.strings["floodwait"].format(wait=wait_secs, rand=rand_secs))
+        except Exception:
+            pass
+        logger.info(f"[Stickerclone] FloodWait {wait_secs}s, sleeping {total_wait}s")
+        await asyncio.sleep(total_wait)
 
     async def _resize_static(self, raw: bytes, size: int = 512):
         try:
@@ -727,7 +772,6 @@ class StickerClone(loader.Module):
         await call.delete()
 
     async def _cb_set_source(self, call: InlineCall, query: str):
-        from telethon.tl.types import DocumentAttributeCustomEmoji
         link = query.strip()
         short_name = self._extract_short_name(link)
 
@@ -755,17 +799,21 @@ class StickerClone(loader.Module):
             )
             return
 
-        is_emoji = any(
-            isinstance(attr, DocumentAttributeCustomEmoji)
-            for doc in result.documents
-            for attr in doc.attributes
-        )
+        if getattr(result.set, "emojis", False):
+            logger.info(f"[Stickerclone] Source rejected, emoji pack: {short_name}")
+            await call.edit(
+                self.strings["source_is_emoji"],
+                reply_markup=[
+                    [{"text": self.strings["btn_retry"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"}],
+                    [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}],
+                ],
+            )
+            return
 
         self._state["source_link"] = link
         self._state["source_short"] = short_name
         self._state["source_documents"] = result.documents
-        self._state["is_emoji"] = is_emoji
-        logger.info(f"[Stickerclone] Source set: {short_name}, {len(result.documents)} stickers, is_emoji={is_emoji}")
+        logger.info(f"[Stickerclone] Source set: {short_name}, {len(result.documents)} stickers")
 
         await call.edit(
             self.strings["source_set"].format(link=link, count=len(result.documents)),
@@ -847,10 +895,9 @@ class StickerClone(loader.Module):
         documents = self._state["source_documents"]
         pack_title = self._state["name"]
         short_name = self._state["new_short"]
-        is_emoji = self._state.get("is_emoji", False)
         total = len(documents)
 
-        logger.info(f"[Stickerclone] Starting copy: title='{pack_title}' short='{short_name}' total={total} emojis={is_emoji}")
+        logger.info(f"[Stickerclone] Starting copy: title='{pack_title}' short='{short_name}' total={total}")
 
         pack_created = False
         copied = 0
@@ -867,7 +914,7 @@ class StickerClone(loader.Module):
                 logger.debug(f"[Stickerclone] Sticker {i}/{total} emoji={emoji} mime={doc.mime_type}")
 
                 try:
-                    input_doc, sticker_type = await self._process_sticker(doc, is_emoji)
+                    input_doc, sticker_type = await self._process_sticker(doc, False)
                     if input_doc is None:
                         failed += 1
                         logger.warning(f"[Stickerclone] Sticker {i}/{total} process failed")
@@ -879,7 +926,6 @@ class StickerClone(loader.Module):
                             title=pack_title,
                             short_name=short_name,
                             stickers=[InputStickerSetItem(document=input_doc, emoji=emoji)],
-                            emojis=is_emoji,
                         ))
                         pack_created = True
                         copied += 1
@@ -894,20 +940,11 @@ class StickerClone(loader.Module):
                     break
 
                 except FloodWaitError as e:
-                    wait_secs = e.seconds
-                    rand_secs = random.randint(1, 10)
-                    total_wait = wait_secs + rand_secs
-
-                    try:
-                        await call.edit(
-                            self.strings["copying"].format(current=i, total=total, name=pack_title) +
-                            f"\n<blockquote>Got floodwait, waiting {wait_secs} + {rand_secs} seconds</blockquote>"
-                        )
-                    except Exception:
-                        pass
-
-                    logger.info(f"[Stickerclone] FloodWait {wait_secs}s, sleeping {total_wait}s")
-                    await asyncio.sleep(total_wait)
+                    await self._sleep_floodwait(
+                        call,
+                        self.strings["copying"].format(current=i, total=total, name=pack_title),
+                        e,
+                    )
                     continue
 
                 except PackShortNameOccupiedError:
@@ -943,7 +980,6 @@ class StickerClone(loader.Module):
             "source_documents": None,
             "new_short": None,
             "name": None,
-            "is_emoji": False,
         }
 
         logger.info(f"[Stickerclone] Done. copied={copied} failed={failed} total={total}")
@@ -984,8 +1020,9 @@ class StickerClone(loader.Module):
         pack = s["packs"][pack_index]
         await call.edit(
             self.strings["sadd_pack_detail"].format(
-                title=pack.title,
+                title=utils.escape_html(pack.title),
                 short=pack.short_name,
+                url=self._pack_url(pack),
                 count=pack.count,
             ),
             reply_markup=[
@@ -1001,7 +1038,7 @@ class StickerClone(loader.Module):
         s = self._sadd_state
         pack = s["packs"][pack_index]
         s["target_short"] = pack.short_name
-        s["target_title"] = pack.title
+        s["target_title"] = utils.escape_html(pack.title)
         s["target_count"] = pack.count
         logger.info(f"[Stickerclone] sadd target selected: {pack.short_name}")
 
@@ -1031,20 +1068,18 @@ class StickerClone(loader.Module):
         await call.edit(self.strings["sadd_adding"])
 
         try:
-            await self._client(AddStickerToSetRequest(
-                stickerset=InputStickerSetShortName(short_name=target_short),
-                sticker=InputStickerSetItem(
-                    document=InputDocument(doc.id, doc.access_hash, doc.file_reference),
-                    emoji=emoji,
-                ),
-            ))
-        except FloodWaitError as e:
-            logger.info(f"[Stickerclone] sadd reply FloodWait {e.seconds}s")
-            await call.edit(
-                self.strings["sadd_fail"].format(error=f"FloodWait {e.seconds}s"),
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-            )
-            return
+            while True:
+                try:
+                    await self._client(AddStickerToSetRequest(
+                        stickerset=InputStickerSetShortName(short_name=target_short),
+                        sticker=InputStickerSetItem(
+                            document=InputDocument(doc.id, doc.access_hash, doc.file_reference),
+                            emoji=emoji,
+                        ),
+                    ))
+                    break
+                except FloodWaitError as e:
+                    await self._sleep_floodwait(call, self.strings["sadd_adding"], e)
         except Exception as e:
             logger.error(f"[Stickerclone] sadd reply add error: {e}")
             await call.edit(
@@ -1082,6 +1117,17 @@ class StickerClone(loader.Module):
         if not result or not result.documents:
             await call.edit(
                 self.strings["source_invalid_resolve"],
+                reply_markup=[
+                    [{"text": self.strings["btn_retry"], "input": self.strings["sadd_input_source"], "handler": self._cb_sadd_set_source, "style": "primary"}],
+                    [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
+                ],
+            )
+            return
+
+        if getattr(result.set, "emojis", False):
+            logger.info(f"[Stickerclone] sadd source rejected, emoji pack: {short_name}")
+            await call.edit(
+                self.strings["source_is_emoji"],
                 reply_markup=[
                     [{"text": self.strings["btn_retry"], "input": self.strings["sadd_input_source"], "handler": self._cb_sadd_set_source, "style": "primary"}],
                     [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
@@ -1139,20 +1185,18 @@ class StickerClone(loader.Module):
         target_short = s["target_short"]
 
         try:
-            await self._client(AddStickerToSetRequest(
-                stickerset=InputStickerSetShortName(short_name=target_short),
-                sticker=InputStickerSetItem(
-                    document=InputDocument(doc.id, doc.access_hash, doc.file_reference),
-                    emoji=emoji,
-                ),
-            ))
-        except FloodWaitError as e:
-            logger.info(f"[Stickerclone] sadd FloodWait {e.seconds}s")
-            await call.edit(
-                self.strings["sadd_fail"].format(error=f"FloodWait {e.seconds}s"),
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-            )
-            return
+            while True:
+                try:
+                    await self._client(AddStickerToSetRequest(
+                        stickerset=InputStickerSetShortName(short_name=target_short),
+                        sticker=InputStickerSetItem(
+                            document=InputDocument(doc.id, doc.access_hash, doc.file_reference),
+                            emoji=emoji,
+                        ),
+                    ))
+                    break
+                except FloodWaitError as e:
+                    await self._sleep_floodwait(call, self.strings["sadd_adding"], e)
         except Exception as e:
             logger.error(f"[Stickerclone] sadd add error: {e}")
             await call.edit(
@@ -1187,13 +1231,10 @@ class StickerClone(loader.Module):
     )
     async def sadd(self, message):
         """Add a sticker to your own pack - without reply opens pack and source menu, reply to a sticker adds it directly"""
-        from telethon.tl.functions.messages import GetMyStickersRequest
-
         reply = await message.get_reply_message()
         reply_doc = self._extract_sticker_doc(reply)
 
-        result = await self._client(GetMyStickersRequest(offset_id=0, limit=100))
-        packs = [item.set for item in result.sets]
+        packs = await self._get_own_packs(emojis=False)
         logger.info(f"[Stickerclone] sadd: {len(packs)} own packs found, reply_doc={'yes' if reply_doc else 'no'}")
 
         self._sadd_state = {
