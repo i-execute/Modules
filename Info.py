@@ -2,11 +2,11 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (2, 1, 3)
+__version__ = (2, 2, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Info/MetaBanner.jpeg
 
-from telethon.tl.types import User, Channel, Message, InputPhotoFileLocation
+from telethon.tl.types import User, Channel, Message, InputPhotoFileLocation, InputMediaWebPage
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.messages import GetFullChatRequest
@@ -14,27 +14,80 @@ from telethon import functions
 from .. import loader, utils
 import os
 import io
+import json
+import logging
 import asyncio
 import tempfile
 
 import aiohttp
 from PIL import Image
 
-async def _upload_to_x0(data: bytes, filename: str, content_type: str) -> str:
+logger = logging.getLogger(__name__)
+
+UPLOAD_UA = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0"
+
+UPLOAD_PROVIDERS = {
+    "x0.at": {
+        "url": "https://x0.at",
+        "field": "file",
+        "extra": {},
+    },
+    "uguu.se": {
+        "url": "https://uguu.se/upload?output=text",
+        "field": "files[]",
+        "extra": {},
+    },
+    "pomf.lain.la": {
+        "url": "https://pomf.lain.la/upload.php",
+        "field": "files[]",
+        "extra": {},
+    },
+}
+
+
+def _parse_upload_url(text: str, base: str = "") -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+    try:
+        data = json.loads(text)
+    except Exception:
+        first = text.splitlines()[0].strip()
+        return first if first.startswith("http") and " " not in first else ""
+    queue = [data]
+    while queue:
+        item = queue.pop(0)
+        if isinstance(item, dict):
+            for key in ("url", "src", "link"):
+                value = item.get(key)
+                if isinstance(value, str):
+                    return base + value if value.startswith("/") else value
+            queue += list(item.values())
+        elif isinstance(item, list):
+            queue += item
+    return ""
+
+
+async def _upload_via(provider: str, data: bytes, filename: str, content_type: str, timeout: int = 60) -> str:
+    cfg = UPLOAD_PROVIDERS.get(provider) or UPLOAD_PROVIDERS["x0.at"]
     try:
         form = aiohttp.FormData()
-        form.add_field("file", data, filename=filename, content_type=content_type)
-        async with aiohttp.ClientSession() as s:
+        for key, value in cfg["extra"].items():
+            form.add_field(key, value)
+        form.add_field(cfg["field"], data, filename=filename, content_type=content_type)
+        async with aiohttp.ClientSession(headers={"User-Agent": UPLOAD_UA}) as s:
             async with s.post(
-                "https://x0.at",
+                cfg["url"],
                 data=form,
-                timeout=aiohttp.ClientTimeout(total=60),
+                timeout=aiohttp.ClientTimeout(total=timeout),
             ) as r:
-                text = (await r.text()).strip()
-                if text.startswith("http"):
-                    return text
-    except Exception:
-        pass
+                text = await r.text()
+                url = _parse_upload_url(text, cfg.get("base", ""))
+                if url:
+                    return url
+                logger.warning("Upload to %s failed: HTTP %s: %s", provider, r.status, text.strip()[:120])
+    except Exception as e:
+        logger.warning("Upload to %s failed: %s: %s", provider, type(e).__name__, e)
     return ""
 
 
@@ -117,6 +170,8 @@ class Info(loader.Module):
         "type_channel": "Channel",
         "type_supergroup": "Supergroup",
         "type_group": "Group",
+        "fetching": "<b>Fetching data...</b>",
+        "cfg_upload_provider": "File hosting used to upload the avatar for the link preview",
     }
 
     strings_ru = {
@@ -179,9 +234,19 @@ class Info(loader.Module):
         "type_channel": "Канал",
         "type_supergroup": "Супергруппа",
         "type_group": "Группа",
+        "fetching": "<b>Получаю данные...</b>",
+        "cfg_upload_provider": "Файлообменник для загрузки аватарки в превью ссылки",
     }
 
     def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "UPLOAD_PROVIDER",
+                "x0.at",
+                lambda: self.strings("cfg_upload_provider"),
+                validator=loader.validators.Choice(list(UPLOAD_PROVIDERS)),
+            ),
+        )
         self._premium_status = None
 
     async def _check_premium(self, client):
@@ -319,6 +384,14 @@ class Info(loader.Module):
                     return None
         return None
 
+    def _format_info(self, key, **fields):
+        template = self.strings(key)
+        if not fields.get("username"):
+            template = "\n".join(
+                line for line in template.split("\n") if "{username}" not in line
+            )
+        return template.format(**fields)
+
     def _build_user_info_text(self, user, is_premium):
         first = user.first_name or ""
         last = user.last_name or ""
@@ -328,12 +401,14 @@ class Info(loader.Module):
         if username and username.strip():
             username_text = f"<u>@{utils.escape_html(username)}</u>"
         else:
-            username_text = f'<a href="tg://user?id={user.id}">{display_name}</a>'
+            username_text = ""
+            display_name = f'<a href="tg://user?id={user.id}">{display_name}</a>'
         dc = self._get_dc(user)
         prefix = "prem" if is_premium else "noprem"
         suffix = "_full" if dc else "_no_dc"
         key = f"{prefix}_user{suffix}"
-        return self.strings(key).format(
+        return self._format_info(
+            key,
             name=display_name,
             username=username_text,
             user_id=user.id,
@@ -346,7 +421,7 @@ class Info(loader.Module):
         if username and username.strip():
             username_text = f"<u>@{utils.escape_html(username)}</u>"
         else:
-            username_text = "—"
+            username_text = ""
         if isinstance(chat, Channel):
             if chat.megagroup:
                 chat_type = self.strings("type_supergroup")
@@ -358,7 +433,8 @@ class Info(loader.Module):
         prefix = "prem" if is_premium else "noprem"
         suffix = "_full" if dc else "_no_dc"
         key = f"{prefix}_chat{suffix}"
-        return self.strings(key).format(
+        return self._format_info(
+            key,
             name=name,
             username=username_text,
             chat_id=chat.id,
@@ -373,129 +449,51 @@ class Info(loader.Module):
             except Exception:
                 pass
 
-    async def _send_error(self, message: Message, text):
-        topic_id = self._get_topic_id(message)
-        await asyncio.gather(
-            message.delete(),
-            message.client.send_message(
-                message.chat_id,
-                text,
-                reply_to=topic_id,
-                parse_mode="HTML",
-            ),
-        )
-
-    async def _send_result(self, message: Message, text, reply_to_msg_id=None):
-        topic_id = self._get_topic_id(message)
-        reply_to = reply_to_msg_id or topic_id
-        await asyncio.gather(
-            message.delete(),
-            message.client.send_message(
-                message.chat_id,
-                text,
-                reply_to=reply_to,
-                parse_mode="HTML",
-            ),
-        )
-
-    async def _send_photo_preview(self, message: Message, text, avatar_path, reply_to_msg_id=None):
-        topic_id = self._get_topic_id(message)
-        reply_to = reply_to_msg_id or topic_id
-        img_url = ""
+    async def _send_preview(self, message: Message, text, avatar_path, is_video=False):
+        media_url = ""
         try:
             with open(avatar_path, "rb") as f:
                 raw = f.read()
-            jpeg_data = _normalize_to_jpeg(raw)
-            img_url = await _upload_to_x0(jpeg_data, "avatar.jpg", "image/jpeg")
+            if is_video:
+                media_url = await _upload_via(
+                    self.config["UPLOAD_PROVIDER"], raw, "avatar.mp4", "video/mp4"
+                )
+            else:
+                media_url = await _upload_via(
+                    self.config["UPLOAD_PROVIDER"], _normalize_to_jpeg(raw), "avatar.jpg", "image/jpeg"
+                )
         except Exception:
-            pass
-        delete_task = asyncio.ensure_future(message.delete())
-        if img_url:
+            logger.exception("Failed to prepare avatar")
+        if media_url:
             try:
                 await message.client(
-                    functions.messages.GetWebPageRequest(url=img_url, hash=0)
+                    functions.messages.GetWebPageRequest(url=media_url, hash=0)
                 )
             except Exception:
                 pass
             await asyncio.sleep(1)
-            await delete_task
-            sent = await message.client.send_message(
-                message.chat_id,
-                text,
-                reply_to=reply_to,
-                parse_mode="HTML",
-            )
             try:
-                from telethon.tl.types import InputMediaWebPage
-                await sent.edit(
+                await utils.answer(
+                    message,
                     text,
-                    file=InputMediaWebPage(img_url, optional=True),
+                    file=InputMediaWebPage(media_url, optional=True),
                     parse_mode="HTML",
                     link_preview=True,
                     invert_media=True,
                 )
                 return
             except Exception:
-                pass
-        else:
-            await delete_task
-        await message.client.send_message(
-            message.chat_id,
-            text,
-            file=avatar_path,
-            reply_to=reply_to,
-            parse_mode="HTML",
-        )
-
-    async def _send_video_preview(self, message: Message, text, avatar_path, reply_to_msg_id=None):
-        topic_id = self._get_topic_id(message)
-        reply_to = reply_to_msg_id or topic_id
-        video_url = ""
-        try:
-            with open(avatar_path, "rb") as f:
-                raw = f.read()
-            video_url = await _upload_to_x0(raw, "avatar.mp4", "video/mp4")
-        except Exception:
-            pass
-        delete_task = asyncio.ensure_future(message.delete())
-        if video_url:
-            try:
-                await message.client(
-                    functions.messages.GetWebPageRequest(url=video_url, hash=0)
-                )
-            except Exception:
-                pass
-            await asyncio.sleep(1)
-            await delete_task
-            sent = await message.client.send_message(
-                message.chat_id,
-                text,
-                reply_to=reply_to,
-                parse_mode="HTML",
-            )
-            try:
-                from telethon.tl.types import InputMediaWebPage
-                await sent.edit(
-                    text,
-                    file=InputMediaWebPage(video_url, optional=True),
-                    parse_mode="HTML",
-                    link_preview=True,
-                    invert_media=True,
-                )
-                return
-            except Exception:
-                pass
-        else:
-            await delete_task
+                logger.exception("Failed to attach link preview")
+        extra = {"supports_streaming": True, "attributes": []} if is_video else {}
         await message.client.send_file(
             message.chat_id,
             avatar_path,
             caption=text,
-            reply_to=reply_to,
+            reply_to=message.reply_to_msg_id or self._get_topic_id(message),
             parse_mode="HTML",
-            supports_streaming=True,
-            attributes=[],
+            **extra,
         )
+        await message.delete()
 
     @loader.command(
         ru_doc="Инфо о пользователе (+ для аватарки)",
@@ -504,6 +502,7 @@ class Info(loader.Module):
     async def who(self, message: Message):
         """User info (+ for avatar)"""
         args = utils.get_args_raw(message) or ""
+        msg = await utils.answer(message, self.strings("fetching"))
         with_photo = "+" in args
         clean_args = args.replace("+", "").strip()
         is_premium = await self._check_premium(message.client)
@@ -511,37 +510,21 @@ class Info(loader.Module):
         if clean_args and not clean_args.lstrip("-").isdigit():
             username = clean_args
         user = await self._get_target_user(message, username)
-        if not user:
-            await self._send_error(
-                message, self._get_error_string("error_reply", is_premium)
-            )
+        if not isinstance(user, User):
+            await utils.answer(msg, self._get_error_string("error_reply", is_premium))
             return
         text = self._build_user_info_text(user, is_premium)
-        reply_to_msg_id = None
-        if message.is_reply:
-            reply = await message.get_reply_message()
-            if reply:
-                reply_to_msg_id = reply.id
-        if with_photo:
-            avatar, is_video = await self._get_avatar(message.client, user)
-            if not avatar:
-                await self._send_error(
-                    message, self._get_error_string("no_photo_msg", is_premium)
-                )
-                return
-            try:
-                if is_video:
-                    await self._send_video_preview(
-                        message, text, avatar, reply_to_msg_id=reply_to_msg_id
-                    )
-                else:
-                    await self._send_photo_preview(
-                        message, text, avatar, reply_to_msg_id=reply_to_msg_id
-                    )
-            finally:
-                await self._cleanup_file(avatar)
-        else:
-            await self._send_result(message, text, reply_to_msg_id=reply_to_msg_id)
+        if not with_photo:
+            await utils.answer(msg, text)
+            return
+        avatar, is_video = await self._get_avatar(message.client, user)
+        if not avatar:
+            await utils.answer(msg, self._get_error_string("no_photo_msg", is_premium))
+            return
+        try:
+            await self._send_preview(msg, text, avatar, is_video)
+        finally:
+            await self._cleanup_file(avatar)
 
     @loader.command(
         ru_doc="Инфо о группе/канале (+ для аватарки)",
@@ -550,28 +533,22 @@ class Info(loader.Module):
     async def where(self, message: Message):
         """Group/channel info (+ for avatar)"""
         args = utils.get_args_raw(message) or ""
+        msg = await utils.answer(message, self.strings("fetching"))
         with_photo = "+" in args
         is_premium = await self._check_premium(message.client)
         chat = await message.get_chat()
         if isinstance(chat, User):
-            await self._send_error(
-                message, self._get_error_string("not_a_chat", is_premium)
-            )
+            await utils.answer(msg, self._get_error_string("not_a_chat", is_premium))
             return
         text = self._build_chat_info_text(chat, is_premium)
-        if with_photo:
-            avatar, is_video = await self._get_avatar(message.client, chat)
-            if not avatar:
-                await self._send_error(
-                    message, self._get_error_string("no_chat_photo", is_premium)
-                )
-                return
-            try:
-                if is_video:
-                    await self._send_video_preview(message, text, avatar)
-                else:
-                    await self._send_photo_preview(message, text, avatar)
-            finally:
-                await self._cleanup_file(avatar)
-        else:
-            await self._send_result(message, text)
+        if not with_photo:
+            await utils.answer(msg, text)
+            return
+        avatar, is_video = await self._get_avatar(message.client, chat)
+        if not avatar:
+            await utils.answer(msg, self._get_error_string("no_chat_photo", is_premium))
+            return
+        try:
+            await self._send_preview(msg, text, avatar, is_video)
+        finally:
+            await self._cleanup_file(avatar)
