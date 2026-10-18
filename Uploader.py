@@ -2,11 +2,10 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 3, 1)
-# meta developer: Execute_forge.t.me
+__version__ = (1, 2, 6)
+# meta developer: I_execute.t.me
 
 import os
-import json
 import asyncio
 import logging
 import time
@@ -18,35 +17,6 @@ from ..inline.types import InlineCall
 logger = logging.getLogger(__name__)
 
 MAX_FILE_SIZE = 512 * 1024 * 1024
-
-UA = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0"
-
-PROVIDERS = {
-    "tempsh": {"label": "temp.sh", "btn": "btn_tempsh"},
-    "uguu": {"label": "uguu.se", "btn": "btn_uguu"},
-    "tmpfiles": {"label": "tmpfiles.org", "btn": "btn_tmpfiles"},
-    "x0.at": {"label": "x0.at", "btn": "btn_x0"},
-    "litterbox": {"label": "litterbox.catbox.moe", "btn": "btn_litter"},
-}
-
-
-def _parse_url(host, text):
-    text = (text or "").strip()
-    if not text:
-        return None
-    if host == "tmpfiles":
-        try:
-            url = json.loads(text)["data"]["url"]
-        except Exception:
-            return None
-        url = url.replace("http://", "https://", 1)
-        if "tmpfiles.org/dl/" not in url:
-            url = url.replace("tmpfiles.org/", "tmpfiles.org/dl/", 1)
-        return url
-    first = text.splitlines()[0].strip()
-    if first.startswith("http") and " " not in first:
-        return first
-    return None
 
 
 def _escape(text):
@@ -171,7 +141,7 @@ ALLOWED_EXTENSIONS = {
 
 @loader.tds
 class Uploader(loader.Module):
-    """Upload files to temp.sh, uguu.se, tmpfiles.org, x0.at or litterbox"""
+    """Upload files to x0.at or litterbox.catbox.moe"""
 
     strings = {
         "name": "Uploader",
@@ -251,10 +221,6 @@ class Uploader(loader.Module):
         ),
         "killed": "<b>Upload cancelled</b>",
         "btn_close": "Close",
-        "btn_back": "Back",
-        "btn_tempsh": "temp.sh (3d)",
-        "btn_uguu": "uguu.se",
-        "btn_tmpfiles": "tmpfiles.org",
         "btn_x0": "x0.at",
         "btn_litter": "litterbox (72h)",
         "btn_kill": "Kill",
@@ -337,10 +303,6 @@ class Uploader(loader.Module):
         ),
         "killed": "<b>Загрузка отменена</b>",
         "btn_close": "Закрыть",
-        "btn_back": "Назад",
-        "btn_tempsh": "temp.sh (3d)",
-        "btn_uguu": "uguu.se",
-        "btn_tmpfiles": "tmpfiles.org",
         "btn_x0": "x0.at",
         "btn_litter": "litterbox (72h)",
         "btn_kill": "Kill",
@@ -349,6 +311,34 @@ class Uploader(loader.Module):
     def __init__(self):
         self._upload_procs = {}
         self._pending_files = {}
+        self._download_tasks = {}
+        self._stop_events = {}
+        self._timer_tasks = {}
+        self._killed = set()
+
+    def _kill_markup(self, uid):
+        return [[
+            {
+                "text": self.strings["btn_kill"],
+                "callback": self._cb_kill,
+                "args": (uid,),
+                "style": "danger",
+            }
+        ]]
+
+    def _close_markup(self):
+        return [[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]]
+
+    async def _stop_timer(self, uid):
+        event = self._stop_events.pop(uid, None)
+        if event:
+            event.set()
+        task = self._timer_tasks.pop(uid, None)
+        if task and task is not asyncio.current_task() and not task.done():
+            try:
+                await task
+            except BaseException:
+                pass
 
     def _s(self, key, **kwargs):
         prefix = self.get_prefix()
@@ -432,34 +422,16 @@ class Uploader(loader.Module):
     def _cleanup(self, uid, tmp_path):
         self._upload_procs.pop(uid, None)
         self._pending_files.pop(uid, None)
+        self._download_tasks.pop(uid, None)
+        if not tmp_path:
+            return
         try:
             os.remove(tmp_path)
         except Exception:
             pass
 
     def _make_curl_args(self, host, tmp_path):
-        ua = UA
-        if host == "tempsh":
-            return [
-                "curl", "-sL", "--max-time", "120",
-                "-A", ua,
-                "-F", f"file=@{tmp_path}",
-                "https://temp.sh/upload",
-            ]
-        if host == "uguu":
-            return [
-                "curl", "-sL", "--max-time", "120",
-                "-A", ua,
-                "-F", f"files[]=@{tmp_path}",
-                "https://uguu.se/upload?output=text",
-            ]
-        if host == "tmpfiles":
-            return [
-                "curl", "-sL", "--max-time", "120",
-                "-A", ua,
-                "-F", f"file=@{tmp_path}",
-                "https://tmpfiles.org/api/v1/upload",
-            ]
+        ua = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0"
         if host == "x0.at":
             return [
                 "curl", "-sL", "--max-time", "120",
@@ -478,84 +450,54 @@ class Uploader(loader.Module):
             ]
         return []
 
-    async def _cb_close(self, call: InlineCall, uid=None):
-        if uid is not None:
-            data = self._pending_files.pop(uid, None)
-            self._upload_procs.pop(uid, None)
-            if data:
-                try:
-                    os.remove(data[0])
-                except Exception:
-                    pass
+    async def _cb_close(self, call: InlineCall):
+        await call.delete()
+
+    async def _cb_close_pending(self, call: InlineCall, uid):
+        data = self._pending_files.pop(uid, None)
+        if data:
+            try:
+                os.remove(data[0])
+            except Exception:
+                pass
         await call.delete()
 
     async def _cb_kill(self, call: InlineCall, uid):
-        proc = self._upload_procs.get(uid)
+        self._killed.add(uid)
+        await self._stop_timer(uid)
+        task = self._download_tasks.pop(uid, None)
+        if task and not task.done():
+            task.cancel()
+        proc = self._upload_procs.pop(uid, None)
         if proc:
             try:
                 proc.kill()
             except Exception:
                 pass
         data = self._pending_files.pop(uid, None)
-        self._upload_procs.pop(uid, None)
         if data:
             try:
                 os.remove(data[0])
             except Exception:
                 pass
-        await call.edit(
-            self._s("killed"),
-            reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-        )
+        try:
+            await call.edit(self._s("killed"), reply_markup=self._close_markup())
+        except Exception:
+            pass
 
-    def _host_rows(self, uid):
-        buttons = [
-            {
-                "text": self.strings[prov["btn"]],
-                "callback": self._cb_upload,
-                "args": (uid, key),
-                "style": "primary",
-            }
-            for key, prov in PROVIDERS.items()
-        ]
-        rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-        rows.append([{"text": self.strings["btn_close"], "callback": self._cb_close, "args": (uid,), "style": "danger"}])
-        return rows
-
-    def _fail_rows(self, uid):
-        return [
-            [{"text": self.strings["btn_back"], "callback": self._cb_back, "args": (uid,), "style": "primary"}],
-            [{"text": self.strings["btn_close"], "callback": self._cb_close, "args": (uid,), "style": "danger"}],
-        ]
-
-    async def _fail(self, form, uid, error):
-        self._upload_procs.pop(uid, None)
-        await form.edit(
-            self._s("upload_fail", error=error),
-            reply_markup=self._fail_rows(uid),
-        )
-
-    async def _cb_back(self, call: InlineCall, uid):
+    async def _cb_upload_x0(self, call: InlineCall, uid):
         data = self._pending_files.get(uid)
-        if not data or not os.path.exists(data[0]):
-            self._pending_files.pop(uid, None)
-            await call.edit(
-                self._s("upload_fail", error="temp file not found"),
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-            )
+        if not data:
             return
         tmp_path, filename, file_type, file_size, dl_elapsed = data
-        await call.edit(
-            self._s("choose_host", name=_escape(filename), size=_format_bytes(file_size)),
-            reply_markup=self._host_rows(uid),
-        )
+        await self._do_upload(call, uid, tmp_path, filename, file_type, file_size, dl_elapsed, "x0.at")
 
-    async def _cb_upload(self, call: InlineCall, uid, host):
+    async def _cb_upload_litter(self, call: InlineCall, uid):
         data = self._pending_files.get(uid)
-        if not data or host not in PROVIDERS:
+        if not data:
             return
         tmp_path, filename, file_type, file_size, dl_elapsed = data
-        await self._do_upload(call, uid, tmp_path, filename, file_type, file_size, dl_elapsed, host)
+        await self._do_upload(call, uid, tmp_path, filename, file_type, file_size, dl_elapsed, "litterbox")
 
     async def _do_upload(self, form, uid, tmp_path, filename, file_type, file_size, dl_elapsed, host):
         if not os.path.exists(tmp_path):
@@ -565,9 +507,10 @@ class Uploader(loader.Module):
             )
             return
 
+        self._killed.discard(uid)
         stop_event = asyncio.Event()
         ul_start = time.time()
-        host_label = PROVIDERS.get(host, {}).get("label", host)
+        host_label = "x0.at" if host == "x0.at" else "litterbox.catbox.moe"
 
         async def _timer():
             while not stop_event.is_set():
@@ -575,14 +518,7 @@ class Uploader(loader.Module):
                 try:
                     await form.edit(
                         self._s("uploading", host=host_label, time=_format_time(elapsed)),
-                        reply_markup=[[
-                            {
-                                "text": self.strings["btn_kill"],
-                                "callback": self._cb_kill,
-                                "args": (uid,),
-                                "style": "danger",
-                            }
-                        ]],
+                        reply_markup=self._kill_markup(uid),
                     )
                 except Exception:
                     pass
@@ -593,6 +529,8 @@ class Uploader(loader.Module):
                     pass
 
         timer_task = asyncio.ensure_future(_timer())
+        self._stop_events[uid] = stop_event
+        self._timer_tasks[uid] = timer_task
 
         try:
             args = self._make_curl_args(host, tmp_path)
@@ -604,40 +542,67 @@ class Uploader(loader.Module):
             )
             self._upload_procs[uid] = proc
 
+            if uid in self._killed:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
             try:
                 out, err = await asyncio.wait_for(proc.communicate(), timeout=130)
             except asyncio.TimeoutError:
-                stop_event.set()
-                await timer_task
-                await self._fail(form, uid, "timeout")
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                await self._stop_timer(uid)
+                self._cleanup(uid, tmp_path)
+                if uid in self._killed:
+                    self._killed.discard(uid)
+                    return
+                await form.edit(
+                    self._s("upload_fail", error="timeout"),
+                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                )
                 return
 
             ul_elapsed = time.time() - ul_start
-            stop_event.set()
-            await timer_task
+            await self._stop_timer(uid)
+
+            if uid in self._killed:
+                self._killed.discard(uid)
+                self._cleanup(uid, tmp_path)
+                return
 
             stdout_text = out.decode("utf-8", errors="replace").strip()
             stderr_text = err.decode("utf-8", errors="replace").strip()
 
-            if uid not in self._pending_files:
-                return
+            self._cleanup(uid, tmp_path)
 
             if proc.returncode != 0:
                 error = stderr_text or stdout_text or f"exit code {proc.returncode}"
-                await self._fail(form, uid, _escape(error[:300]))
+                await form.edit(
+                    self._s("upload_fail", error=_escape(error[:300])),
+                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                )
                 return
 
             if not stdout_text:
                 error = stderr_text or "empty response"
-                await self._fail(form, uid, _escape(error[:300]))
+                await form.edit(
+                    self._s("upload_fail", error=_escape(error[:300])),
+                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                )
                 return
 
-            url = _parse_url(host, stdout_text)
-            if not url:
-                await self._fail(form, uid, _escape(stdout_text[:300]))
+            if not stdout_text.startswith("http"):
+                await form.edit(
+                    self._s("upload_fail", error=_escape(stdout_text[:300])),
+                    reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                )
                 return
 
-            self._cleanup(uid, tmp_path)
+            url = stdout_text
             total_elapsed = dl_elapsed + ul_elapsed
 
             await form.edit(
@@ -655,27 +620,29 @@ class Uploader(loader.Module):
             )
 
         except FileNotFoundError:
-            stop_event.set()
-            await timer_task
+            await self._stop_timer(uid)
             self._cleanup(uid, tmp_path)
             await form.edit(
                 self._s("upload_fail", error="curl not found"),
                 reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
             )
         except Exception as e:
-            stop_event.set()
-            try:
-                await timer_task
-            except Exception:
-                pass
-            await self._fail(form, uid, _escape(str(e)[:300]))
+            await self._stop_timer(uid)
+            self._cleanup(uid, tmp_path)
+            if uid in self._killed:
+                self._killed.discard(uid)
+                return
+            await form.edit(
+                self._s("upload_fail", error=_escape(str(e)[:300])),
+                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            )
 
     @loader.command(
-        ru_doc="Реплай на фото/видео/файл - загрузить на temp.sh, uguu, tmpfiles, x0.at или litterbox",
-        en_doc="Reply to photo/video/file - upload to temp.sh, uguu, tmpfiles, x0.at or litterbox",
+        ru_doc="Реплай на фото/видео/файл - загрузить на x0.at или litterbox.catbox.moe",
+        en_doc="Reply to photo/video/file - upload to x0.at or litterbox.catbox.moe",
     )
     async def upl(self, message):
-        """Reply to photo/video/file - upload to temp.sh, uguu, tmpfiles, x0.at or litterbox"""
+        """Reply to photo/video/file - upload to x0.at or litterbox.catbox.moe"""
         reply = await message.get_reply_message()
 
         if not reply or not reply.media:
@@ -717,10 +684,12 @@ class Uploader(loader.Module):
 
         file_type = _detect_type(filename)
 
+        uid = f"{message.chat_id}_{message.id}_{time.time_ns()}"
+
         form = await self.inline.form(
             text=self._s("downloading", time="0.00s"),
             message=message,
-            reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            reply_markup=self._kill_markup(uid),
             silent=True,
         )
 
@@ -731,7 +700,10 @@ class Uploader(loader.Module):
             while not stop_event.is_set():
                 elapsed = time.time() - dl_start
                 try:
-                    await form.edit(self._s("downloading", time=_format_time(elapsed)))
+                    await form.edit(
+                        self._s("downloading", time=_format_time(elapsed)),
+                        reply_markup=self._kill_markup(uid),
+                    )
                 except Exception:
                     pass
                 try:
@@ -741,6 +713,8 @@ class Uploader(loader.Module):
                     pass
 
         timer_task = asyncio.ensure_future(_dl_timer())
+        self._stop_events[uid] = stop_event
+        self._timer_tasks[uid] = timer_task
         tmp_path = None
 
         try:
@@ -748,33 +722,67 @@ class Uploader(loader.Module):
             tmp_path = tmp_fd.name
             tmp_fd.close()
 
-            await reply.download_media(file=tmp_path)
+            dl_task = asyncio.ensure_future(reply.download_media(file=tmp_path))
+            self._download_tasks[uid] = dl_task
+
+            try:
+                await dl_task
+            except asyncio.CancelledError:
+                if uid not in self._killed:
+                    raise
+                await self._stop_timer(uid)
+                self._cleanup(uid, tmp_path)
+                self._killed.discard(uid)
+                return
+
+            self._download_tasks.pop(uid, None)
             dl_elapsed = time.time() - dl_start
-            stop_event.set()
-            await timer_task
+            await self._stop_timer(uid)
+
+            if uid in self._killed:
+                self._killed.discard(uid)
+                self._cleanup(uid, tmp_path)
+                return
 
             file_size = os.path.getsize(tmp_path)
-            uid = str(id(form))
 
             self._pending_files[uid] = (tmp_path, filename, file_type, file_size, dl_elapsed)
 
             await form.edit(
                 self._s("choose_host", name=_escape(filename), size=_format_bytes(file_size)),
-                reply_markup=self._host_rows(uid),
+                reply_markup=[
+                    [
+                        {
+                            "text": self.strings["btn_x0"],
+                            "callback": self._cb_upload_x0,
+                            "args": (uid,),
+                            "style": "primary",
+                        },
+                        {
+                            "text": self.strings["btn_litter"],
+                            "callback": self._cb_upload_litter,
+                            "args": (uid,),
+                            "style": "primary",
+                        },
+                    ],
+                    [
+                        {
+                            "text": self.strings["btn_close"],
+                            "callback": self._cb_close_pending,
+                            "args": (uid,),
+                            "style": "danger",
+                        }
+                    ],
+                ],
             )
 
         except Exception as e:
-            stop_event.set()
-            try:
-                await timer_task
-            except Exception:
-                pass
+            await self._stop_timer(uid)
+            self._cleanup(uid, tmp_path)
+            if uid in self._killed:
+                self._killed.discard(uid)
+                return
             await form.edit(
                 self._s("download_fail", error=_escape(str(e)[:300])),
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                reply_markup=self._close_markup(),
             )
-            if tmp_path:
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
