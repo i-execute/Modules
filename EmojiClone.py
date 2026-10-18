@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 1, 0)
+__version__ = (1, 2, 0)
 # meta developer: Execute_forge.t.me
 
 import asyncio
@@ -115,7 +115,12 @@ class EmojiClone(loader.Module):
         "copying": (
             "<b>Copying</b>\n"
             "<blockquote>Progress: {current}/{total}\n"
-            "Pack: {name}{flood}</blockquote>"
+            "Pack: {name}</blockquote>"
+        ),
+        "floodwait": "\n<blockquote>Got floodwait, waiting {wait} + {rand} seconds</blockquote>",
+        "source_not_emoji": (
+            "<b>Not an Emoji Pack</b>\n"
+            "<blockquote>This link points to a sticker pack. Use Stickerclone for sticker packs.</blockquote>"
         ),
         "done": (
             "<b>Done</b>\n"
@@ -159,7 +164,7 @@ class EmojiClone(loader.Module):
         "eadd_pack_detail": (
             "<b>Eadd - Pack Selected</b>\n"
             "<blockquote>{title}\n"
-            "@{short}\n"
+            "<a href='https://t.me/addemoji/{short}'>{short}</a>\n"
             "Emoji: {count}</blockquote>"
         ),
         "eadd_btn_select": "Add Here",
@@ -270,7 +275,12 @@ class EmojiClone(loader.Module):
         "copying": (
             "<b>Копирование</b>\n"
             "<blockquote>Прогресс: {current}/{total}\n"
-            "Пак: {name}{flood}</blockquote>"
+            "Пак: {name}</blockquote>"
+        ),
+        "floodwait": "\n<blockquote>Словил флудвейт, жду {wait} + {rand} секунд</blockquote>",
+        "source_not_emoji": (
+            "<b>Это не эмодзи-пак</b>\n"
+            "<blockquote>По ссылке стикерпак. Для стикерпаков используйте Stickerclone.</blockquote>"
         ),
         "done": (
             "<b>Готово</b>\n"
@@ -314,7 +324,7 @@ class EmojiClone(loader.Module):
         "eadd_pack_detail": (
             "<b>Eadd - Пак выбран</b>\n"
             "<blockquote>{title}\n"
-            "@{short}\n"
+            "<a href='https://t.me/addemoji/{short}'>{short}</a>\n"
             "Эмодзи: {count}</blockquote>"
         ),
         "eadd_btn_select": "Добавить сюда",
@@ -388,10 +398,10 @@ class EmojiClone(loader.Module):
             from telethon.tl.types import DocumentAttributeCustomEmoji, DocumentAttributeSticker
             for attr in doc.attributes:
                 if isinstance(attr, (DocumentAttributeCustomEmoji, DocumentAttributeSticker)):
-                    return attr.alt or "⭐"
+                    return attr.alt or "\u2b50"
         except Exception:
             pass
-        return "⭐"
+        return "\u2b50"
 
     def _extract_reply_emoji_doc_id(self, message) -> int | None:
         from telethon.tl.types import MessageEntityCustomEmoji
@@ -413,29 +423,23 @@ class EmojiClone(loader.Module):
             logger.error(f"[EmojiClone] _resolve_doc_by_id {document_id}: {e}")
         return None
 
-    async def _with_floodwait(self, coro, call, current, total, name):
+    async def _with_floodwait(self, func, call, text):
         from telethon.errors import FloodWaitError
         while True:
             try:
-                return await coro
+                return await func()
             except FloodWaitError as e:
                 wait = e.seconds
                 extra = random.randint(1, 10)
-                flood_line = f"\nGot floodwait, waiting {wait} + {extra} seconds"
+                logger.info(f"[EmojiClone] FloodWait {wait}s, sleeping {wait + extra}s")
                 try:
-                    await call.edit(
-                        self.strings["copying"].format(
-                            current=current,
-                            total=total,
-                            name=name,
-                            flood=flood_line,
-                        )
-                    )
+                    await call.edit(text + self.strings["floodwait"].format(wait=wait, rand=extra))
                 except Exception:
                     pass
                 await asyncio.sleep(wait + extra)
 
-    async def _upload_emoji_doc(self, doc, call, current, total, name):
+    async def _upload_emoji_doc(self, doc):
+        from telethon.errors import FloodWaitError
         from telethon.tl.functions.messages import UploadMediaRequest
         from telethon.tl.types import (
             InputPeerSelf,
@@ -477,16 +481,57 @@ class EmojiClone(loader.Module):
                 ],
             )
 
-            result = await self._with_floodwait(
-                self._client(UploadMediaRequest(peer=InputPeerSelf(), media=media)),
-                call, current, total, name,
-            )
+            result = await self._client(UploadMediaRequest(peer=InputPeerSelf(), media=media))
             d = result.document
             return InputDocument(d.id, d.access_hash, d.file_reference), alt
 
+        except FloodWaitError:
+            raise
         except Exception as e:
             logger.error(f"[EmojiClone] _upload_emoji_doc: {e}")
             return None, None
+
+    async def _copy_one(self, doc, short_name, title, create):
+        from telethon.tl.functions.stickers import CreateStickerSetRequest, AddStickerToSetRequest
+        from telethon.tl.types import InputStickerSetShortName, InputStickerSetItem, InputUserSelf
+
+        input_doc, alt = await self._upload_emoji_doc(doc)
+        if input_doc is None:
+            return False
+        item = InputStickerSetItem(document=input_doc, emoji=alt)
+        if create:
+            await self._client(CreateStickerSetRequest(
+                user_id=InputUserSelf(),
+                title=title,
+                short_name=short_name,
+                stickers=[item],
+                emojis=True,
+            ))
+        else:
+            await self._client(AddStickerToSetRequest(
+                stickerset=InputStickerSetShortName(short_name=short_name),
+                sticker=item,
+            ))
+        return True
+
+    async def _get_own_packs(self, emojis: bool):
+        from telethon.tl.functions.messages import GetMyStickersRequest
+        packs = []
+        seen = set()
+        offset_id = 0
+        for _ in range(50):
+            result = await self._client(GetMyStickersRequest(offset_id=offset_id, limit=100))
+            sets = [item.set for item in result.sets if item.set.id not in seen]
+            if not sets:
+                break
+            for pack in sets:
+                seen.add(pack.id)
+                if bool(getattr(pack, "emojis", False)) == emojis:
+                    packs.append(pack)
+            offset_id = sets[-1].id
+            if len(seen) >= (getattr(result, "count", 0) or 0):
+                break
+        return packs
 
     async def _try_resolve_pack(self, short_name: str):
         from telethon.tl.functions.messages import GetStickerSetRequest
@@ -609,6 +654,16 @@ class EmojiClone(loader.Module):
             )
             return
 
+        if not getattr(result.set, "emojis", False):
+            await call.edit(
+                self.strings["source_not_emoji"],
+                reply_markup=[
+                    [{"text": self.strings["btn_retry"], "input": self.strings["input_source"], "handler": self._cb_set_source, "style": "primary"}],
+                    [{"text": self.strings["btn_back"], "callback": self._cb_state_menu, "style": "danger"}],
+                ],
+            )
+            return
+
         self._state["source_link"] = link
         self._state["source_short"] = short_name
         self._state["source_documents"] = result.documents
@@ -682,9 +737,8 @@ class EmojiClone(loader.Module):
             )
             return
 
-        from telethon.tl.functions.stickers import CreateStickerSetRequest, AddStickerToSetRequest
         from telethon.tl.functions.messages import UninstallStickerSetRequest
-        from telethon.tl.types import InputStickerSetShortName, InputStickerSetItem, InputUserSelf
+        from telethon.tl.types import InputStickerSetShortName
         from telethon.errors.rpcerrorlist import PackShortNameOccupiedError
 
         documents = self._state["source_documents"]
@@ -697,46 +751,18 @@ class EmojiClone(loader.Module):
         failed = 0
 
         for i, doc in enumerate(documents, 1):
+            text = self.strings["copying"].format(current=i, total=total, name=pack_title)
             try:
-                await call.edit(
-                    self.strings["copying"].format(
-                        current=i,
-                        total=total,
-                        name=pack_title,
-                        flood="",
-                    )
-                )
+                await call.edit(text)
             except Exception:
                 pass
 
-            input_doc, alt = await self._upload_emoji_doc(doc, call, i, total, pack_title)
-            if input_doc is None:
-                failed += 1
-                continue
-
             try:
-                if not pack_created:
-                    await self._with_floodwait(
-                        self._client(CreateStickerSetRequest(
-                            user_id=InputUserSelf(),
-                            title=pack_title,
-                            short_name=short_name,
-                            stickers=[InputStickerSetItem(document=input_doc, emoji=alt)],
-                            emojis=True,
-                        )),
-                        call, i, total, pack_title,
-                    )
-                    pack_created = True
-                    copied += 1
-                else:
-                    await self._with_floodwait(
-                        self._client(AddStickerToSetRequest(
-                            stickerset=InputStickerSetShortName(short_name=short_name),
-                            sticker=InputStickerSetItem(document=input_doc, emoji=alt),
-                        )),
-                        call, i, total, pack_title,
-                    )
-                    copied += 1
+                ok = await self._with_floodwait(
+                    lambda: self._copy_one(doc, short_name, pack_title, not pack_created),
+                    call,
+                    text,
+                )
             except PackShortNameOccupiedError:
                 await call.edit(
                     self.strings["short_occupied"],
@@ -746,6 +772,13 @@ class EmojiClone(loader.Module):
             except Exception as e:
                 logger.error(f"[EmojiClone] add emoji {i}/{total}: {e}")
                 failed += 1
+                continue
+
+            if not ok:
+                failed += 1
+                continue
+            pack_created = True
+            copied += 1
 
         if not pack_created:
             await call.edit(
@@ -805,7 +838,7 @@ class EmojiClone(loader.Module):
         pack = s["packs"][pack_index]
         await call.edit(
             self.strings["eadd_pack_detail"].format(
-                title=pack.title,
+                title=utils.escape_html(pack.title),
                 short=pack.short_name,
                 count=pack.count,
             ),
@@ -822,7 +855,7 @@ class EmojiClone(loader.Module):
         s = self._eadd_state
         pack = s["packs"][pack_index]
         s["target_short"] = pack.short_name
-        s["target_title"] = pack.title
+        s["target_title"] = utils.escape_html(pack.title)
         s["target_count"] = pack.count
         logger.info(f"[EmojiClone] eadd target selected: {pack.short_name}")
 
@@ -840,36 +873,21 @@ class EmojiClone(loader.Module):
         )
 
     async def _eadd_do_add_reply(self, call: InlineCall, doc):
-        from telethon.tl.functions.stickers import AddStickerToSetRequest
-        from telethon.tl.types import InputStickerSetShortName, InputStickerSetItem, InputDocument
-        from telethon.errors import FloodWaitError
-
         s = self._eadd_state
         target_short = s["target_short"]
         target_title = s["target_title"]
-        alt = self._get_emoji_alt(doc)
+        text = self.strings["eadd_adding"]
 
-        await call.edit(self.strings["eadd_adding"])
+        await call.edit(text)
 
         try:
-            input_doc, alt = await self._upload_emoji_doc(doc, call, 1, 1, target_title)
-            if input_doc is None:
-                raise Exception("upload failed")
-
-            await self._client(AddStickerToSetRequest(
-                stickerset=InputStickerSetShortName(short_name=target_short),
-                sticker=InputStickerSetItem(
-                    document=input_doc,
-                    emoji=alt,
-                ),
-            ))
-        except FloodWaitError as e:
-            logger.info(f"[EmojiClone] eadd reply FloodWait {e.seconds}s")
-            await call.edit(
-                self.strings["eadd_fail"].format(error=f"FloodWait {e.seconds}s"),
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            ok = await self._with_floodwait(
+                lambda: self._copy_one(doc, target_short, target_title, False),
+                call,
+                text,
             )
-            return
+            if not ok:
+                raise Exception("upload failed")
         except Exception as e:
             logger.error(f"[EmojiClone] eadd reply add error: {e}")
             await call.edit(
@@ -906,6 +924,16 @@ class EmojiClone(loader.Module):
         if not result or not result.documents:
             await call.edit(
                 self.strings["source_invalid_resolve"],
+                reply_markup=[
+                    [{"text": self.strings["btn_retry"], "input": self.strings["eadd_input_source"], "handler": self._cb_eadd_set_source, "style": "primary"}],
+                    [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
+                ],
+            )
+            return
+
+        if not getattr(result.set, "emojis", False):
+            await call.edit(
+                self.strings["source_not_emoji"],
                 reply_markup=[
                     [{"text": self.strings["btn_retry"], "input": self.strings["eadd_input_source"], "handler": self._cb_eadd_set_source, "style": "primary"}],
                     [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
@@ -953,30 +981,18 @@ class EmojiClone(loader.Module):
             )
             return
 
-        await call.edit(self.strings["eadd_adding"])
-
-        from telethon.tl.functions.stickers import AddStickerToSetRequest
-        from telethon.tl.types import InputStickerSetShortName, InputStickerSetItem
-        from telethon.errors import FloodWaitError
-
         target_short = s["target_short"]
+        text = self.strings["eadd_adding"]
+        await call.edit(text)
 
         try:
-            input_doc, alt = await self._upload_emoji_doc(doc, call, 1, 1, s["target_title"])
-            if input_doc is None:
-                raise Exception("upload failed")
-
-            await self._client(AddStickerToSetRequest(
-                stickerset=InputStickerSetShortName(short_name=target_short),
-                sticker=InputStickerSetItem(document=input_doc, emoji=alt),
-            ))
-        except FloodWaitError as e:
-            logger.info(f"[EmojiClone] eadd FloodWait {e.seconds}s")
-            await call.edit(
-                self.strings["eadd_fail"].format(error=f"FloodWait {e.seconds}s"),
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            ok = await self._with_floodwait(
+                lambda: self._copy_one(doc, target_short, s["target_title"], False),
+                call,
+                text,
             )
-            return
+            if not ok:
+                raise Exception("upload failed")
         except Exception as e:
             logger.error(f"[EmojiClone] eadd add error: {e}")
             await call.edit(
@@ -1011,8 +1027,6 @@ class EmojiClone(loader.Module):
     )
     async def eadd(self, message):
         """Add emoji to your own pack - without reply opens pack and source menu, reply to a custom emoji adds it directly"""
-        from telethon.tl.functions.messages import GetMyStickersRequest
-
         reply = await message.get_reply_message()
         reply_doc = None
 
@@ -1025,8 +1039,7 @@ class EmojiClone(loader.Module):
                 else:
                     logger.warning(f"[EmojiClone] eadd reply emoji doc_id={doc_id} resolve failed")
 
-        result = await self._client(GetMyStickersRequest(offset_id=0, limit=100))
-        packs = [item.set for item in result.sets if getattr(item.set, "emojis", False)]
+        packs = await self._get_own_packs(emojis=True)
         logger.info(f"[EmojiClone] eadd: {len(packs)} own emoji packs found, reply_doc={'yes' if reply_doc else 'no'}")
 
         self._eadd_state = {
