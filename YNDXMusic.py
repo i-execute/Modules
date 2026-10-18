@@ -361,21 +361,70 @@ def _write_id3_tags(filepath, title, artist, album_title=None, cover_data=None):
         pass
 
 
-async def _upload_to_x0(data: bytes, filename: str, content_type: str = "audio/mpeg") -> str:
+UPLOAD_UA = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0"
+
+UPLOAD_PROVIDERS = {
+    "x0.at": {
+        "url": "https://x0.at",
+        "field": "file",
+        "extra": {},
+    },
+    "uguu.se": {
+        "url": "https://uguu.se/upload?output=text",
+        "field": "files[]",
+        "extra": {},
+    },
+    "pomf.lain.la": {
+        "url": "https://pomf.lain.la/upload.php",
+        "field": "files[]",
+        "extra": {},
+    },
+}
+
+
+def _parse_upload_url(text: str, base: str = "") -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+    try:
+        data = json.loads(text)
+    except Exception:
+        first = text.splitlines()[0].strip()
+        return first if first.startswith("http") and " " not in first else ""
+    queue = [data]
+    while queue:
+        item = queue.pop(0)
+        if isinstance(item, dict):
+            for key in ("url", "src", "link"):
+                value = item.get(key)
+                if isinstance(value, str):
+                    return base + value if value.startswith("/") else value
+            queue += list(item.values())
+        elif isinstance(item, list):
+            queue += item
+    return ""
+
+
+async def _upload_via(provider: str, data: bytes, filename: str, content_type: str = "audio/mpeg", timeout: int = 60) -> str:
+    cfg = UPLOAD_PROVIDERS.get(provider) or UPLOAD_PROVIDERS["x0.at"]
     try:
         form = aiohttp.FormData()
-        form.add_field("file", data, filename=filename, content_type=content_type)
-        async with aiohttp.ClientSession() as s:
+        for key, value in cfg["extra"].items():
+            form.add_field(key, value)
+        form.add_field(cfg["field"], data, filename=filename, content_type=content_type)
+        async with aiohttp.ClientSession(headers={"User-Agent": UPLOAD_UA}) as s:
             async with s.post(
-                "https://x0.at",
+                cfg["url"],
                 data=form,
-                timeout=aiohttp.ClientTimeout(total=60),
+                timeout=aiohttp.ClientTimeout(total=timeout),
             ) as r:
-                text = (await r.text()).strip()
-                if text.startswith("http"):
-                    return text
-    except Exception:
-        pass
+                text = await r.text()
+                url = _parse_upload_url(text, cfg.get("base", ""))
+                if url:
+                    return url
+                _log("UPLOAD", f"{provider}: HTTP {r.status}: {text.strip()[:120]}")
+    except Exception as e:
+        _log("UPLOAD", f"{provider}: {type(e).__name__}: {e}")
     return ""
 
 
@@ -846,6 +895,11 @@ class YNDXMusic(loader.Module):
                 "SEARCH_LIMIT", 5,
                 "Search results limit (1-10)",
                 validator=loader.validators.Integer(minimum=1, maximum=10),
+            ),
+            loader.ConfigValue(
+                "UPLOAD_PROVIDER", "x0.at",
+                "File hosting used to upload tracks and covers",
+                validator=loader.validators.Choice(list(UPLOAD_PROVIDERS)),
             ),
             loader.ConfigValue(
                 "YM_CLIENT_ID", "23cabbbdc6cd418abb4b39c32c41195d",
@@ -1431,9 +1485,9 @@ class YNDXMusic(loader.Module):
                 with open(info["path"], "rb") as f:
                     mp3_bytes = f.read()
                 filename = sanitize_fn(f"{artist} - {title}") + ".mp3"
-                mp3_url = await _upload_to_x0(mp3_bytes, filename, "audio/mpeg")
+                mp3_url = await self._upload_file(mp3_bytes, filename, "audio/mpeg")
                 if not mp3_url:
-                    await utils.answer(msg, self.strings["error"].format(msg="Upload to x0.at failed"))
+                    await utils.answer(msg, self.strings["error"].format(msg=f"Upload to {self.config['UPLOAD_PROVIDER']} failed"))
                     return
                 self._now_mp3_url = mp3_url
             finally:
@@ -1524,7 +1578,7 @@ class YNDXMusic(loader.Module):
                 ]],
                 silent=True,
             )
-            await self.inline.form(**form_kwargs)
+            await self._safe_form(**form_kwargs)
             return
         if _is_ym_track_link(query):
             await self._yms_download_by_link(message, query, is_forum, topic_id)
@@ -1598,7 +1652,7 @@ class YNDXMusic(loader.Module):
         )
         if cover_url:
             edit_kwargs["photo"] = cover_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
         asyncio.ensure_future(self._yms_prefetch_covers(new_sid))
 
     async def _yms_download_by_link(self, message, url, is_forum, topic_id):
@@ -1665,7 +1719,7 @@ class YNDXMusic(loader.Module):
         )
         if cover_url:
             form_kwargs["photo"] = cover_url
-        await self.inline.form(**form_kwargs)
+        await self._safe_form(**form_kwargs)
         asyncio.ensure_future(self._yms_prefetch_covers(session_id))
 
     async def _yms_get_cover(self, session_id: str, idx: int):
@@ -1684,7 +1738,7 @@ class YNDXMusic(loader.Module):
         cover_url = None
         if raw_cover:
             filename = sanitize_fn(f"{artist} - {title}") + ".jpg"
-            cover_url = await _upload_to_x0(
+            cover_url = await self._upload_file(
                 normalize_cover(raw_cover, force_jpeg=True) or raw_cover,
                 filename,
                 "image/jpeg",
@@ -1766,7 +1820,7 @@ class YNDXMusic(loader.Module):
         )
         if cover_url:
             edit_kwargs["photo"] = cover_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
         asyncio.ensure_future(self._yms_prefetch_covers(session_id))
 
     async def _yms_left(self, call, session_id: str):
@@ -1809,7 +1863,7 @@ class YNDXMusic(loader.Module):
         )
         if cover_url:
             edit_kwargs["photo"] = cover_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
 
     async def _yms_download(self, call, session_id: str):
         sess = self._yms_sessions.get(session_id)
@@ -1938,7 +1992,7 @@ class YNDXMusic(loader.Module):
             ]],
             silent=True,
         )
-        await self.inline.form(**form_kwargs)
+        await self._safe_form(**form_kwargs)
 
     async def _ymp_show_confirm_form(self, message, session_id, pl_title, count, cover_url, is_forum, topic_id):
         form_kwargs = dict(
@@ -1952,14 +2006,38 @@ class YNDXMusic(loader.Module):
         )
         if cover_url:
             form_kwargs["photo"] = cover_url
-        await self.inline.form(**form_kwargs)
+        await self._safe_form(**form_kwargs)
+
+    async def _safe_form(self, **kwargs):
+        try:
+            return await self.inline.form(**kwargs)
+        except Exception as e:
+            if "photo" not in kwargs:
+                raise
+            _log("UPLOAD", f"photo rejected by Telegram ({type(e).__name__}), retry without it")
+            kwargs.pop("photo")
+            return await self.inline.form(**kwargs)
+
+    async def _safe_edit(self, call, **kwargs):
+        try:
+            return await call.edit(**kwargs)
+        except Exception as e:
+            if "photo" not in kwargs:
+                raise
+            _log("UPLOAD", f"photo rejected by Telegram ({type(e).__name__}), retry without it")
+            kwargs.pop("photo")
+            return await call.edit(**kwargs)
+
+    async def _upload_file(self, data, filename, content_type="audio/mpeg"):
+        timeout = 60 if content_type.startswith("audio") else 20
+        return await _upload_via(self.config["UPLOAD_PROVIDER"], data, filename, content_type, timeout)
 
     async def _get_x0_cover_url(self, raw_url, name):
         try:
             r = await _yndx_curl_get(raw_url, timeout=10)
             if r is not None and r.status_code == 200:
                 data = r.content
-                return await _upload_to_x0(
+                return await self._upload_file(
                     normalize_cover(data, force_jpeg=True) or data,
                     sanitize_fn(name) + ".jpg",
                     "image/jpeg",
@@ -2020,7 +2098,7 @@ class YNDXMusic(loader.Module):
         edit_kwargs = dict(text=self.strings["ymp_title"].format(name=escape_html(pl_title), count=count), reply_markup=markup)
         if x0_url:
             edit_kwargs["photo"] = x0_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
 
     async def _ymp_open_my(self, call, session_id: str):
         sess = self._ymp_sessions.get(session_id)
@@ -2081,7 +2159,7 @@ class YNDXMusic(loader.Module):
         edit_kwargs = dict(text=self.strings["ymp_playlist_title"].format(title=escape_html(title), count=count), reply_markup=markup)
         if x0_url:
             edit_kwargs["photo"] = x0_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
 
     def _ymp_my_markup(self, my_sid: str, total: int):
         sess = self._ymp_my_sessions.get(my_sid, {})
@@ -2174,7 +2252,7 @@ class YNDXMusic(loader.Module):
         edit_kwargs = dict(text=self.strings["ymp_title"].format(name=escape_html(pl_title), count=count), reply_markup=markup)
         if x0_url:
             edit_kwargs["photo"] = x0_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
 
     async def _ymp_download(self, call, session_id: str):
         sess = self._ymp_sessions.get(session_id)
@@ -2299,7 +2377,7 @@ class YNDXMusic(loader.Module):
             ]],
             silent=True,
         )
-        await self.inline.form(**form_kwargs)
+        await self._safe_form(**form_kwargs)
 
     async def _ymb_show_book_form(self, message, session_id, al, is_forum, topic_id):
         title = getattr(al, "title", None) or "Audiobook"
@@ -2318,7 +2396,7 @@ class YNDXMusic(loader.Module):
         if cover_uri:
             raw = await _download_cover_best(cover_uri, self._covers_dir)
             if raw:
-                x0_url = await _upload_to_x0(normalize_cover(raw, force_jpeg=True) or raw, sanitize_fn(title) + ".jpg", "image/jpeg")
+                x0_url = await self._upload_file(normalize_cover(raw, force_jpeg=True) or raw, sanitize_fn(title) + ".jpg", "image/jpeg")
         form_kwargs = dict(
             text=self.strings["ymb_title"].format(name=escape_html(title), count=count),
             message=message,
@@ -2330,7 +2408,7 @@ class YNDXMusic(loader.Module):
         )
         if x0_url:
             form_kwargs["photo"] = x0_url
-        await self.inline.form(**form_kwargs)
+        await self._safe_form(**form_kwargs)
 
     async def _ymb_link_input(self, call, query: str, session_id: str):
         url = query.strip()
@@ -2361,7 +2439,7 @@ class YNDXMusic(loader.Module):
         if cover_uri:
             raw = await _download_cover_best(cover_uri, self._covers_dir)
             if raw:
-                x0_url = await _upload_to_x0(normalize_cover(raw, force_jpeg=True) or raw, sanitize_fn(title) + ".jpg", "image/jpeg")
+                x0_url = await self._upload_file(normalize_cover(raw, force_jpeg=True) or raw, sanitize_fn(title) + ".jpg", "image/jpeg")
         markup = [[
             {"text": self.strings["ymb_download"], "callback": self._ymb_download, "args": (session_id,), "style": "success"},
             {"text": self.strings["ymb_cancel"], "callback": self._ymb_cancel, "args": (session_id,), "style": "danger"},
@@ -2369,7 +2447,7 @@ class YNDXMusic(loader.Module):
         edit_kwargs = dict(text=self.strings["ymb_title"].format(name=escape_html(title), count=count), reply_markup=markup)
         if x0_url:
             edit_kwargs["photo"] = x0_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
 
     async def _ymb_open_my(self, call, session_id: str):
         sess = self._ymb_sessions.get(session_id)
@@ -2409,7 +2487,7 @@ class YNDXMusic(loader.Module):
         edit_kwargs = dict(text=self.strings["ymb_title"].format(name=escape_html(title), count=track_count), reply_markup=markup)
         if x0_url:
             edit_kwargs["photo"] = x0_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
 
     def _ymb_my_markup(self, my_sid: str, total: int):
         sess = self._ymb_my_sessions.get(my_sid, {})
@@ -2609,7 +2687,7 @@ class YNDXMusic(loader.Module):
             ]],
             silent=True,
         )
-        await self.inline.form(**form_kwargs)
+        await self._safe_form(**form_kwargs)
 
     async def _yma_show_album_form(self, message, session_id, al, is_forum, topic_id):
         title = getattr(al, "title", None) or "Album"
@@ -2628,7 +2706,7 @@ class YNDXMusic(loader.Module):
         if cover_uri:
             raw = await _download_cover_best(cover_uri, self._covers_dir)
             if raw:
-                x0_url = await _upload_to_x0(normalize_cover(raw, force_jpeg=True) or raw, sanitize_fn(title) + ".jpg", "image/jpeg")
+                x0_url = await self._upload_file(normalize_cover(raw, force_jpeg=True) or raw, sanitize_fn(title) + ".jpg", "image/jpeg")
         form_kwargs = dict(
             text=self.strings["yma_title"].format(name=escape_html(title), artist=escape_html(artist_names), count=count),
             message=message,
@@ -2640,7 +2718,7 @@ class YNDXMusic(loader.Module):
         )
         if x0_url:
             form_kwargs["photo"] = x0_url
-        await self.inline.form(**form_kwargs)
+        await self._safe_form(**form_kwargs)
 
     async def _yma_link_input(self, call, query: str, session_id: str):
         url = query.strip()
@@ -2675,7 +2753,7 @@ class YNDXMusic(loader.Module):
         if cover_uri:
             raw = await _download_cover_best(cover_uri, self._covers_dir)
             if raw:
-                x0_url = await _upload_to_x0(normalize_cover(raw, force_jpeg=True) or raw, sanitize_fn(title) + ".jpg", "image/jpeg")
+                x0_url = await self._upload_file(normalize_cover(raw, force_jpeg=True) or raw, sanitize_fn(title) + ".jpg", "image/jpeg")
         markup = [[
             {"text": self.strings["yma_download"], "callback": self._yma_download, "args": (session_id,), "style": "success"},
             {"text": self.strings["yma_cancel"], "callback": self._yma_cancel, "args": (session_id,), "style": "danger"},
@@ -2683,7 +2761,7 @@ class YNDXMusic(loader.Module):
         edit_kwargs = dict(text=self.strings["yma_title"].format(name=escape_html(title), artist=escape_html(artist_names), count=count), reply_markup=markup)
         if x0_url:
             edit_kwargs["photo"] = x0_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
 
     async def _yma_open_my(self, call, session_id: str):
         sess = self._yma_sessions.get(session_id)
@@ -2724,7 +2802,7 @@ class YNDXMusic(loader.Module):
         edit_kwargs = dict(text=self.strings["yma_title"].format(name=escape_html(title), artist=escape_html(artist_names), count=track_count), reply_markup=markup)
         if x0_url:
             edit_kwargs["photo"] = x0_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
 
     def _yma_my_markup(self, my_sid: str, total: int):
         sess = self._yma_my_sessions.get(my_sid, {})
