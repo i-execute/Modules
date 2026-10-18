@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (4, 2, 4)
+__version__ = (4, 2, 5)
 # meta developer: Execute_forge.t.me 
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
@@ -858,10 +858,6 @@ class XRay(loader.Module):
         self._logger_topic = None
         self._asset_channel = None
 
-    def _ensure_root(self):
-        os.makedirs(self._root, mode=0o700, exist_ok=True)
-        os.makedirs(os.path.join(self._root, "users"), mode=0o700, exist_ok=True)
-
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
@@ -872,7 +868,8 @@ class XRay(loader.Module):
         self._xray_path = os.path.join(self._root, "xray")
         self._cloudflared_path = os.path.join(self._root, "cloudflared")
         
-        self._ensure_root()
+        os.makedirs(self._root, mode=0o700, exist_ok=True)
+        os.makedirs(os.path.join(self._root, "users"), mode=0o700, exist_ok=True)
 
         self._users = self._db.get("XR", "users", {})
         self._external_ip = await self._detect_external_ip()
@@ -1437,7 +1434,6 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         }.get(arch)
         if not asset:
             return False, f"Unsupported arch: {arch}"
-        self._ensure_root()
         tmp_path = f"{self._cloudflared_path}.tmp"
         try:
             process = await asyncio.create_subprocess_exec(
@@ -1455,11 +1451,11 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            out, _ = await check.communicate()
+            await check.communicate()
             if check.returncode != 0:
                 return False, "Cloudflared validation failed"
             os.replace(tmp_path, self._cloudflared_path)
-            return True, out.decode(errors="replace").strip()[:80]
+            return True, await self._get_version("cloudflared")
         except Exception as e:
             return False, str(e)
         finally:
@@ -1742,7 +1738,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             shutil.copy2(binary, self._xray_path)
             os.chmod(self._xray_path, 0o755)
             
-            version = await self._get_xray_version()
+            version = await self._get_version("xray")
             return True, version
             
         except Exception as e:
@@ -1751,37 +1747,24 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             if tmp and os.path.exists(tmp):
                 shutil.rmtree(tmp, ignore_errors=True)
 
-    async def _get_xray_version(self) -> str:
-        if not self._xray_installed():
+    async def _get_version(self, binary: str = "xray") -> str:
+        specs = {
+            "xray": (getattr(self, "_xray_path", None), self._xray_installed, ("version",)),
+            "cloudflared": (getattr(self, "_cloudflared_path", None), self._cloudflared_installed, ("--version",)),
+        }
+        path, installed, args = specs[binary]
+        if not installed():
             return "not installed"
         try:
             p = await asyncio.create_subprocess_exec(
-                self._xray_path, "version",
+                path, *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            out, _ = await p.communicate()
-            text = out.decode().strip()
-            return text.split("\n")[0][:50] if text else "unknown"
-        except:
-            return "unknown"
-
-    async def _get_cloudflared_version(self) -> str:
-        if not self._cloudflared_installed():
-            return "not installed"
-        try:
-            p = await asyncio.create_subprocess_exec(
-                self._cloudflared_path, "--version",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            out, _ = await p.communicate()
-            txt = out.decode().strip()
-            if not txt:
-                return "unknown"
-            line = txt.split("\n")[0]
-            return line[:80]
-        except:
+            out, err = await p.communicate()
+            text = out.decode(errors="replace").strip() or err.decode(errors="replace").strip()
+            return text.split("\n")[0][:80] if text else "unknown"
+        except Exception:
             return "unknown"
 
     async def _generate_vless_encryption(self) -> Tuple[Optional[str], Optional[str]]:
@@ -2266,9 +2249,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         return " ".join(parts)
 
     async def _cb_setup_menu(self, call: InlineCall):
-        xray_version = await self._get_xray_version()
-        xray_status = f"{xray_version}" if self._xray_installed() else "Not installed"
-        cloudflared_status = "Installed" if self._cloudflared_installed() else "Not installed"
+        xray_status = await self._get_version("xray") if self._xray_installed() else "Not installed"
+        cloudflared_status = await self._get_version("cloudflared") if self._cloudflared_installed() else "Not installed"
         
         gh_token = self._gh_token()
         gh_status = "Authorized" if gh_token else "Not authorized"
@@ -2340,7 +2322,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
     async def _cb_xray_install_menu(self, call: InlineCall):
         await call.edit(self.strings["collecting_versions"])
         
-        current_version = await self._get_xray_version()
+        current_version = await self._get_version("xray")
         
         text = self.strings["xray_install_menu"].format(current=current_version)
         
@@ -2441,8 +2423,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         await self._reattach_processes()
         total = len(self._users)
         active = await self._get_active_count()
-        version = await self._get_xray_version()
-        cf_version = await self._get_cloudflared_version()
+        version = await self._get_version("xray")
+        cf_version = await self._get_version("cloudflared")
         
         text = self.strings["main_menu"].format(
             total=total,
@@ -3425,8 +3407,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             text=self.strings["main_menu"].format(
                 total=len(self._users),
                 active=active_cnt,
-                version=await self._get_xray_version(),
-                cloudflared_version=await self._get_cloudflared_version(),
+                version=await self._get_version("xray"),
+                cloudflared_version=await self._get_version("cloudflared"),
             ),
             message=message,
             reply_markup=[
