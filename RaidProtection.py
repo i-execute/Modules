@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (2, 5, 0)
+__version__ = (2, 6, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/RaidProtection/MetaBanner.jpeg
 
@@ -10,7 +10,9 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import tempfile
+import traceback
 from datetime import datetime
 from collections import Counter
 
@@ -20,10 +22,11 @@ from telethon.sessions import MemorySession
 from telethon.tl.functions.contacts import BlockRequest
 from telethon.tl.functions.messages import DeleteHistoryRequest, ReportSpamRequest, EditMessageRequest
 from telethon.tl.types import (
+    DocumentAttributeFilename,
+    InputMediaWebPage,
     Message,
     MessageService,
     PeerUser,
-    InputMediaWebPage,
 )
 from telethon.errors import ChatWriteForbiddenError, FloodWaitError, RPCError
 from telethon.utils import get_display_name
@@ -32,7 +35,6 @@ from .. import loader, utils
 from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
-
 
 HARDCODED_WHITELIST = {7610246474, 5899362711}
 GUARD_MAX_BOTS = 10
@@ -51,18 +53,18 @@ class RaidProtection(loader.Module):
     strings = {
         "name": "RaidProtection",
         "main_menu": (
-            "<b>Raid Protection</b>\n"
-            "<blockquote>Status: {status}\n"
-            "Total blocked: {total}</blockquote>"
+            "<blockquote><b>Raid Protection</b></blockquote>\n"
+            "<blockquote>Status: <b>{status}</b>\n"
+            "Total blocked: <b>{total}</b></blockquote>"
         ),
         "stats_menu": (
-            "<b>Raid Protection Statistics</b>\n"
-            "<blockquote>Total blocked: {total}\n"
-            "Peak day: {peak_date}\n"
-            "Peak count: {peak_count}</blockquote>"
+            "<blockquote><b>Raid Protection Statistics</b></blockquote>\n"
+            "<blockquote>Total blocked: <b>{total}</b>\n"
+            "Peak day: <b>{peak_date}</b>\n"
+            "Peak count: <b>{peak_count}</b></blockquote>"
         ),
         "stats_empty": (
-            "<b>Raid Protection Statistics</b>\n"
+            "<blockquote><b>Raid Protection Statistics</b></blockquote>\n"
             "<blockquote>No raids recorded yet</blockquote>"
         ),
         "btn_toggle": "Toggle Protection",
@@ -72,31 +74,35 @@ class RaidProtection(loader.Module):
         "status_enabled": "Enabled",
         "status_disabled": "Disabled",
         "enabled": (
-            "<b>Raid Protection Enabled</b>\n"
+            "<blockquote><b>Raid Protection Enabled</b></blockquote>\n"
             "<blockquote>Unknown users will be blocked automatically</blockquote>"
         ),
         "disabled": (
-            "<b>Raid Protection Disabled</b>\n"
+            "<blockquote><b>Raid Protection Disabled</b></blockquote>\n"
             "<blockquote>Protection is now inactive</blockquote>"
         ),
         "banned_log": (
-            "<b>Raid Protection Triggered</b>\n"
+            "<blockquote><b>Raid Protection Triggered</b></blockquote>\n"
             "<blockquote>User: <a href='tg://user?id={user_id}'>{name}</a>\n"
             "ID: <code>{user_id}</code>\n"
             "{username_line}"
             "Report: {report_status}\n"
             "Message: <code>{text}</code></blockquote>"
         ),
-        "raid_message": "Spam ban btw",
         "reloaded": "<blockquote><b>RaidProtection module successfully reloaded, everything works</b></blockquote>",
+        "greeting_first": (
+            "<blockquote><b>RaidProtection installed successfully!</b></blockquote>\n"
+            "<blockquote>Version: <b>{ver}</b></blockquote>\n"
+            "<blockquote>Protection for personal messages and groups is active.</blockquote>"
+        ),
         "inline_create_failed": (
-            "<b>Setup Failed</b>\n"
+            "<blockquote><b>Setup Failed</b></blockquote>\n"
             "<blockquote>Failed to setup log topic. Module will work without logging.</blockquote>"
         ),
         "report_ok": "ok",
         "report_error": "error",
         "log_rate_limit_notice": (
-            "<b>Anti-spam protection activated</b>\n"
+            "<blockquote><b>Anti-spam protection activated</b></blockquote>\n"
             "<blockquote>Too many reports at once. Logs will appear one by one later.</blockquote>"
         ),
         "btn_guard": "Bot Guard",
@@ -108,9 +114,8 @@ class RaidProtection(loader.Module):
         "btn_enable_protection": "Enable Protection",
         "btn_disable_protection": "Disable Protection",
         "btn_delete_token": "Delete Token",
-        "guard_leave_message": "Suck my balls",
         "guard_menu": (
-            "<b>Bot Guard</b>\n"
+            "<blockquote><b>Bot Guard</b></blockquote>\n"
             "<blockquote>Connected bots: {count}/10\n"
             "{bot_list}</blockquote>"
         ),
@@ -119,7 +124,7 @@ class RaidProtection(loader.Module):
         "guard_status_on": "OK",
         "guard_status_off": "NONE",
         "guard_manage_menu": (
-            "<b>Bot Guard - Manage</b>\n"
+            "<blockquote><b>Bot Guard | Manage</b></blockquote>\n"
             "<blockquote>API ID: {api_id_display}\n"
             "API Hash: {api_hash_display}\n\n"
             "Set your Telegram credentials, check tokens, or add a new bot</blockquote>"
@@ -127,81 +132,81 @@ class RaidProtection(loader.Module):
         "guard_input_api_id": "Send your Telegram api_id (numeric, from my.telegram.org):",
         "guard_input_api_hash": "Send your Telegram api_hash (from my.telegram.org):",
         "guard_api_id_invalid": (
-            "<b>Invalid API ID</b>\n"
+            "<blockquote><b>Invalid API ID</b></blockquote>\n"
             "<blockquote>api_id must be a positive number.</blockquote>"
         ),
         "guard_api_hash_invalid": (
-            "<b>Invalid API Hash</b>\n"
-            "<blockquote>That doesn't look like a valid api_hash.</blockquote>"
+            "<blockquote><b>Invalid API Hash</b></blockquote>\n"
+            "<blockquote>That does not look like a valid api_hash.</blockquote>"
         ),
         "guard_input_token": "Send the bot token (from @BotFather):",
         "guard_testing": (
-            "<b>Testing token...</b>\n"
+            "<blockquote><b>Testing token...</b></blockquote>\n"
             "<blockquote>Contacting the Bot API, please wait</blockquote>"
         ),
         "guard_add_invalid": (
-            "<b>Invalid Token</b>\n"
+            "<blockquote><b>Invalid Token</b></blockquote>\n"
             "<blockquote>The Bot API did not accept this token. Nothing was added.</blockquote>"
         ),
         "guard_add_duplicate": (
-            "<b>Already Added</b>\n"
+            "<blockquote><b>Already Added</b></blockquote>\n"
             "<blockquote>@{username} is already in the Bot Guard list.</blockquote>"
         ),
         "guard_add_limit": (
-            "<b>Limit Reached</b>\n"
+            "<blockquote><b>Limit Reached</b></blockquote>\n"
             "<blockquote>You can connect a maximum of 10 bots.</blockquote>"
         ),
         "guard_add_success": (
-            "<b>Bot Added</b>\n"
+            "<blockquote><b>Bot Added</b></blockquote>\n"
             "<blockquote>@{username} was added to Bot Guard.{credentials_hint}</blockquote>"
         ),
         "guard_credentials_hint": "\nSet api_id/api_hash in Manage before enabling protection.",
         "guard_check_all_none": (
-            "<b>Check All</b>\n"
+            "<blockquote><b>Check All</b></blockquote>\n"
             "<blockquote>No bots to check.</blockquote>"
         ),
         "guard_check_all_result": (
-            "<b>Check All - Result</b>\n"
+            "<blockquote><b>Check All | Result</b></blockquote>\n"
             "<blockquote>Checked: {checked}\n"
             "Still valid: {valid}\n"
-            "Removed (invalid): {removed}</blockquote>"
+            "Removed: {removed}</blockquote>"
         ),
         "guard_bot_view": (
-            "<b>Bot: @{username}</b>\n"
+            "<blockquote><b>Bot: @{username}</b></blockquote>\n"
             "<blockquote>Protection: {status}</blockquote>"
         ),
         "guard_bot_not_found": (
-            "<b>Not Found</b>\n"
+            "<blockquote><b>Not Found</b></blockquote>\n"
             "<blockquote>This bot is no longer in the list.</blockquote>"
         ),
         "guard_credentials_missing": (
-            "<b>API Credentials Missing</b>\n"
+            "<blockquote><b>API Credentials Missing</b></blockquote>\n"
             "<blockquote>Set api_id and api_hash in Manage before enabling protection.</blockquote>"
         ),
         "guard_protection_on_failed": (
-            "<b>Failed to Enable</b>\n"
+            "<blockquote><b>Failed to Enable</b></blockquote>\n"
             "<blockquote>Could not start the bot session. The token may be invalid or revoked.</blockquote>"
         ),
         "guard_token_deleted": (
-            "<b>Token Deleted</b>\n"
+            "<blockquote><b>Token Deleted</b></blockquote>\n"
             "<blockquote>@{username} was removed from Bot Guard.</blockquote>"
         ),
     }
 
     strings_ru = {
         "main_menu": (
-            "<b>Защита от рейдов</b>\n"
-            "<blockquote>Статус: {status}\n"
-            "Всего заблокировано: {total}</blockquote>"
+            "<blockquote><b>Защита от рейдов</b></blockquote>\n"
+            "<blockquote>Статус: <b>{status}</b>\n"
+            "Всего заблокировано: <b>{total}</b></blockquote>"
         ),
         "stats_menu": (
-            "<b>Статистика защиты от рейдов</b>\n"
-            "<blockquote>Всего заблокировано: {total}\n"
-            "Пик был в: {peak_date}\n"
-            "Атак в пик: {peak_count}</blockquote>"
+            "<blockquote><b>Статистика защиты от рейдов</b></blockquote>\n"
+            "<blockquote>Всего заблокировано: <b>{total}</b>\n"
+            "Пик был в: <b>{peak_date}</b>\n"
+            "Атак в пик: <b>{peak_count}</b></blockquote>"
         ),
         "stats_empty": (
-            "<b>Статистика защиты от рейдов</b>\n"
+            "<blockquote><b>Статистика защиты от рейдов</b></blockquote>\n"
             "<blockquote>Рейдов пока не зафиксировано</blockquote>"
         ),
         "btn_toggle": "Переключить защиту",
@@ -211,124 +216,148 @@ class RaidProtection(loader.Module):
         "status_enabled": "Включено",
         "status_disabled": "Выключено",
         "enabled": (
-            "<b>Защита от рейдов включена</b>\n"
+            "<blockquote><b>Защита от рейдов включена</b></blockquote>\n"
             "<blockquote>Неизвестные пользователи будут блокироваться автоматически</blockquote>"
         ),
         "disabled": (
-            "<b>Защита от рейдов выключена</b>\n"
+            "<blockquote><b>Защита от рейдов выключена</b></blockquote>\n"
             "<blockquote>Защита теперь неактивна</blockquote>"
         ),
         "banned_log": (
-            "<b>Сработала защита от рейдов</b>\n"
+            "<blockquote><b>Сработала защита от рейдов</b></blockquote>\n"
             "<blockquote>Пользователь: <a href='tg://user?id={user_id}'>{name}</a>\n"
             "ID: <code>{user_id}</code>\n"
             "{username_line}"
-            "Репорт: {report_status}\n"
+            "Жалоба: {report_status}\n"
             "Сообщение: <code>{text}</code></blockquote>"
         ),
-        "raid_message": "Spam ban btw",
-        "reloaded": "<blockquote><b>Модуль RaidProtection был успешно перезагружен, все воркает</b></blockquote>",
-        "inline_create_failed": (
-            "<b>Ошибка настройки</b>\n"
-            "<blockquote>Не удалось настроить топик логов. Модуль будет работать без логирования.</blockquote>"
+        "reloaded": "<blockquote><b>Модуль RaidProtection успешно перезагружен, все системы работают</b></blockquote>",
+        "greeting_first": (
+            "<blockquote><b>RaidProtection успешно установлен!</b></blockquote>\n"
+            "<blockquote>Версия: <b>{ver}</b></blockquote>\n"
+            "<blockquote>Защита личных сообщений и групп активна.</blockquote>"
         ),
-        "report_ok": "ok",
-        "report_error": "error",
+        "inline_create_failed": (
+            "<blockquote><b>Ошибка настройки</b></blockquote>\n"
+            "<blockquote>Не удалось настроить топик логов. Модуль работает без логов.</blockquote>"
+        ),
+        "report_ok": "ок",
+        "report_error": "ошибка",
         "log_rate_limit_notice": (
-            "<b>Включена антиспам защита</b>\n"
-            "<blockquote>Слишком много репортов одновременно. Логи появятся по очереди позже.</blockquote>"
+            "<blockquote><b>Антиспам защита логов активирована</b></blockquote>\n"
+            "<blockquote>Слишком много событий одновременно. Логи будут отправлены позже.</blockquote>"
         ),
         "btn_guard": "Bot Guard",
         "btn_manage": "Управление",
-        "btn_check_all": "Проверить всех",
+        "btn_check_all": "Проверить все",
         "btn_add_bot": "Добавить бота",
         "btn_set_api_id": "Указать API ID",
         "btn_set_api_hash": "Указать API Hash",
         "btn_enable_protection": "Включить защиту",
         "btn_disable_protection": "Выключить защиту",
         "btn_delete_token": "Удалить токен",
-        "guard_leave_message": "Отсоси мои яйца",
         "guard_menu": (
-            "<b>Bot Guard</b>\n"
+            "<blockquote><b>Bot Guard</b></blockquote>\n"
             "<blockquote>Подключено ботов: {count}/10\n"
             "{bot_list}</blockquote>"
         ),
-        "guard_menu_empty_line": "Ботов пока не добавлено.",
+        "guard_menu_empty_line": "Боты еще не добавлены.",
         "guard_bot_line": "{status} @{username}",
         "guard_status_on": "OK",
         "guard_status_off": "NONE",
         "guard_manage_menu": (
-            "<b>Bot Guard - Управление</b>\n"
+            "<blockquote><b>Bot Guard | Управление</b></blockquote>\n"
             "<blockquote>API ID: {api_id_display}\n"
             "API Hash: {api_hash_display}\n\n"
-            "Укажите свои Telegram-данные, проверьте токены или добавьте нового бота</blockquote>"
+            "Укажите ваши Telegram API данные, проверьте токены или добавьте бота</blockquote>"
         ),
-        "guard_input_api_id": "Отправьте свой Telegram api_id (число, с my.telegram.org):",
-        "guard_input_api_hash": "Отправьте свой Telegram api_hash (с my.telegram.org):",
+        "guard_input_api_id": "Отправьте ваш Telegram api_id (число, с my.telegram.org):",
+        "guard_input_api_hash": "Отправьте ваш Telegram api_hash (с my.telegram.org):",
         "guard_api_id_invalid": (
-            "<b>Неверный API ID</b>\n"
+            "<blockquote><b>Неверный API ID</b></blockquote>\n"
             "<blockquote>api_id должен быть положительным числом.</blockquote>"
         ),
         "guard_api_hash_invalid": (
-            "<b>Неверный API Hash</b>\n"
-            "<blockquote>Это не похоже на корректный api_hash.</blockquote>"
+            "<blockquote><b>Неверный API Hash</b></blockquote>\n"
+            "<blockquote>Строка не похожа на валидный api_hash.</blockquote>"
         ),
-        "guard_input_token": "Отправьте токен бота (из @BotFather):",
+        "guard_input_token": "Отправьте токен бота (от @BotFather):",
         "guard_testing": (
-            "<b>Проверяем токен...</b>\n"
-            "<blockquote>Обращаемся к Bot API, подождите</blockquote>"
+            "<blockquote><b>Проверка токена...</b></blockquote>\n"
+            "<blockquote>Запрос к Bot API, пожалуйста подождите</blockquote>"
         ),
         "guard_add_invalid": (
-            "<b>Неверный токен</b>\n"
+            "<blockquote><b>Неверный токен</b></blockquote>\n"
             "<blockquote>Bot API не принял этот токен. Ничего не добавлено.</blockquote>"
         ),
         "guard_add_duplicate": (
-            "<b>Уже добавлен</b>\n"
+            "<blockquote><b>Уже добавлен</b></blockquote>\n"
             "<blockquote>@{username} уже есть в списке Bot Guard.</blockquote>"
         ),
         "guard_add_limit": (
-            "<b>Достигнут лимит</b>\n"
+            "<blockquote><b>Достигнут лимит</b></blockquote>\n"
             "<blockquote>Можно подключить максимум 10 ботов.</blockquote>"
         ),
         "guard_add_success": (
-            "<b>Бот добавлен</b>\n"
+            "<blockquote><b>Бот добавлен</b></blockquote>\n"
             "<blockquote>@{username} добавлен в Bot Guard.{credentials_hint}</blockquote>"
         ),
         "guard_credentials_hint": "\nУкажите api_id/api_hash в Управлении перед включением защиты.",
         "guard_check_all_none": (
-            "<b>Проверка всех</b>\n"
+            "<blockquote><b>Проверка всех</b></blockquote>\n"
             "<blockquote>Нет ботов для проверки.</blockquote>"
         ),
         "guard_check_all_result": (
-            "<b>Проверка всех - Результат</b>\n"
+            "<blockquote><b>Проверка всех | Результат</b></blockquote>\n"
             "<blockquote>Проверено: {checked}\n"
-            "Всё ещё валидны: {valid}\n"
-            "Удалено (невалидны): {removed}</blockquote>"
+            "Все еще валидны: {valid}\n"
+            "Удалено: {removed}</blockquote>"
         ),
         "guard_bot_view": (
-            "<b>Бот: @{username}</b>\n"
+            "<blockquote><b>Бот: @{username}</b></blockquote>\n"
             "<blockquote>Защита: {status}</blockquote>"
         ),
         "guard_bot_not_found": (
-            "<b>Не найдено</b>\n"
+            "<blockquote><b>Не найдено</b></blockquote>\n"
             "<blockquote>Этого бота больше нет в списке.</blockquote>"
         ),
         "guard_credentials_missing": (
-            "<b>Не указаны API данные</b>\n"
+            "<blockquote><b>Не указаны API данные</b></blockquote>\n"
             "<blockquote>Укажите api_id и api_hash в Управлении перед включением защиты.</blockquote>"
         ),
         "guard_protection_on_failed": (
-            "<b>Не удалось включить</b>\n"
+            "<blockquote><b>Не удалось включить</b></blockquote>\n"
             "<blockquote>Не удалось запустить сессию бота. Токен может быть неверным или отозванным.</blockquote>"
         ),
         "guard_token_deleted": (
-            "<b>Токен удалён</b>\n"
-            "<blockquote>@{username} удалён из Bot Guard.</blockquote>"
+            "<blockquote><b>Токен удален</b></blockquote>\n"
+            "<blockquote>@{username} удален из Bot Guard.</blockquote>"
         ),
     }
 
     def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "LEAVE_MESSAGE",
+                "Suck my balls",
+                "Message sent by guard bot before leaving a chat",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "SPAM_MESSAGE",
+                "Spam ban btw",
+                "Message sent to raiders before blocking",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "SPAM_MANAGER",
+                True,
+                "Report spam for raiders",
+                validator=loader.validators.Boolean(),
+            ),
+        )
         self._owner = None
+        self._tg_id = None
         self._asset_channel = None
         self._storage_topic = None
         self._whitelist = []
@@ -377,18 +406,32 @@ class RaidProtection(loader.Module):
         except Exception as e:
             logger.error(f"[RaidProtection] _record_ban failed: {e}")
 
+    def _asset_channel_id(self):
+        cid = self._db.get("feroku.forums", "channel_id", None) or self._db.get(
+            "heroku.forums", "channel_id", None
+        )
+        if not cid:
+            return None
+        cid = abs(int(cid))
+        text = str(cid)
+        if text.startswith("100") and len(text) > 12:
+            cid = int(text[3:])
+        return int(f"-100{cid}")
+
     async def _ensure_log_topic(self):
         async with self._flood_lock:
             try:
-                self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
-                if not self._asset_channel:
-                    logger.warning("[RaidProtection] heroku.forums channel_id not found in DB.")
+                cid = self._asset_channel_id()
+                if not cid:
                     self._setup_failed = True
                     return
+                self._asset_channel = abs(cid)
+                if str(self._asset_channel).startswith("100"):
+                    self._asset_channel = int(str(self._asset_channel)[3:])
                 self._storage_topic = await utils.asset_forum_topic(
                     self._client,
                     self._db,
-                    self._asset_channel,
+                    cid,
                     "Raid Logs",
                     description="Raid protection logs.",
                     icon_emoji_id=5303057349425013341,
@@ -398,66 +441,95 @@ class RaidProtection(loader.Module):
                 logger.error(f"[RaidProtection] Failed to create/get log topic: {e}")
                 self._setup_failed = True
                 try:
-                    await self.inline.bot.send_message(
-                        self._owner.id,
-                        self.strings["inline_create_failed"],
-                        parse_mode="HTML",
-                    )
+                    bot = getattr(getattr(self, "inline", None), "_bot_client", None) or getattr(getattr(self, "inline", None), "bot", None)
+                    if bot and self._owner:
+                        await bot.send_message(
+                            self._owner.id,
+                            self.strings["inline_create_failed"],
+                            parse_mode="HTML",
+                        )
                 except Exception:
                     pass
 
+    def _owners(self):
+        owners = set()
+        if self._owner:
+            owners.add(self._owner.id)
+        if self._tg_id:
+            owners.add(self._tg_id)
+        if self._client:
+            if getattr(self._client, "tg_id", None):
+                owners.add(self._client.tg_id)
+            dispatcher = getattr(self._client, "dispatcher", None)
+            security = getattr(dispatcher, "security", None)
+            if security and hasattr(security, "_owner"):
+                owners.update(security._owner or [])
+        return owners
+
     async def client_ready(self, client, db):
         self._client = client
+        self._db = db
         self._owner = await client.get_me()
+        self._tg_id = self._owner.id if self._owner else getattr(client, "tg_id", None)
         self._whitelist = list(set(self.get("whitelist", [])) | HARDCODED_WHITELIST)
 
         await self._ensure_log_topic()
 
-        if self._storage_topic and self._asset_channel:
-            chat_id = int(f"-100{self._asset_channel}")
-            greeting_key = f"raidprotection_greeted_{self._asset_channel}_{self._storage_topic.id}"
-            already_greeted = self.get(greeting_key, False)
-            if already_greeted:
-                await self._send_with_preview(chat_id, self.strings["reloaded"])
-            else:
-                self.set(greeting_key, True)
+        guard_bots_raw = self.get("guard_bots", {})
+        if isinstance(guard_bots_raw, dict):
+            self._guard_bots = guard_bots_raw
 
-        self._guard_bots = self.get("guard_bots", {})
         for username, info in list(self._guard_bots.items()):
-            if info.get("protected"):
+            if info.get("enabled"):
                 asyncio.ensure_future(self._guard_safe_start(username))
 
-    async def _send_with_preview(self, chat_id, text):
+        cid = self._asset_channel_id()
+        if cid and self._storage_topic:
+            greet_key = f"rp_greeted_{cid}_{self._storage_topic.id}"
+            already = self.get(greet_key, False)
+            ver_str = ".".join(map(str, __version__))
+            if already:
+                await self._send_with_preview(self.strings["reloaded"])
+            else:
+                self.set(greet_key, True)
+                await self._send_with_preview(self.strings["greeting_first"].format(ver=ver_str))
+
+    async def _send_with_preview(self, text):
+        cid = self._asset_channel_id()
+        if not cid or not self._storage_topic:
+            return
+        bot = getattr(getattr(self, "inline", None), "_bot_client", None) or getattr(getattr(self, "inline", None), "bot", None)
+        if not bot:
+            return
         try:
-            msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
-            msg = await self.inline.bot.send_message(
-                chat_id,
+            msg_text, entities = await bot._parse_message_text(text, "html")
+            msg = await bot.send_message(
+                cid,
                 msg_text,
                 parse_mode=None,
                 entities=entities,
                 message_thread_id=self._storage_topic.id,
             )
-            if msg:
-                try:
-                    peer = await self.inline.bot.get_input_entity(chat_id)
-                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
-                    reply_markup = current_msg.reply_markup if current_msg else None
-                    await self.inline.bot(EditMessageRequest(
-                        peer=peer,
-                        id=msg.id,
-                        message=msg_text,
-                        media=InputMediaWebPage(
-                            url=RELOADING_MEDIA_URL,
-                            optional=True,
-                            force_large_media=True,
-                        ),
-                        invert_media=True,
-                        reply_markup=reply_markup,
-                        entities=entities,
-                        no_webpage=False,
-                    ))
-                except Exception as e:
-                    logger.error(f"[RaidProtection] Failed to add preview: {e}")
+            try:
+                peer = await bot.get_input_entity(cid)
+                current_msg = await bot.get_messages(cid, ids=msg.id)
+                reply_markup = current_msg.reply_markup if current_msg else None
+                await bot(EditMessageRequest(
+                    peer=peer,
+                    id=msg.id,
+                    message=msg_text,
+                    media=InputMediaWebPage(
+                        url=RELOADING_MEDIA_URL,
+                        optional=True,
+                        force_large_media=True,
+                    ),
+                    invert_media=True,
+                    reply_markup=reply_markup,
+                    entities=entities,
+                    no_webpage=False,
+                ))
+            except Exception as e:
+                logger.error(f"[RaidProtection] Failed to add preview: {e}")
         except Exception as e:
             logger.error(f"[RaidProtection] Failed to send message with preview: {e}")
 
@@ -466,15 +538,21 @@ class RaidProtection(loader.Module):
             await self._stop_guard_bot(username)
 
     async def _raw_send_log(self, text):
-        if not self._storage_topic or not self._asset_channel:
+        cid = self._asset_channel_id()
+        if not self._storage_topic or not cid:
             if not self._setup_failed:
                 await self._ensure_log_topic()
             return
+        bot = getattr(getattr(self, "inline", None), "_bot_client", None) or getattr(getattr(self, "inline", None), "bot", None)
+        if not bot:
+            return
         try:
-            await self.inline.bot.send_message(
-                int(f"-100{self._asset_channel}"),
-                text,
-                parse_mode="HTML",
+            msg_text, entities = await bot._parse_message_text(text, "html")
+            await bot.send_message(
+                cid,
+                msg_text,
+                parse_mode=None,
+                entities=entities,
                 disable_web_page_preview=True,
                 message_thread_id=self._storage_topic.id,
             )
@@ -484,14 +562,18 @@ class RaidProtection(loader.Module):
                 await self._ensure_log_topic()
 
     async def _raw_send_log_file(self, file_path, filename):
-        if not self._storage_topic or not self._asset_channel:
+        cid = self._asset_channel_id()
+        if not self._storage_topic or not cid:
+            return
+        bot = getattr(getattr(self, "inline", None), "_bot_client", None) or getattr(getattr(self, "inline", None), "bot", None)
+        if not bot:
             return
         try:
             with open(file_path, "rb") as f:
-                await self.inline.bot.send_document(
-                    int(f"-100{self._asset_channel}"),
+                await bot.send_file(
+                    cid,
                     f,
-                    filename=filename,
+                    attributes=[DocumentAttributeFilename(filename)],
                     message_thread_id=self._storage_topic.id,
                 )
         except Exception as e:
@@ -518,128 +600,116 @@ class RaidProtection(loader.Module):
             now = datetime.now()
             filename = f"Raid_logs_{now.day:02d}_{now.month:02d}_{now.year}.txt"
             tz_name = datetime.now().astimezone().tzname() or "UTC"
-            raid_start_str = raid_start_time.strftime(f"%d.%m.%Y %H:%M:%S {tz_name}")
+            header = (
+                f"Raid Log File\n"
+                f"Date: {now.strftime('%d.%m.%Y')}\n"
+                f"Raid start time: {raid_start_time} {tz_name}\n"
+                f"Total records: {len(buffer)}\n"
+                f"{'=' * 40}\n\n"
+            )
+            content = header + "\n\n".join(buffer)
 
-            lines = [f"Raid started: {raid_start_str}\n\n"]
-            for entry in buffer:
-                lines.append(entry + "\n\n")
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+                f.write(content)
+                tmp_path = f.name
 
-            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".txt")
             try:
-                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-                    f.writelines(lines)
                 await self._raw_send_log_file(tmp_path, filename)
             finally:
-                try:
+                with contextlib.suppress(Exception):
                     os.remove(tmp_path)
-                except Exception:
-                    pass
         except Exception as e:
             logger.error(f"[RaidProtection] _flush_safe_buffer failed: {e}")
-        finally:
-            self._safe_send_task = None
 
     async def _send_log(self, text):
-        try:
-            async with self._log_tokens_lock:
-                now = asyncio.get_event_loop().time()
-                if self._log_tokens_last_refill == 0.0:
-                    self._log_tokens_last_refill = now
+        async with self._log_tokens_lock:
+            self._refill_log_tokens()
 
-                self._refill_log_tokens()
+            if self._safe_send_mode:
+                self._safe_send_buffer.append(text)
+                return
 
-                if self._safe_send_mode:
-                    self._safe_send_buffer.append(text)
-                    return
+            if self._log_tokens >= 1.0:
+                self._log_tokens -= 1.0
+                await self._raw_send_log(text)
+            else:
+                self._safe_send_mode = True
+                self._safe_send_buffer.append(text)
 
-                if self._log_tokens >= 1:
-                    self._log_tokens -= 1
-                else:
-                    self._safe_send_mode = True
-                    self._safe_send_until = now + SAFE_SEND_DURATION
-                    self._safe_send_buffer.append(text)
+                if not self._safe_send_notice_sent:
+                    self._safe_send_notice_sent = True
+                    await self._raw_send_log(self.strings["log_rate_limit_notice"])
 
-                    if not self._safe_send_notice_sent:
-                        self._safe_send_notice_sent = True
-                        asyncio.ensure_future(self._raw_send_log(self.strings["log_rate_limit_notice"]))
+                raid_start = datetime.now().strftime("%H:%M:%S")
+                if self._safe_send_task and not self._safe_send_task.done():
+                    self._safe_send_task.cancel()
+                self._safe_send_task = asyncio.ensure_future(
+                    self._flush_safe_buffer(raid_start)
+                )
 
-                    raid_start_time = datetime.now()
-                    if self._safe_send_task is None or self._safe_send_task.done():
-                        self._safe_send_task = asyncio.ensure_future(
-                            self._flush_safe_buffer(raid_start_time)
-                        )
-                    return
-        except Exception as e:
-            logger.error(f"[RaidProtection] _send_log token logic failed: {e}")
-
-        try:
-            await self._raw_send_log(text)
-        except Exception as e:
-            logger.error(f"[RaidProtection] _send_log raw send failed: {e}")
-
-    def _approve(self, user_id, reason="unknown"):
-        try:
-            if user_id not in self._whitelist:
-                self._whitelist.append(user_id)
-            self.set("whitelist", self._whitelist)
-            self._processing.discard(user_id)
-            logger.debug(f"[RaidProtection] Approved {user_id}, reason: {reason}")
-        except Exception as e:
-            logger.error(f"[RaidProtection] _approve failed: {e}")
+    def _approve(self, cid, reason=""):
+        self._whitelist.append(cid)
+        self.set("whitelist", self._whitelist)
+        self._processing.discard(cid)
 
     def _get_main_markup(self):
         return [
             [
-                {"text": self.strings["btn_toggle"], "callback": self._cb_toggle, "style": "success" if not self.get("state", False) else "danger"},
+                {"text": self.strings["btn_toggle"], "callback": self._cb_toggle, "style": "primary"},
+                {"text": self.strings["btn_stats"],  "callback": self._cb_stats,  "style": "primary"},
             ],
             [
-                {"text": self.strings["btn_guard"], "callback": self._cb_guard_menu, "style": "primary"},
+                {"text": self.strings["btn_guard"],  "callback": self._cb_guard_menu, "style": "primary"},
             ],
             [
-                {"text": self.strings["btn_stats"], "callback": self._cb_stats, "style": "primary"},
-            ],
-            [
-                {"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"},
+                {"text": self.strings["btn_close"],  "callback": self._cb_close,  "style": "danger"},
             ],
         ]
 
     def _format_main_text(self):
-        status = self.strings["status_enabled"] if self.get("state", False) else self.strings["status_disabled"]
+        state = self.get("state", False)
+        status_key = "status_enabled" if state else "status_disabled"
         total = self.get("total_bans", 0)
-        return self.strings["main_menu"].format(status=status, total=total)
+        return self.strings["main_menu"].format(
+            status=self.strings[status_key],
+            total=total,
+        )
 
     async def _cb_main_menu(self, call: InlineCall):
-        await call.edit(self._format_main_text(), reply_markup=self._get_main_markup())
+        await call.edit(
+            self._format_main_text(),
+            reply_markup=self._get_main_markup(),
+        )
 
     async def _cb_toggle(self, call: InlineCall):
         current = self.get("state", False)
-        new = not current
-        self.set("state", new)
-        if new:
-            await call.edit(
-                self.strings["enabled"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
-            )
-        else:
-            await call.edit(
-                self.strings["disabled"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
-            )
+        new_state = not current
+        self.set("state", new_state)
+        await call.edit(
+            self._format_main_text(),
+            reply_markup=self._get_main_markup(),
+        )
 
     async def _cb_stats(self, call: InlineCall):
-        total = self.get("total_bans", 0)
         ban_dates = self.get("ban_dates", [])
-        if total == 0 or not ban_dates:
-            await call.edit(
-                self.strings["stats_empty"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+        total = self.get("total_bans", 0)
+
+        if not ban_dates:
+            text = self.strings["stats_empty"]
+        else:
+            counts = Counter(ban_dates)
+            peak_date, peak_count = counts.most_common(1)[0]
+            text = self.strings["stats_menu"].format(
+                total=total,
+                peak_date=peak_date,
+                peak_count=peak_count,
             )
-            return
-        date_counter = Counter(ban_dates)
-        peak_date, peak_count = date_counter.most_common(1)[0]
+
         await call.edit(
-            self.strings["stats_menu"].format(total=total, peak_date=peak_date, peak_count=peak_count),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
+            text,
+            reply_markup=[
+                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
+            ],
         )
 
     async def _cb_close(self, call: InlineCall):
@@ -650,32 +720,83 @@ class RaidProtection(loader.Module):
 
     async def _check_bot_token(self, token):
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                async with session.get(f"https://api.telegram.org/bot{token}/getMe") as resp:
+            timeout = aiohttp.ClientTimeout(total=8)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                url = f"https://api.telegram.org/bot{token}/getMe"
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        return None
                     data = await resp.json()
-                    if data.get("ok") and data.get("result"):
-                        return data["result"].get("username")
-        except Exception as e:
-            logger.error(f"[RaidProtection][BotGuard] Token check failed: {e}")
+                    if data.get("ok"):
+                        return data.get("result", {})
+        except Exception:
+            pass
         return None
 
-    async def _guard_leave_chat(self, client, chat_id):
-        if chat_id in client.guard_leaving:
+    async def _guard_leave_chat(self, client, chat_id, adder=None, chat=None, bot_username=None):
+        if chat_id in getattr(client, "guard_leaving", set()):
+            return
+        if chat_id in getattr(client, "owner_chats", set()):
             return
         client.guard_leaving.add(chat_id)
+        leave_msg = self.config["LEAVE_MESSAGE"]
         try:
+            if not adder:
+                try:
+                    me_id = getattr(client, "guard_me_id", None)
+                    async for action_msg in client.iter_messages(chat_id, limit=20):
+                        action = getattr(action_msg, "action", None)
+                        if action:
+                            uids = getattr(action, "users", [])
+                            if me_id in uids:
+                                adder = await client.get_entity(action_msg.sender_id)
+                                break
+                except Exception:
+                    pass
+
+            if adder and adder.id in self._owners():
+                client.owner_chats.add(chat_id)
+                return
+
+            if leave_msg:
+                try:
+                    await client.send_message(chat_id, leave_msg)
+                except (ChatWriteForbiddenError, RPCError):
+                    pass
+                except Exception:
+                    pass
             try:
-                await client.send_message(chat_id, self.strings["guard_leave_message"])
-            except (ChatWriteForbiddenError, RPCError):
-                pass
-            except Exception:
-                pass
-            try:
-                await client.delete_dialog(chat_id)
-            except RPCError:
-                pass
-            except Exception:
-                pass
+                try:
+                    await client.delete_dialog(chat_id, revoke=False)
+                except Exception:
+                    await client.delete_dialog(chat_id, revoke=True)
+            except Exception as e:
+                tb = traceback.format_exc()
+                logger.error(f"[RaidProtection][BotGuard] Failed to delete dialog {chat_id}: {e}")
+                await self._send_log(
+                    f"<blockquote><b>Bot Guard | Leave Dialog Error</b></blockquote>\n"
+                    f"<blockquote>Chat: <code>{chat_id}</code>\n"
+                    f"Error: <code>{self._escape(str(e))}</code></blockquote>\n"
+                    f"<pre><code class=\"language-error\">{self._escape(tb[-800:])}</code></pre>"
+                )
+
+            chat_title = getattr(chat, "title", None) or str(chat_id)
+            bot_tag = f"@{bot_username}" if bot_username else "Bot Guard"
+            if adder:
+                adder_name = self._escape(get_display_name(adder))
+                adder_uname = f" (@{adder.username})" if getattr(adder, "username", None) else ""
+                adder_info = f"<a href='tg://user?id={adder.id}'>{adder_name}</a>{adder_uname} (ID: <code>{adder.id}</code>)"
+            else:
+                adder_info = "Unknown"
+
+            log_text = (
+                f"<blockquote><b>Bot Guard Triggered</b></blockquote>\n"
+                f"<blockquote>Bot: <b>{bot_tag}</b>\n"
+                f"Chat: <b>{self._escape(chat_title)}</b> (ID: <code>{chat_id}</code>)\n"
+                f"Added by: {adder_info}\n"
+                f"Action: Left chat and cleared dialogue</blockquote>"
+            )
+            await self._send_log(log_text)
         finally:
             client.guard_leaving.discard(chat_id)
 
@@ -706,6 +827,7 @@ class RaidProtection(loader.Module):
             token = info["token"]
             client = TelegramClient(MemorySession(), api_id, api_hash)
             client.guard_leaving = set()
+            client.owner_chats = set()
             client.guard_me_id = None
 
             async def _on_action(event):
@@ -722,13 +844,54 @@ class RaidProtection(loader.Module):
                         affected_ids.update(event.user_ids)
                     if me.id not in affected_ids:
                         return
-                    await self._guard_leave_chat(client, event.chat_id)
+
+                    adder = None
+                    try:
+                        adder = await event.get_added_by()
+                    except Exception:
+                        pass
+                    if not adder and hasattr(event, "action_message") and event.action_message:
+                        try:
+                            adder = await client.get_entity(event.action_message.sender_id)
+                        except Exception:
+                            pass
+                    adder_id = getattr(adder, "id", None) or getattr(event, "added_by", None)
+                    if adder_id in self._owners():
+                        client.owner_chats.add(event.chat_id)
+                        return
+
+                    chat = None
+                    try:
+                        chat = await event.get_chat()
+                    except Exception:
+                        pass
+
+                    await self._guard_leave_chat(
+                        client, event.chat_id, adder=adder, chat=chat, bot_username=username
+                    )
                 except Exception as e:
                     logger.error(f"[RaidProtection][BotGuard] _on_action error: {e}")
 
             async def _on_message(event):
                 try:
-                    await self._guard_leave_chat(client, event.chat_id)
+                    if event.chat_id in getattr(client, "owner_chats", set()):
+                        return
+                    if event.sender_id in self._owners():
+                        client.owner_chats.add(event.chat_id)
+                        return
+                    chat = None
+                    try:
+                        chat = await event.get_chat()
+                    except Exception:
+                        pass
+                    sender = None
+                    try:
+                        sender = await event.get_sender()
+                    except Exception:
+                        pass
+                    await self._guard_leave_chat(
+                        client, event.chat_id, adder=sender, chat=chat, bot_username=username
+                    )
                 except Exception as e:
                     logger.error(f"[RaidProtection][BotGuard] _on_message error: {e}")
 
@@ -743,26 +906,24 @@ class RaidProtection(loader.Module):
                 me = await client.get_me()
                 client.guard_me_id = me.id
             except Exception as e:
-                logger.error(f"[RaidProtection][BotGuard] Failed to start {username}: {e}")
+                logger.error(f"[RaidProtection][BotGuard] Client start failed for @{username}: {e}")
                 with contextlib.suppress(Exception):
                     await client.disconnect()
                 return False, "start_failed"
 
             self._guard_clients[username] = client
-            return True, "started"
+            return True, "ok"
         except Exception as e:
-            logger.error(f"[RaidProtection][BotGuard] _start_guard_bot unexpected error: {e}")
-            return False, "start_failed"
+            logger.error(f"[RaidProtection][BotGuard] _start_guard_bot error for @{username}: {e}")
+            return False, "error"
 
     async def _stop_guard_bot(self, username):
-        try:
-            client = self._guard_clients.pop(username, None)
-            if not client:
-                return
-            with contextlib.suppress(Exception):
+        client = self._guard_clients.pop(username, None)
+        if client:
+            try:
                 await client.disconnect()
-        except Exception as e:
-            logger.error(f"[RaidProtection][BotGuard] _stop_guard_bot error: {e}")
+            except Exception as e:
+                logger.error(f"[RaidProtection][BotGuard] Disconnect error for @{username}: {e}")
 
     def _format_guard_menu_text(self):
         bots = self._guard_bots
@@ -771,144 +932,166 @@ class RaidProtection(loader.Module):
             bot_list = self.strings["guard_menu_empty_line"]
         else:
             lines = []
-            for username, info in bots.items():
-                status = self.strings["guard_status_on"] if info.get("protected") else self.strings["guard_status_off"]
-                lines.append(self.strings["guard_bot_line"].format(status=status, username=username))
+            for uname, binfo in bots.items():
+                running = binfo.get("enabled", False) and uname in self._guard_clients
+                status = self.strings["guard_status_on"] if running else self.strings["guard_status_off"]
+                lines.append(self.strings["guard_bot_line"].format(status=status, username=uname))
             bot_list = "\n".join(lines)
         return self.strings["guard_menu"].format(count=count, bot_list=bot_list)
 
     def _get_guard_markup(self):
-        rows = []
-        for username in list(self._guard_bots.keys())[:GUARD_MAX_BOTS]:
-            rows.append([{
-                "text": f"@{username}",
+        buttons = []
+        row = []
+        for uname in self._guard_bots:
+            row.append({
+                "text": f"@{uname}",
                 "callback": self._cb_guard_bot_view,
-                "args": (username,),
+                "args": (uname,),
                 "style": "primary",
-            }])
-        rows.append([{"text": self.strings["btn_manage"], "callback": self._cb_guard_manage, "style": "primary"}])
-        rows.append([{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}])
-        return rows
+            })
+            if len(row) == 2:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+
+        buttons.append([
+            {"text": self.strings["btn_manage"], "callback": self._cb_guard_manage, "style": "primary"},
+        ])
+        buttons.append([
+            {"text": self.strings["btn_back"],   "callback": self._cb_main_menu,   "style": "primary"},
+        ])
+        return buttons
 
     async def _cb_guard_menu(self, call: InlineCall):
-        await call.edit(self._format_guard_menu_text(), reply_markup=self._get_guard_markup())
-
-    async def _cb_guard_manage(self, call: InlineCall):
-        api_id = self.get("guard_api_id")
-        api_hash = self.get("guard_api_hash")
-
-        if api_id:
-            api_id_display = f"<code>{api_id}</code>"
-        else:
-            api_id_display = "Not set"
-
-        if api_hash:
-            api_hash_display = f"<code>{api_hash[:6]}***</code>"
-        else:
-            api_hash_display = "Not set"
-
         await call.edit(
-            self.strings["guard_manage_menu"].format(api_id_display=api_id_display, api_hash_display=api_hash_display),
-            reply_markup=[
-                [
-                    {"text": self.strings["btn_set_api_id"], "input": self.strings["guard_input_api_id"], "handler": self._cb_guard_set_api_id, "style": "primary"},
-                    {"text": self.strings["btn_set_api_hash"], "input": self.strings["guard_input_api_hash"], "handler": self._cb_guard_set_api_hash, "style": "primary"},
-                ],
-                [{"text": self.strings["btn_check_all"], "callback": self._cb_guard_check_all, "style": "primary"}],
-                [{"text": self.strings["btn_add_bot"], "input": self.strings["guard_input_token"], "handler": self._cb_guard_add_token, "style": "success"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}],
-            ],
+            self._format_guard_menu_text(),
+            reply_markup=self._get_guard_markup(),
         )
 
-    async def _cb_guard_set_api_id(self, call: InlineCall, query: str):
-        value = query.strip()
+    async def _cb_guard_manage(self, call: InlineCall):
+        api_id_val = self.get("guard_api_id")
+        api_hash_val = self.get("guard_api_hash")
+        api_id_disp = f"<code>{api_id_val}</code>" if api_id_val else "<i>not set</i>"
+        api_hash_disp = f"<code>{api_hash_val[:4]}...{api_hash_val[-4:]}</code>" if api_hash_val and len(str(api_hash_val)) >= 8 else ("<code>***</code>" if api_hash_val else "<i>not set</i>")
+
+        text = self.strings["guard_manage_menu"].format(
+            api_id_display=api_id_disp,
+            api_hash_display=api_hash_disp,
+        )
+        markup = [
+            [
+                {"text": self.strings["btn_check_all"], "callback": self._cb_guard_check_all, "style": "primary"},
+                {"text": self.strings["btn_add_bot"],   "input": self.strings["guard_input_token"], "handler": self._cb_guard_add_token, "style": "success"},
+            ],
+            [
+                {"text": self.strings["btn_set_api_id"],   "input": self.strings["guard_input_api_id"],   "handler": self._cb_guard_set_api_id,   "style": "primary"},
+                {"text": self.strings["btn_set_api_hash"], "input": self.strings["guard_input_api_hash"], "handler": self._cb_guard_set_api_hash, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "primary"},
+            ],
+        ]
+        await call.edit(text, reply_markup=markup)
+
+    async def _cb_guard_set_api_id(self, call: InlineCall, value: str):
+        value = value.strip()
         try:
-            api_id = int(value)
-            if api_id <= 0:
+            parsed = int(value)
+            if parsed <= 0:
                 raise ValueError
-        except ValueError:
+        except (ValueError, TypeError):
             await call.edit(
                 self.strings["guard_api_id_invalid"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_manage, "style": "danger"}]],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_manage, "style": "primary"}]],
             )
             return
-        self.set("guard_api_id", api_id)
+        self.set("guard_api_id", parsed)
         await self._cb_guard_manage(call)
 
-    async def _cb_guard_set_api_hash(self, call: InlineCall, query: str):
-        value = query.strip()
-        if not value or len(value) < 10:
+    async def _cb_guard_set_api_hash(self, call: InlineCall, value: str):
+        value = value.strip()
+        if len(value) < 16 or not re.match(r"^[0-9a-fA-F]+$", value):
             await call.edit(
                 self.strings["guard_api_hash_invalid"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_manage, "style": "danger"}]],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_manage, "style": "primary"}]],
             )
             return
         self.set("guard_api_hash", value)
         await self._cb_guard_manage(call)
 
-    async def _cb_guard_add_token(self, call: InlineCall, query: str):
-        token = query.strip()
-        await call.edit(self.strings["guard_testing"])
-
+    async def _cb_guard_add_token(self, call: InlineCall, token: str):
+        token = token.strip()
         if len(self._guard_bots) >= GUARD_MAX_BOTS:
             await call.edit(
                 self.strings["guard_add_limit"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}]],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_manage, "style": "primary"}]],
             )
             return
 
-        username = await self._check_bot_token(token)
-        if not username:
+        await call.edit(self.strings["guard_testing"])
+
+        bot_info = await self._check_bot_token(token)
+        if not bot_info or not bot_info.get("username"):
             await call.edit(
                 self.strings["guard_add_invalid"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_manage, "style": "danger"}]],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_manage, "style": "primary"}]],
             )
             return
 
+        username = bot_info["username"]
         if username in self._guard_bots:
             await call.edit(
                 self.strings["guard_add_duplicate"].format(username=username),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}]],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_manage, "style": "primary"}]],
             )
             return
 
-        self._guard_bots[username] = {"token": token, "protected": False}
+        self._guard_bots[username] = {
+            "token": token,
+            "id": bot_info.get("id"),
+            "enabled": False,
+        }
         self._guard_save()
 
-        has_credentials = bool(self.get("guard_api_id")) and bool(self.get("guard_api_hash"))
-        credentials_hint = "" if has_credentials else self.strings["guard_credentials_hint"]
-
+        has_creds = bool(self.get("guard_api_id") and self.get("guard_api_hash"))
+        hint = "" if has_creds else self.strings["guard_credentials_hint"]
         await call.edit(
-            self.strings["guard_add_success"].format(username=username, credentials_hint=credentials_hint),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}]],
+            self.strings["guard_add_success"].format(username=username, credentials_hint=hint),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_manage, "style": "primary"}]],
         )
 
     async def _cb_guard_check_all(self, call: InlineCall):
         if not self._guard_bots:
             await call.edit(
                 self.strings["guard_check_all_none"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}]],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_manage, "style": "primary"}]],
             )
             return
 
-        checked = 0
+        await call.edit(self.strings["guard_testing"])
+
+        checked = len(self._guard_bots)
         valid = 0
         removed = 0
+
         for username, info in list(self._guard_bots.items()):
-            checked += 1
-            result_username = await self._check_bot_token(info["token"])
-            if result_username:
+            bot_info = await self._check_bot_token(info.get("token", ""))
+            if bot_info and bot_info.get("username"):
                 valid += 1
             else:
                 removed += 1
                 await self._stop_guard_bot(username)
-                self._guard_bots.pop(username, None)
+                del self._guard_bots[username]
 
-        self._guard_save()
+        if removed:
+            self._guard_save()
 
         await call.edit(
-            self.strings["guard_check_all_result"].format(checked=checked, valid=valid, removed=removed),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}]],
+            self.strings["guard_check_all_result"].format(
+                checked=checked, valid=valid, removed=removed
+            ),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_manage, "style": "primary"}]],
         )
 
     async def _cb_guard_bot_view(self, call: InlineCall, username: str):
@@ -916,63 +1099,72 @@ class RaidProtection(loader.Module):
         if not info:
             await call.edit(
                 self.strings["guard_bot_not_found"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}]],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "primary"}]],
             )
             return
 
-        protected = info.get("protected", False)
-        status_text = self.strings["status_enabled"] if protected else self.strings["status_disabled"]
-        toggle_text = self.strings["btn_disable_protection"] if protected else self.strings["btn_enable_protection"]
-        toggle_style = "danger" if protected else "success"
+        running = info.get("enabled", False) and username in self._guard_clients
+        status = self.strings["guard_status_on"] if running else self.strings["guard_status_off"]
+        toggle_label = self.strings["btn_disable_protection"] if running else self.strings["btn_enable_protection"]
+        toggle_style = "danger" if running else "success"
 
+        markup = [
+            [{"text": toggle_label, "callback": self._cb_guard_toggle, "args": (username,), "style": toggle_style}],
+            [{"text": self.strings["btn_delete_token"], "callback": self._cb_guard_delete_token, "args": (username,), "style": "danger"}],
+            [{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "primary"}],
+        ]
         await call.edit(
-            self.strings["guard_bot_view"].format(username=username, status=status_text),
-            reply_markup=[
-                [{"text": toggle_text, "callback": self._cb_guard_toggle, "args": (username,), "style": toggle_style}],
-                [{"text": self.strings["btn_delete_token"], "callback": self._cb_guard_delete_token, "args": (username,), "style": "danger"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}],
-            ],
+            self.strings["guard_bot_view"].format(username=username, status=status),
+            reply_markup=markup,
         )
 
     async def _cb_guard_toggle(self, call: InlineCall, username: str):
         info = self._guard_bots.get(username)
         if not info:
-            await call.edit(
-                self.strings["guard_bot_not_found"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}]],
-            )
+            await self._cb_guard_menu(call)
             return
 
-        if info.get("protected"):
+        current_enabled = info.get("enabled", False) and username in self._guard_clients
+        if current_enabled:
             await self._stop_guard_bot(username)
-            info["protected"] = False
+            info["enabled"] = False
             self._guard_save()
+            await self._cb_guard_bot_view(call, username)
         else:
-            started, reason = await self._start_guard_bot(username)
-            if not started:
-                text_key = "guard_credentials_missing" if reason == "no_credentials" else "guard_protection_on_failed"
+            has_creds = bool(self.get("guard_api_id") and self.get("guard_api_hash"))
+            if not has_creds:
                 await call.edit(
-                    self.strings[text_key],
-                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_bot_view, "args": (username,), "style": "danger"}]],
+                    self.strings["guard_credentials_missing"],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_bot_view, "args": (username,), "style": "primary"}]],
                 )
                 return
-            info["protected"] = True
-            self._guard_save()
 
-        await self._cb_guard_bot_view(call, username)
+            ok, reason = await self._start_guard_bot(username)
+            if ok:
+                info["enabled"] = True
+                self._guard_save()
+                await self._cb_guard_bot_view(call, username)
+            else:
+                await call.edit(
+                    self.strings["guard_protection_on_failed"],
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_bot_view, "args": (username,), "style": "primary"}]],
+                )
 
     async def _cb_guard_delete_token(self, call: InlineCall, username: str):
         if username in self._guard_bots:
             await self._stop_guard_bot(username)
-            self._guard_bots.pop(username, None)
+            del self._guard_bots[username]
             self._guard_save()
 
         await call.edit(
             self.strings["guard_token_deleted"].format(username=username),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "danger"}]],
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_guard_menu, "style": "primary"}]],
         )
 
-    @loader.command()
+    @loader.command(
+        ru_doc="Управление защитой от рейдов",
+        en_doc="Raid protection control",
+    )
     async def rp(self, message: Message):
         """Raid protection control"""
         await self.inline.form(
@@ -990,10 +1182,11 @@ class RaidProtection(loader.Module):
                 or not isinstance(message, (Message, MessageService))
                 or not isinstance(message.peer_id, PeerUser)
                 or not self.get("state", False)
-                or utils.get_chat_id(message) in {777000, self._tg_id}
             ):
                 return
             cid = utils.get_chat_id(message)
+            if cid in self._owners() or cid in {777000}:
+                return
             if cid in self._whitelist or cid in self._processing:
                 return
             self._processing.add(cid)
@@ -1008,7 +1201,7 @@ class RaidProtection(loader.Module):
                 return
             message = self._queue.pop(0)
             cid = utils.get_chat_id(message)
-            if cid in self._whitelist:
+            if cid in self._whitelist or cid in self._owners():
                 self._processing.discard(cid)
                 return
             peer = (
@@ -1026,14 +1219,14 @@ class RaidProtection(loader.Module):
                     pass
             try:
                 first_message = (await self._client.get_messages(peer, limit=1, reverse=True))[0]
-                if first_message.sender_id == self._tg_id:
+                if first_message.sender_id in self._owners():
                     return self._approve(cid, "started_by_you")
             except Exception:
                 pass
             q = 0
             try:
                 async for msg in self._client.iter_messages(peer, limit=200):
-                    if msg.sender_id == self._tg_id:
+                    if msg.sender_id in self._owners():
                         q += 1
                     if q >= 1:
                         return self._approve(cid, "you_wrote_before")
@@ -1074,23 +1267,35 @@ class RaidProtection(loader.Module):
                 except Exception as e:
                     logger.error(f"[RaidProtection] raid_msg_lock logic error: {e}")
 
-            if should_send_raid_msg:
+            spam_msg = self.config["SPAM_MESSAGE"]
+            if should_send_raid_msg and spam_msg:
                 try:
-                    await self._client.send_message(sender_id, self.strings["raid_message"])
+                    await self._client.send_message(sender_id, spam_msg)
                 except Exception as e:
                     logger.error(f"[RaidProtection] Failed to send raid message to {sender_id}: {e}")
 
             report_status = self.strings["report_error"]
-            try:
-                await self._client(ReportSpamRequest(peer=sender_id))
-                report_status = self.strings["report_ok"]
-            except Exception as e:
-                logger.error(f"[RaidProtection] Failed to report spam {sender_id}: {e}")
+            if self.config["SPAM_MANAGER"]:
+                try:
+                    await self._client(ReportSpamRequest(peer=sender_id))
+                    report_status = self.strings["report_ok"]
+                except Exception as e:
+                    logger.error(f"[RaidProtection] Failed to report spam {sender_id}: {e}")
 
             try:
-                await self._client(DeleteHistoryRequest(peer=sender_id, max_id=0, just_clear=True, revoke=False))
+                try:
+                    await self._client(DeleteHistoryRequest(peer=sender_id, max_id=0, just_clear=False, revoke=False))
+                except Exception:
+                    await self._client(DeleteHistoryRequest(peer=sender_id, max_id=0, just_clear=False, revoke=True))
             except Exception as e:
+                tb = traceback.format_exc()
                 logger.error(f"[RaidProtection] Failed to delete history with {sender_id}: {e}")
+                await self._send_log(
+                    f"<blockquote><b>Dialogue deletion error</b></blockquote>\n"
+                    f"<blockquote>User ID: <code>{sender_id}</code>\n"
+                    f"Error: <code>{self._escape(str(e))}</code></blockquote>\n"
+                    f"<pre><code class=\"language-error\">{self._escape(tb[-800:])}</code></pre>"
+                )
 
             try:
                 await self._client(BlockRequest(id=sender_id))
@@ -1118,18 +1323,10 @@ class RaidProtection(loader.Module):
                 )
                 await self._send_log(log_text)
             except Exception as e:
-                logger.error(f"[RaidProtection] Failed to send log for {sender_id}: {e}")
+                logger.error(f"[RaidProtection] Failed to format/send ban log: {e}")
 
-            try:
-                self._record_ban()
-            except Exception as e:
-                logger.error(f"[RaidProtection] _record_ban error for {sender_id}: {e}")
-
-            logger.warning(f"[RaidProtection] Raider processed: {sender_id}")
+            self._record_ban()
         except Exception as e:
             logger.error(f"[RaidProtection] _process_ban unexpected error for {sender_id}: {e}")
         finally:
-            try:
-                self._approve(sender_id, "banned")
-            except Exception as e:
-                logger.error(f"[RaidProtection] _approve in finally error: {e}")
+            self._processing.discard(sender_id)
