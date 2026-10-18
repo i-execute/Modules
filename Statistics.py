@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 1, 0)
+__version__ = (1, 1, 1)
 # meta developer: Execute_forge.t.me
 
 import logging
@@ -19,6 +19,7 @@ from telethon.tl.types import (
     ChannelForbidden,
     ChatForbidden,
 )
+from telethon.utils import get_peer_id
 
 from .. import loader, utils
 
@@ -46,8 +47,9 @@ class Statistics(loader.Module):
             "<b>Archived:</b> <code>{archived}</code></blockquote>\n"
             "<blockquote><b>Users:</b> <code>{users}</code>\n"
             "<b>Bots:</b> <code>{bots}</code>\n"
-            "<b>Groups:</b> <code>{groups}</code>\n"
+            "<b>Groups:</b> <code>{groups}</code> (forums: <code>{forums}</code>)\n"
             "<b>Channels:</b> <code>{channels}</code>\n"
+            "<b>Channel direct messages:</b> <code>{monoforums}</code>\n"
             "<b>Deleted accounts:</b> <code>{deleted}</code></blockquote>\n"
             "<blockquote><b>Contacts:</b> <code>{contacts}</code>\n"
             "<b>Blocked:</b> <code>{blocked}</code></blockquote>\n"
@@ -89,8 +91,9 @@ class Statistics(loader.Module):
             "<b>В архиве:</b> <code>{archived}</code></blockquote>\n"
             "<blockquote><b>Пользователи:</b> <code>{users}</code>\n"
             "<b>Боты:</b> <code>{bots}</code>\n"
-            "<b>Группы:</b> <code>{groups}</code>\n"
+            "<b>Группы:</b> <code>{groups}</code> (форумы: <code>{forums}</code>)\n"
             "<b>Каналы:</b> <code>{channels}</code>\n"
+            "<b>Личка каналов:</b> <code>{monoforums}</code>\n"
             "<b>Удаленные аккаунты:</b> <code>{deleted}</code></blockquote>\n"
             "<blockquote><b>Контакты:</b> <code>{contacts}</code>\n"
             "<b>Заблокировано:</b> <code>{blocked}</code></blockquote>\n"
@@ -223,54 +226,56 @@ class Statistics(loader.Module):
         except Exception:
             await utils.answer(message, text, parse_mode="html")
 
-    async def _count_dialogs(self):
-        users = 0
-        bots = 0
-        groups = 0
-        channels = 0
-        deleted = 0
-        total = 0
-        archived = 0
+    def _dialog_kind(self, ent):
+        if isinstance(ent, User):
+            if getattr(ent, "deleted", False):
+                return "deleted"
+            if getattr(ent, "bot", False):
+                return "bots"
+            if getattr(ent, "is_self", False):
+                return None
+            return "users"
+        if isinstance(ent, Channel):
+            if getattr(ent, "monoforum", False):
+                return "monoforums"
+            if getattr(ent, "broadcast", False):
+                return "channels"
+            return "groups"
+        if isinstance(ent, Chat):
+            return "groups"
+        return None
 
+    async def _count_dialogs(self):
+        counts = dict.fromkeys(
+            ("users", "bots", "groups", "forums", "channels", "monoforums", "deleted", "chats", "archived"),
+            0,
+        )
+        seen = set()
         try:
-            dialogs = await self._client.get_dialogs(limit=None)
-            total = len(dialogs)
-            for d in dialogs:
+            async for d in self._client.iter_dialogs():
                 ent = d.entity
+                try:
+                    key = get_peer_id(d.dialog.peer)
+                except Exception:
+                    key = d.id
+                if key in seen:
+                    continue
+                seen.add(key)
+                if isinstance(ent, Chat) and (getattr(ent, "migrated_to", None) or getattr(ent, "deactivated", False)):
+                    continue
+                counts["chats"] += 1
+                if d.archived:
+                    counts["archived"] += 1
                 if isinstance(ent, (ChannelForbidden, ChatForbidden)):
                     continue
-                if isinstance(ent, User):
-                    if getattr(ent, "deleted", False):
-                        deleted += 1
-                    elif getattr(ent, "bot", False):
-                        bots += 1
-                    elif not getattr(ent, "is_self", False):
-                        users += 1
-                elif isinstance(ent, Channel):
-                    if getattr(ent, "broadcast", False):
-                        channels += 1
-                    else:
-                        groups += 1
-                elif isinstance(ent, Chat):
-                    groups += 1
-        except Exception:
-            pass
-
-        try:
-            archived_dialogs = await self._client.get_dialogs(folder=1, limit=None)
-            archived = len(archived_dialogs)
-        except Exception:
-            pass
-
-        return {
-            "users": users,
-            "bots": bots,
-            "groups": groups,
-            "channels": channels,
-            "deleted": deleted,
-            "chats": total,
-            "archived": archived,
-        }
+                kind = self._dialog_kind(ent)
+                if kind:
+                    counts[kind] += 1
+                if kind == "groups" and getattr(ent, "forum", False):
+                    counts["forums"] += 1
+        except Exception as e:
+            logger.error(f"[Statistics] dialogs count failed: {e}")
+        return counts
 
     @loader.watcher("out", "only_messages")
     async def watcher(self, message: Message):
@@ -356,7 +361,9 @@ class Statistics(loader.Module):
                 users=dialog_counts["users"],
                 bots=dialog_counts["bots"],
                 groups=dialog_counts["groups"],
+                forums=dialog_counts["forums"],
                 channels=dialog_counts["channels"],
+                monoforums=dialog_counts["monoforums"],
                 deleted=dialog_counts["deleted"],
                 contacts=contacts,
                 blocked=blocked,
