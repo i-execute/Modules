@@ -2,12 +2,13 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (2, 0, 1)
+__version__ = (2, 1, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/SCMusic/MetaBanner.jpeg
 
 import asyncio
 import io
+import json
 import logging
 import os
 import re
@@ -29,17 +30,17 @@ DEPS = ["curl_cffi", "Pillow", "mutagen"]
 def _install_deps():
     import importlib
     import subprocess
-    
+
     pip = os.path.join(os.path.dirname(sys.executable), "pip")
     if not os.path.exists(pip):
         pip = "pip"
-    
+
     imp_map = {
         "curl_cffi": "curl_cffi",
         "Pillow": "PIL",
         "mutagen": "mutagen",
     }
-    
+
     lines = []
     for pkg in DEPS:
         try:
@@ -58,7 +59,7 @@ def _install_deps():
                 lines.append(f"{pkg}: FAIL (import error)")
         except Exception as e:
             lines.append(f"{pkg}: FAIL ({e})")
-    
+
     return lines
 
 
@@ -109,7 +110,7 @@ MAX_LOG = 300
 
 def _log(tag: str, msg: str):
     ts = time.strftime("%H:%M:%S")
-    entry = f"[{ts}][SCMusic][{tag}] {msg}"
+    entry = f"[{ts}] [{tag}] {msg}"
     LOG_ENTRIES.append(entry)
     if len(LOG_ENTRIES) > MAX_LOG:
         LOG_ENTRIES.pop(0)
@@ -160,92 +161,124 @@ def _embed_id3(filepath: str, title: str, artist: str, cover_data: typing.Option
         pass
 
 
-async def _upload_to_x0(data: bytes, filename: str, content_type: str = "audio/mpeg") -> str:
+UPLOAD_UA = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0"
+
+UPLOAD_PROVIDERS = {
+    "x0.at": {
+        "url": "https://x0.at",
+        "field": "file",
+        "extra": {},
+    },
+    "uguu.se": {
+        "url": "https://uguu.se/upload?output=text",
+        "field": "files[]",
+        "extra": {},
+    },
+    "pomf.lain.la": {
+        "url": "https://pomf.lain.la/upload.php",
+        "field": "files[]",
+        "extra": {},
+    },
+}
+
+
+def _parse_upload_url(text: str, base: str = "") -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+    try:
+        data = json.loads(text)
+    except Exception:
+        first = text.splitlines()[0].strip()
+        return first if first.startswith("http") and " " not in first else ""
+    queue = [data]
+    while queue:
+        item = queue.pop(0)
+        if isinstance(item, dict):
+            for key in ("url", "src", "link"):
+                value = item.get(key)
+                if isinstance(value, str):
+                    return base + value if value.startswith("/") else value
+            queue += list(item.values())
+        elif isinstance(item, list):
+            queue += item
+    return ""
+
+
+async def _upload_via(provider: str, data: bytes, filename: str, content_type: str = "audio/mpeg", timeout: int = 60) -> str:
+    cfg = UPLOAD_PROVIDERS.get(provider) or UPLOAD_PROVIDERS["x0.at"]
     if not AIOHTTP_OK:
         return ""
     try:
         form = aiohttp.FormData()
-        form.add_field("file", data, filename=filename, content_type=content_type)
-        async with aiohttp.ClientSession() as s:
+        for key, value in cfg["extra"].items():
+            form.add_field(key, value)
+        form.add_field(cfg["field"], data, filename=filename, content_type=content_type)
+        async with aiohttp.ClientSession(headers={"User-Agent": UPLOAD_UA}) as s:
             async with s.post(
-                "https://x0.at",
+                cfg["url"],
                 data=form,
-                timeout=aiohttp.ClientTimeout(total=60),
+                timeout=aiohttp.ClientTimeout(total=timeout),
             ) as r:
-                text = (await r.text()).strip()
-                if text.startswith("http"):
-                    return text
-    except Exception:
-        pass
-    return ""
-
-
-async def _download_image_aiohttp(url: str) -> typing.Optional[bytes]:
-    if not AIOHTTP_OK or not url:
-        return None
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(
-                url,
-                timeout=aiohttp.ClientTimeout(total=15),
-                allow_redirects=True,
-            ) as r:
-                if r.status != REQUEST_OK:
-                    return None
-                data = await r.read()
-                return data if len(data) > 500 else None
+                text = await r.text()
+                url = _parse_upload_url(text, cfg.get("base", ""))
+                if url:
+                    return url
+                _log("UPLOAD", f"{provider}: HTTP {r.status}: {text.strip()[:120]}")
     except Exception as e:
-        _log("DL_IMG", f"Error {url[:80]}: {e}")
-        return None
+        _log("UPLOAD", f"{provider}: {type(e).__name__}: {e}")
+    return ""
 
 
 @loader.tds
 class SCMusic(loader.Module):
-    """SoundCloud Music - search and download audio from SoundCloud"""
+    """SoundCloud audio downloader and search"""
 
     strings = {
         "name": "SCMusic",
-        "no_results": "<b>Nothing found</b>",
-        "provide_query": "<b>Provide a search query</b>",
-        "searching": "<b>Searching</b> <code>{query}</code>",
         "uploading": "<b>Uploading...</b>",
-        "download_fail": "<b>Download failed.</b> Try again.",
         "error": "<b>Error:</b> {msg}",
-        "downloading_track": "<b>Downloading</b> <code>{title}</code>",
-        "btn_download": "⬇️ Download",
-        "btn_cancel": "✖️ Close",
-        "btn_new_search": "🔍 New search",
+        "download_fail": "<b>Download failed.</b> Try again.",
+        "no_cffi": "<b>curl_cffi not installed</b>",
+        "scs_searching": "<b>Searching</b> <code>{query}</code>",
+        "scs_download": "⬇️ Download",
+        "scs_cancel": "✖️ Close",
+        "scs_new_search": "🔍 New search",
+        "scs_downloading": "Downloading...",
+        "scs_edit_dl": "<b>Downloading</b> <code>{title}</code>",
+        "scs_no_results": "<b>Nothing found</b>",
+        "scs_provide_query": "<b>Provide a search query</b>",
+        "scs_not_found": "<b>Track not found by link</b>",
+        "scs_menu_title": "<b>SoundCloud Music</b>\n<blockquote>Search a track</blockquote>",
+        "scs_via_link": "Via link",
+        "scs_via_query": "Via query",
+        "scs_enter_link": "Enter SoundCloud link:",
+        "scs_enter_query": "Enter search query:",
         "btn_left": "⬅️",
         "btn_right": "➡️",
-        "menu_title": "<b>SoundCloud Music</b>\n<blockquote>Search a track</blockquote>",
-        "via_link": "Via link",
-        "via_query": "Via query",
-        "enter_link": "Enter SoundCloud link:",
-        "enter_query": "Enter search query:",
-        "link_not_found": "<b>Track not found by link</b>",
-        "no_cffi": "<b>curl_cffi not installed</b>",
     }
 
     strings_ru = {
-        "no_results": "<b>Ничего не найдено</b>",
-        "provide_query": "<b>Укажите поисковый запрос</b>",
-        "searching": "<b>Поиск</b> <code>{query}</code>",
         "uploading": "<b>Загрузка...</b>",
-        "download_fail": "<b>Ошибка скачивания.</b> Попробуйте снова.",
         "error": "<b>Ошибка:</b> {msg}",
-        "downloading_track": "<b>Загружаю</b> <code>{title}</code>",
-        "btn_download": "⬇️ Скачать",
-        "btn_cancel": "✖️ Закрыть",
-        "btn_new_search": "🔍 Новый поиск",
+        "download_fail": "<b>Ошибка скачивания.</b> Попробуйте снова.",
+        "no_cffi": "<b>curl_cffi не установлен</b>",
+        "scs_searching": "<b>Поиск</b> <code>{query}</code>",
+        "scs_download": "⬇️ Скачать",
+        "scs_cancel": "✖️ Закрыть",
+        "scs_new_search": "🔍 Новый поиск",
+        "scs_downloading": "Загрузка...",
+        "scs_edit_dl": "<b>Загружаю</b> <code>{title}</code>",
+        "scs_no_results": "<b>Ничего не найдено</b>",
+        "scs_provide_query": "<b>Укажите поисковый запрос</b>",
+        "scs_not_found": "<b>Трек по ссылке не найден</b>",
+        "scs_menu_title": "<b>SoundCloud Music</b>\n<blockquote>Поиск трека</blockquote>",
+        "scs_via_link": "По ссылке",
+        "scs_via_query": "По запросу",
+        "scs_enter_link": "Введите ссылку на SoundCloud:",
+        "scs_enter_query": "Введите поисковый запрос:",
         "btn_left": "⬅️",
         "btn_right": "➡️",
-        "menu_title": "<b>SoundCloud Music</b>\n<blockquote>Поиск трека</blockquote>",
-        "via_link": "По ссылке",
-        "via_query": "По запросу",
-        "enter_link": "Введите ссылку на SoundCloud:",
-        "enter_query": "Введите поисковый запрос:",
-        "link_not_found": "<b>Трек по ссылке не найден</b>",
-        "no_cffi": "<b>curl_cffi не установлен</b>",
     }
 
     def __init__(self):
@@ -254,6 +287,11 @@ class SCMusic(loader.Module):
                 "SEARCH_LIMIT", 5,
                 "Search results limit (1-10)",
                 validator=loader.validators.Integer(minimum=1, maximum=10),
+            ),
+            loader.ConfigValue(
+                "UPLOAD_PROVIDER", "x0.at",
+                "File hosting used to upload covers",
+                validator=loader.validators.Choice(list(UPLOAD_PROVIDERS)),
             ),
         )
         self._client_id = None
@@ -323,7 +361,7 @@ class SCMusic(loader.Module):
     async def _resolve_url(self, url: str) -> typing.Optional[dict]:
         if not CFFI_OK:
             return None
-        
+
         try:
             async with cffi_requests.AsyncSession(impersonate="chrome120") as ses:
                 if "on.soundcloud.com" in url:
@@ -332,7 +370,7 @@ class SCMusic(loader.Module):
                     if r.status_code == REQUEST_OK:
                         url = str(r.url)
                         _log("RESOLVE", f"Redirected to: {url}")
-                
+
                 c_id = await self._get_client_id(ses)
                 if not c_id:
                     return None
@@ -553,11 +591,11 @@ class SCMusic(loader.Module):
         return False
 
     @loader.command(
-        ru_doc="Поиск трека на SoundCloud. Без аргументов открывает форму выбора",
-        en_doc="Search track on SoundCloud. Without args opens selection form",
+        ru_doc="Поиск трека. Без аргументов открывает форму выбора",
+        en_doc="Search track. Without args opens selection form",
     )
     async def scs(self, message: Message):
-        """Search SoundCloud track."""
+        """Search track. Without args opens selection form"""
         if not CFFI_OK:
             await utils.answer(message, self.strings["no_cffi"])
             return
@@ -574,19 +612,19 @@ class SCMusic(loader.Module):
                 "topic_id": topic_id,
             }
             form_kwargs = dict(
-                text=self.strings["menu_title"],
+                text=self.strings["scs_menu_title"],
                 message=message,
                 reply_markup=[[
                     {
-                        "text": self.strings["via_link"],
-                        "input": self.strings["enter_link"],
+                        "text": self.strings["scs_via_link"],
+                        "input": self.strings["scs_enter_link"],
                         "handler": self._scs_link_input,
                         "args": (session_id,),
                         "style": "primary",
                     },
                     {
-                        "text": self.strings["via_query"],
-                        "input": self.strings["enter_query"],
+                        "text": self.strings["scs_via_query"],
+                        "input": self.strings["scs_enter_query"],
                         "handler": self._scs_query_input,
                         "args": (session_id,),
                         "style": "primary",
@@ -596,7 +634,7 @@ class SCMusic(loader.Module):
             )
             if is_forum and topic_id:
                 form_kwargs["reply_to"] = topic_id
-            await self.inline.form(**form_kwargs)
+            await self._safe_form(**form_kwargs)
             return
 
         m = SC_URL_RE.search(query)
@@ -611,20 +649,20 @@ class SCMusic(loader.Module):
         sess = self._scs_sessions.get(session_id, {})
         m = SC_URL_RE.search(url)
         if not m:
-            await call.edit(self.strings["link_not_found"])
+            await call.edit(self.strings["scs_not_found"])
             return
         await call.edit(self.strings["uploading"])
-        
+
         track = await self._resolve_url(m.group(0))
         if not track:
-            await call.edit(self.strings["link_not_found"])
+            await call.edit(self.strings["scs_not_found"])
             return
 
         chat_id = sess.get("chat_id")
         is_forum = sess.get("is_forum", False)
         topic_id = sess.get("topic_id")
         self._scs_sessions.pop(session_id, None)
-        
+
         ddir = tempfile.mkdtemp(dir=self._tmp)
         try:
             info, err = await self._prepare_track(track["track_data"], ddir)
@@ -640,15 +678,15 @@ class SCMusic(loader.Module):
         query = text.strip()
         sess = self._scs_sessions.get(session_id, {})
         if not query:
-            await call.edit(self.strings["no_results"])
+            await call.edit(self.strings["scs_no_results"])
             return
-        await call.edit(self.strings["searching"].format(query=escape_html(query)))
+        await call.edit(self.strings["scs_searching"].format(query=escape_html(query)))
         limit = self._get_limit()
         tracks = await self._search_sc(query, limit=limit)
         if not tracks:
-            await call.edit(self.strings["no_results"])
+            await call.edit(self.strings["scs_no_results"])
             return
-        
+
         chat_id = sess.get("chat_id")
         is_forum = sess.get("is_forum", False)
         topic_id = sess.get("topic_id")
@@ -671,16 +709,16 @@ class SCMusic(loader.Module):
         )
         if cover_url:
             edit_kwargs["photo"] = cover_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
         asyncio.ensure_future(self._scs_prefetch_covers(new_sid))
 
     async def _scs_download_by_link(self, message, url: str, is_forum: bool, topic_id):
         msg = await utils.answer(message, self.strings["uploading"])
         track = await self._resolve_url(url)
         if not track:
-            await utils.answer(msg, self.strings["link_not_found"])
+            await utils.answer(msg, self.strings["scs_not_found"])
             return
-        
+
         ddir = tempfile.mkdtemp(dir=self._tmp)
         try:
             info, err = await self._prepare_track(track["track_data"], ddir)
@@ -696,13 +734,13 @@ class SCMusic(loader.Module):
             shutil.rmtree(ddir, ignore_errors=True)
 
     async def _scs_run_search(self, message, query: str, is_forum: bool, topic_id):
-        msg = await utils.answer(message, self.strings["searching"].format(query=escape_html(query)))
+        msg = await utils.answer(message, self.strings["scs_searching"].format(query=escape_html(query)))
         limit = self._get_limit()
         tracks = await self._search_sc(query, limit=limit)
         if not tracks:
-            await utils.answer(msg, self.strings["no_results"])
+            await utils.answer(msg, self.strings["scs_no_results"])
             return
-        
+
         session_id = str(id(message))
         self._scs_sessions[session_id] = {
             "tracks": tracks,
@@ -730,8 +768,32 @@ class SCMusic(loader.Module):
             form_kwargs["photo"] = cover_url
         if is_forum and topic_id:
             form_kwargs["reply_to"] = topic_id
-        await self.inline.form(**form_kwargs)
+        await self._safe_form(**form_kwargs)
         asyncio.ensure_future(self._scs_prefetch_covers(session_id))
+
+    async def _safe_form(self, **kwargs):
+        try:
+            return await self.inline.form(**kwargs)
+        except Exception as e:
+            if "photo" not in kwargs:
+                raise
+            _log("UPLOAD", f"photo rejected by Telegram ({type(e).__name__}), retry without it")
+            kwargs.pop("photo")
+            return await self.inline.form(**kwargs)
+
+    async def _safe_edit(self, call, **kwargs):
+        try:
+            return await call.edit(**kwargs)
+        except Exception as e:
+            if "photo" not in kwargs:
+                raise
+            _log("UPLOAD", f"photo rejected by Telegram ({type(e).__name__}), retry without it")
+            kwargs.pop("photo")
+            return await call.edit(**kwargs)
+
+    async def _upload_file(self, data, filename, content_type="audio/mpeg"):
+        timeout = 60 if content_type.startswith("audio") else 20
+        return await _upload_via(self.config["UPLOAD_PROVIDER"], data, filename, content_type, timeout)
 
     async def _scs_get_cover(self, session_id: str, idx: int) -> typing.Optional[str]:
         sess = self._scs_sessions.get(session_id)
@@ -745,19 +807,19 @@ class SCMusic(loader.Module):
         if not art_url:
             cache[idx] = None
             return None
-        
+
         track_id = track["id"]
         if track_id in self._cover_cache:
             cache[idx] = self._cover_cache[track_id]
             return cache[idx]
-        
+
         raw = await _download_image_aiohttp(art_url)
         if not raw:
             cache[idx] = None
             return None
-        
+
         norm = normalize_cover(raw, force_jpeg=True) or raw
-        x0_url = await _upload_to_x0(
+        x0_url = await self._upload_file(
             norm,
             sanitize_fn(f"{track['username']} - {track['title']}") + ".jpg",
             "image/jpeg",
@@ -787,21 +849,21 @@ class SCMusic(loader.Module):
         if idx < total - 1:
             right_btn["style"] = "primary"
         return [
-            [{"text": self.strings["btn_download"], "callback": self._scs_download, "args": (session_id,), "style": "success"}],
+            [{"text": self.strings["scs_download"], "callback": self._scs_download, "args": (session_id,), "style": "success"}],
             [left_btn, right_btn],
-            [{"text": self.strings["btn_cancel"], "callback": self._scs_cancel, "args": (session_id,), "style": "danger"}],
+            [{"text": self.strings["scs_cancel"], "callback": self._scs_cancel, "args": (session_id,), "style": "danger"}],
         ]
 
     def _scs_done_markup(self, session_id: str):
         return [
             [{
-                "text": self.strings["btn_new_search"],
-                "input": self.strings["enter_query"],
+                "text": self.strings["scs_new_search"],
+                "input": self.strings["scs_enter_query"],
                 "handler": self._scs_new_search_input,
                 "args": (session_id,),
                 "style": "primary",
             }],
-            [{"text": self.strings["btn_cancel"], "callback": self._scs_cancel, "args": (session_id,), "style": "danger"}],
+            [{"text": self.strings["scs_cancel"], "callback": self._scs_cancel, "args": (session_id,), "style": "danger"}],
         ]
 
     async def _scs_left(self, call, session_id: str):
@@ -842,7 +904,7 @@ class SCMusic(loader.Module):
         )
         if cover_url:
             edit_kwargs["photo"] = cover_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
 
     async def _scs_download(self, call, session_id: str):
         sess = self._scs_sessions.get(session_id)
@@ -860,9 +922,10 @@ class SCMusic(loader.Module):
             chat_id = sess["chat_id"]
             is_forum = sess.get("is_forum", False)
             topic_id = sess.get("topic_id")
+            await call.answer(self.strings["scs_downloading"])
             try:
                 await call.edit(
-                    self.strings["downloading_track"].format(title=escape_html(f"{username} - {title}")),
+                    self.strings["scs_edit_dl"].format(title=escape_html(f"{username} - {title}")),
                     reply_markup=[],
                 )
             except Exception:
@@ -884,7 +947,7 @@ class SCMusic(loader.Module):
                 shutil.rmtree(ddir, ignore_errors=True)
             try:
                 await call.edit(
-                    f"<b>{escape_html(username)} — {escape_html(title)}</b>",
+                    f"<b>{escape_html(username)} - {escape_html(title)}</b>",
                     reply_markup=self._scs_done_markup(session_id),
                 )
             except Exception:
@@ -896,11 +959,11 @@ class SCMusic(loader.Module):
             await call.delete()
             return
         sess = self._scs_sessions.get(session_id, {})
-        await call.edit(self.strings["searching"].format(query=escape_html(query)))
+        await call.edit(self.strings["scs_searching"].format(query=escape_html(query)))
         limit = self._get_limit()
         tracks = await self._search_sc(query, limit=limit)
         if not tracks:
-            await call.edit(self.strings["no_results"], reply_markup=self._scs_done_markup(session_id))
+            await call.edit(self.strings["scs_no_results"], reply_markup=self._scs_done_markup(session_id))
             return
         self._scs_sessions[session_id] = {
             "tracks": tracks,
@@ -920,7 +983,7 @@ class SCMusic(loader.Module):
         )
         if cover_url:
             edit_kwargs["photo"] = cover_url
-        await call.edit(**edit_kwargs)
+        await self._safe_edit(call, **edit_kwargs)
         asyncio.ensure_future(self._scs_prefetch_covers(session_id))
 
     async def _scs_cancel(self, call, session_id: str):
