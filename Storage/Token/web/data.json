@@ -1,0 +1,310 @@
+{
+  "bot": {
+    "id": "8737332461",
+    "name": "test",
+    "username": "tesbjskskskakakakakalalanbot"
+  },
+  "is_private": false,
+  "pin": "",
+  "total_messages": 82,
+  "total_chats": 12,
+  "chats": [
+    {
+      "id": "7610246474",
+      "name": "Forget me not",
+      "username": "",
+      "count": 56,
+      "last": "/seturl https://app8737332461.tgcloud.ai",
+      "date": "2026-10-19 10:45:00"
+    },
+    {
+      "id": "1985547514",
+      "name": "hillByte",
+      "username": "hillByte",
+      "count": 2,
+      "last": "NousGuard работает.\nMini App: не настроен\nДобавьте бота адми",
+      "date": "2026-10-19 10:40:01"
+    },
+    {
+      "id": "7445368300",
+      "name": "durex",
+      "username": "durexddurex",
+      "count": 2,
+      "last": "NousGuard работает.\nMini App: не настроен\nДобавьте бота адми",
+      "date": "2026-10-19 10:40:01"
+    },
+    {
+      "id": "7948741477",
+      "name": "broke lv",
+      "username": "ohneluv",
+      "count": 2,
+      "last": "NousGuard работает.\nMini App: не настроен\nДобавьте бота адми",
+      "date": "2026-10-19 10:40:01"
+    },
+    {
+      "id": "8144716027",
+      "name": "Starlex",
+      "username": "trueomg",
+      "count": 2,
+      "last": "NousGuard работает.\nMini App: не настроен\nДобавьте бота адми",
+      "date": "2026-10-19 10:40:01"
+    },
+    {
+      "id": "7782940937",
+      "name": "09:53 killak02561",
+      "username": "killak02561",
+      "count": 2,
+      "last": "NousGuard работает.\nMini App: не настроен\nДобавьте бота адми",
+      "date": "2026-10-19 10:40:01"
+    },
+    {
+      "id": "7456777054",
+      "name": "KRINTOL",
+      "username": "KRINTOL",
+      "count": 2,
+      "last": "NousGuard работает.\nMini App: не настроен\nДобавьте бота адми",
+      "date": "2026-10-19 10:40:01"
+    },
+    {
+      "id": "8019454967",
+      "name": "скалов",
+      "username": "",
+      "count": 2,
+      "last": "NousGuard работает.\nMini App: не настроен\nДобавьте бота адми",
+      "date": "2026-10-19 10:40:01"
+    },
+    {
+      "id": "8890502021",
+      "name": "sssaacy",
+      "username": "sssaacy",
+      "count": 5,
+      "last": "NousGuard работает.\nMini App: не настроен\nДобавьте бота адми",
+      "date": "2026-10-19 10:40:01"
+    },
+    {
+      "id": "400216230",
+      "name": "shareui",
+      "username": "",
+      "count": 2,
+      "last": "NousGuard работает.\nMini App: не настроен\nДобавьте бота адми",
+      "date": "2026-10-19 10:40:01"
+    },
+    {
+      "id": "8479214651",
+      "name": "stodoza",
+      "username": "",
+      "count": 2,
+      "last": "NousGuard работает.\nMini App: не настроен\nДобавьте бота адми",
+      "date": "2026-10-19 10:40:01"
+    },
+    {
+      "id": "8617304554",
+      "name": "snagm",
+      "username": "",
+      "count": 3,
+      "last": "NousGuard работает.\nMini App: не настроен\nДобавьте бота адми",
+      "date": "2026-10-19 10:40:01"
+    }
+  ],
+  "messages": {
+    "7610246474": [
+      {
+        "id": 1,
+        "out": false,
+        "text": "/start",
+        "date": "2026-10-19 10:40:00",
+        "media": ""
+      },
+      {
+        "id": 2,
+        "out": true,
+        "text": "NousGuard работает.\nMini App: не настроен\nДобавьте бота админом.",
+        "date": "2026-10-19 10:40:01",
+        "media": ""
+      },
+      {
+        "id": 15,
+        "out": false,
+        "text": "/seturl https://app8737332461.tgcloud.ai",
+        "date": "2026-10-19 10:45:00",
+        "media": ""
+      }
+    ],
+    "1985547514": [
+      {
+        "id": 1,
+        "out": false,
+        "text": "/start",
+        "date": "2026-10-19 10:40:00",
+        "media": ""
+      },
+      {
+        "id": 2,
+        "out": true,
+        "text": "NousGuard работает.\nMini App: не настроен\nДобавьте бота админом.",
+        "date": "2026-10-19 10:40:01",
+        "media": ""
+      }
+    ],
+    "7445368300": [
+      {
+        "id": 1,
+        "out": false,
+        "text": "/start",
+        "date": "2026-10-19 10:40:00",
+        "media": ""
+      },
+      {
+        "id": 2,
+        "out": true,
+        "text": "NousGuard работает.\nMini App: не настроен\nДобавьте бота админом.",
+        "date": "2026-10-19 10:40:01",
+        "media": ""
+      }
+    ],
+    "7948741477": [
+      {
+        "id": 1,
+        "out": false,
+        "text": "/start",
+        "date": "2026-10-19 10:40:00",
+        "media": ""
+      },
+      {
+        "id": 2,
+        "out": true,
+        "text": "NousGuard работает.\nMini App: не настроен\nДобавьте бота админом.",
+        "date": "2026-10-19 10:40:01",
+        "media": ""
+      }
+    ],
+    "8144716027": [
+      {
+        "id": 1,
+        "out": false,
+        "text": "/start",
+        "date": "2026-10-19 10:40:00",
+        "media": ""
+      },
+      {
+        "id": 2,
+        "out": true,
+        "text": "NousGuard работает.\nMini App: не настроен\nДобавьте бота админом.",
+        "date": "2026-10-19 10:40:01",
+        "media": ""
+      }
+    ],
+    "7782940937": [
+      {
+        "id": 1,
+        "out": false,
+        "text": "/start",
+        "date": "2026-10-19 10:40:00",
+        "media": ""
+      },
+      {
+        "id": 2,
+        "out": true,
+        "text": "NousGuard работает.\nMini App: не настроен\nДобавьте бота админом.",
+        "date": "2026-10-19 10:40:01",
+        "media": ""
+      }
+    ],
+    "7456777054": [
+      {
+        "id": 1,
+        "out": false,
+        "text": "/start",
+        "date": "2026-10-19 10:40:00",
+        "media": ""
+      },
+      {
+        "id": 2,
+        "out": true,
+        "text": "NousGuard работает.\nMini App: не настроен\nДобавьте бота админом.",
+        "date": "2026-10-19 10:40:01",
+        "media": ""
+      }
+    ],
+    "8019454967": [
+      {
+        "id": 1,
+        "out": false,
+        "text": "/start",
+        "date": "2026-10-19 10:40:00",
+        "media": ""
+      },
+      {
+        "id": 2,
+        "out": true,
+        "text": "NousGuard работает.\nMini App: не настроен\nДобавьте бота админом.",
+        "date": "2026-10-19 10:40:01",
+        "media": ""
+      }
+    ],
+    "8890502021": [
+      {
+        "id": 1,
+        "out": false,
+        "text": "/start",
+        "date": "2026-10-19 10:40:00",
+        "media": ""
+      },
+      {
+        "id": 2,
+        "out": true,
+        "text": "NousGuard работает.\nMini App: не настроен\nДобавьте бота админом.",
+        "date": "2026-10-19 10:40:01",
+        "media": ""
+      }
+    ],
+    "400216230": [
+      {
+        "id": 1,
+        "out": false,
+        "text": "/start",
+        "date": "2026-10-19 10:40:00",
+        "media": ""
+      },
+      {
+        "id": 2,
+        "out": true,
+        "text": "NousGuard работает.\nMini App: не настроен\nДобавьте бота админом.",
+        "date": "2026-10-19 10:40:01",
+        "media": ""
+      }
+    ],
+    "8479214651": [
+      {
+        "id": 1,
+        "out": false,
+        "text": "/start",
+        "date": "2026-10-19 10:40:00",
+        "media": ""
+      },
+      {
+        "id": 2,
+        "out": true,
+        "text": "NousGuard работает.\nMini App: не настроен\nДобавьте бота админом.",
+        "date": "2026-10-19 10:40:01",
+        "media": ""
+      }
+    ],
+    "8617304554": [
+      {
+        "id": 1,
+        "out": false,
+        "text": "/start",
+        "date": "2026-10-19 10:40:00",
+        "media": ""
+      },
+      {
+        "id": 2,
+        "out": true,
+        "text": "NousGuard работает.\nMini App: не настроен\nДобавьте бота админом.",
+        "date": "2026-10-19 10:40:01",
+        "media": ""
+      }
+    ]
+  }
+}
