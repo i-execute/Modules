@@ -2,9 +2,10 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (3, 0, 0)
+__version__ = (3, 1, 0)
 # meta developer: Execute_forge.t.me
 
+import contextlib
 import json
 import logging
 import os
@@ -36,9 +37,15 @@ def _mask(key: str) -> str:
 
 def _domain_from_url(url: str) -> str:
     try:
+        if not (url.startswith("http://") or url.startswith("https://")):
+            url = f"https://{url}"
         host = urlparse(url).hostname or url
+        if all(part.isdigit() for part in host.split(".")):
+            return host
         parts = host.split(".")
         if len(parts) >= 2:
+            if parts[-2] in {"co", "com", "org", "net", "gov", "edu"} and len(parts) >= 3:
+                return parts[-3]
             return parts[-2]
         return host
     except Exception:
@@ -190,6 +197,10 @@ class KeyKeeper(loader.Module):
         "btn_validate_all": "Validate All Keys",
         "btn_export_all": "Export All",
         "btn_close": "Close",
+        "btn_input_url": "Enter Base URL",
+        "prompt_url": "Base URL (e.g. https://api.openai.com/v1):",
+        "btn_input_key": "Enter Key",
+        "prompt_key": "API key:",
         "btn_back": "Back",
         "btn_left": "<",
         "btn_right": ">",
@@ -361,6 +372,10 @@ class KeyKeeper(loader.Module):
         "btn_validate_all": "Проверить все ключи",
         "btn_export_all": "Экспорт всего",
         "btn_close": "Закрыть",
+        "btn_input_url": "Ввести Base URL",
+        "prompt_url": "Base URL (например https://api.openai.com/v1):",
+        "btn_input_key": "Ввести ключ",
+        "prompt_key": "API ключ:",
         "btn_back": "Назад",
         "btn_left": "<",
         "btn_right": ">",
@@ -540,6 +555,8 @@ class KeyKeeper(loader.Module):
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
+        self._owner = await client.get_me()
+        self._tg_id = self._owner.id if self._owner else getattr(client, "tg_id", None)
         self._providers = self.get("providers", [])
 
     def _save(self):
@@ -569,8 +586,11 @@ class KeyKeeper(loader.Module):
         return n
 
     async def _send_json(self, chat_id, data: dict | list, filename: str):
+        uid = getattr(self, "_tg_id", None) or (self._owner.id if getattr(self, "_owner", None) else "common")
+        tmp_dir = os.path.join(tempfile.gettempdir(), "KeyKeeper", str(uid))
+        os.makedirs(tmp_dir, exist_ok=True)
         tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
+            mode="w", suffix=".json", dir=tmp_dir, delete=False, encoding="utf-8"
         )
         json.dump(data, tmp, indent=2, ensure_ascii=False)
         tmp.close()
@@ -582,7 +602,8 @@ class KeyKeeper(loader.Module):
                 file_name=filename,
             )
         finally:
-            os.unlink(tmp.name)
+            with contextlib.suppress(Exception):
+                os.unlink(tmp.name)
 
     def _fmt_main(self) -> str:
         return self.strings["main_menu"].format(
@@ -613,17 +634,19 @@ class KeyKeeper(loader.Module):
         await call.edit(
             self.strings["add_url"],
             reply_markup=[
-                [{"text": self.strings["input_key"], "input": self.strings["add_url"], "handler": self._ih_add_url, "style": "primary"}],
+                [{"text": self.strings["btn_input_url"], "input": self.strings["prompt_url"], "handler": self._ih_add_url, "style": "primary"}],
                 [{"text": self.strings["btn_back"], "callback": self._cb_main, "style": "danger"}],
             ],
         )
 
     async def _ih_add_url(self, call: InlineCall, url: str):
         url = url.strip().rstrip("/")
+        if not (url.startswith("http://") or url.startswith("https://")):
+            url = f"https://{url}"
         await call.edit(
             self.strings["add_key"].format(url=_escape(url)),
             reply_markup=[
-                [{"text": self.strings["input_key"], "input": self.strings["input_key"], "handler": self._ih_add_api_key, "args": (url,), "style": "primary"}],
+                [{"text": self.strings["btn_input_key"], "input": self.strings["prompt_key"], "handler": self._ih_add_api_key, "args": (url,), "style": "primary"}],
                 [{"text": self.strings["btn_back"], "callback": self._cb_add_provider_start, "style": "danger"}],
             ],
         )
@@ -696,13 +719,22 @@ class KeyKeeper(loader.Module):
             await call.answer()
             return
         pid = (max((p.get("id", 0) for p in self._providers), default=0)) + 1
+        initial_keys = []
+        if pending.get("api_key"):
+            initial_keys.append({
+                "num": 1,
+                "key": pending["api_key"],
+                "status": "valid",
+                "comment": "Initial key",
+                "last_check": _now_str(self.config["timezone_offset"]),
+            })
         self._providers.append({
             "id": pid,
             "name": pending["name"],
             "url": pending["url"],
             "api_key": pending["api_key"],
             "model": model,
-            "keys": [],
+            "keys": initial_keys,
         })
         self._save()
         await call.edit(
@@ -834,7 +866,7 @@ class KeyKeeper(loader.Module):
         await call.edit(
             self.strings["add_key_input"].format(name=_escape(provider["name"])),
             reply_markup=[
-                [{"text": self.strings["input_key"], "input": self.strings["input_key"], "handler": self._ih_validate_new_key, "args": (pid,), "style": "primary"}],
+                [{"text": self.strings["btn_input_key"], "input": self.strings["prompt_key"], "handler": self._ih_validate_new_key, "args": (pid,), "style": "primary"}],
                 [{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}],
             ],
         )
