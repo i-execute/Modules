@@ -272,7 +272,7 @@ def _make_down_mp4(base_bytes, avatar_bytes):
 
 
 @loader.tds
-class RoflsMod(loader.Module):
+class Rofls(loader.Module):
     """PetPet stickers and Down meme"""
 
     strings = {
