@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import ChatList from './components/ChatList';
 import ChatView from './components/ChatView';
 import ProfileModal from './components/ProfileModal';
-import LockScreen from './components/LockScreen';
 
 function getTelegramUser() {
   try {
@@ -21,18 +20,35 @@ function getTelegramUser() {
   return null;
 }
 
+function decryptPayload(encoded, key) {
+  try {
+    const raw = atob(encoded);
+    const keyBytes = new TextEncoder().encode(String(key));
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) {
+      out[i] = raw.charCodeAt(i) ^ keyBytes[i % keyBytes.length];
+    }
+    const jsonStr = new TextDecoder().decode(out);
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    return null;
+  }
+}
+
 export default function App() {
-  const [data, setData] = useState(() => window.DUMP_DATA || null);
-  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [data, setData] = useState(null);
   const [activeChatId, setActiveChatId] = useState(null);
   const [profileChat, setProfileChat] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  const [accessDenied, setAccessDenied] = useState(false);
+  const [accessState, setAccessState] = useState('checking'); // 'checking', 'granted', 'denied'
+  const [denialReason, setDenialReason] = useState('');
 
   useEffect(() => {
     if (window.Telegram?.WebApp) {
-      window.Telegram.WebApp.ready();
-      window.Telegram.WebApp.expand();
+      try {
+        window.Telegram.WebApp.ready();
+        window.Telegram.WebApp.expand();
+      } catch (e) {}
     }
 
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -41,61 +57,83 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!data) {
-      const pathParts = window.location.pathname.split('/').filter(Boolean);
-      const subPath = pathParts.length > 0 ? pathParts[0] : '';
-      const dataUrl = subPath ? `/${subPath}/data.json` : 'data.json';
-
-      fetch(dataUrl)
-        .then((r) => r.json())
-        .then((d) => setData(d))
-        .catch(() => {
-          fetch('data.json')
-            .then((r) => r.json())
-            .then((d) => setData(d))
-            .catch(() => {});
-        });
-    }
-  }, [data]);
-
-  useEffect(() => {
-    if (!data) return;
-
-    if (!data.is_private) {
-      setIsUnlocked(true);
-      return;
-    }
-
     const tgUser = getTelegramUser();
     const currentUserId = tgUser?.id;
 
-    if (currentUserId) {
-      if (String(currentUserId) === String(data.owner_id)) {
-        setIsUnlocked(true);
-      } else {
-        setAccessDenied(true);
-      }
+    // Check if running inside Telegram Mini App
+    if (!tgUser || !currentUserId) {
+      setAccessState('denied');
+      setDenialReason('Доступ разрешен только внутри Telegram Mini App. Прямой просмотр через браузер запрещен.');
+      return;
     }
-  }, [data]);
 
-  if (!data) {
+    // Try resolving dump data from window.DUMP_DATA or window.ENCRYPTED_DUMP
+    let resolvedData = null;
+
+    if (window.ENCRYPTED_DUMP) {
+      resolvedData = decryptPayload(window.ENCRYPTED_DUMP, currentUserId);
+    } else if (window.DUMP_DATA) {
+      resolvedData = window.DUMP_DATA;
+    }
+
+    if (resolvedData) {
+      if (String(currentUserId) === String(resolvedData.owner_id)) {
+        setData(resolvedData);
+        setAccessState('granted');
+      } else {
+        setAccessState('denied');
+        setDenialReason(`Доступ ограничен. Ваш ID (${currentUserId}) не совпадает с ID владельца дампа.`);
+      }
+      return;
+    }
+
+    // If data not yet in window, fetch data.json
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    const subPath = pathParts.length > 0 ? pathParts[0] : '';
+    const dataUrl = subPath ? `/${subPath}/data.json` : 'data.json';
+
+    fetch(dataUrl)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && d.encrypted) {
+          const dec = decryptPayload(d.encrypted, currentUserId);
+          if (dec && String(currentUserId) === String(dec.owner_id)) {
+            setData(dec);
+            setAccessState('granted');
+            return;
+          }
+        } else if (d && String(currentUserId) === String(d.owner_id)) {
+          setData(d);
+          setAccessState('granted');
+          return;
+        }
+        setAccessState('denied');
+        setDenialReason(`Доступ ограничен. Ваш ID (${currentUserId}) не совпадает с ID владельца.`);
+      })
+      .catch(() => {
+        setAccessState('denied');
+        setDenialReason('Архив диалогов не найден или доступ заблокирован.');
+      });
+  }, []);
+
+  if (accessState === 'checking') {
     return (
       <div style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         height: '100%',
+        backgroundColor: 'var(--bg)',
         color: 'var(--muted)',
         fontFamily: 'sans-serif'
       }}>
-        Загрузка архива диалогов...
+        Проверка доступа Telegram Mini App...
       </div>
     );
   }
 
-  if (accessDenied) {
+  if (accessState === 'denied') {
     const tgUser = getTelegramUser();
-    const currentUserId = tgUser?.id;
     return (
       <div style={{
         display: 'flex',
@@ -104,43 +142,41 @@ export default function App() {
         height: '100%',
         width: '100%',
         backgroundColor: 'var(--panel)',
-        fontFamily: 'sans-serif'
+        fontFamily: 'sans-serif',
+        padding: 20
       }}>
         <div style={{
           backgroundColor: 'var(--bg)',
           border: '1px solid var(--border)',
           borderRadius: 16,
           padding: '32px 28px',
-          maxWidth: 380,
-          width: '90%',
+          maxWidth: 420,
+          width: '100%',
           textAlign: 'center',
           boxShadow: '0 8px 30px rgba(0,0,0,0.12)'
         }}>
-          <div style={{ fontSize: 44, marginBottom: 12 }}>🔒</div>
-          <h2 style={{ fontSize: 20, marginBottom: 8 }}>Доступ ограничен</h2>
-          <p style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1.5 }}>
-            Этот дамп является приватным и доступен только владельцу бота.
+          <div style={{ fontSize: 50, marginBottom: 12 }}>🔒</div>
+          <h2 style={{ fontSize: 20, marginBottom: 10, color: 'var(--text)' }}>Доступ ограничен</h2>
+          <p style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1.5, marginBottom: 16 }}>
+            {denialReason || 'Этот дамп сообщений строго приватный и доступен исключительно его владельцу.'}
           </p>
-          <div style={{ marginTop: 16, fontSize: 12, color: 'var(--muted)' }}>
-            Ваш Telegram ID: <code>{currentUserId || 'Не определен'}</code>
+          <div style={{
+            padding: '10px 14px',
+            backgroundColor: 'var(--panel)',
+            borderRadius: 8,
+            fontSize: 12,
+            color: 'var(--muted)',
+            border: '1px solid var(--border)'
+          }}>
+            Ваш Telegram ID: <b>{tgUser?.id || 'Не в Telegram Mini App'}</b>
           </div>
         </div>
       </div>
     );
   }
 
-  if (data.is_private && !isUnlocked) {
-    return (
-      <LockScreen
-        bot={data.bot}
-        expectedPin={data.pin}
-        onUnlock={() => setIsUnlocked(true)}
-      />
-    );
-  }
-
-  const activeChat = (data.chats || []).find((c) => String(c.id) === String(activeChatId));
-  const activeMessages = (data.messages && activeChatId) ? (data.messages[String(activeChatId)] || []) : [];
+  const activeChat = (data?.chats || []).find((c) => String(c.id) === String(activeChatId));
+  const activeMessages = (data?.messages && activeChatId) ? (data.messages[String(activeChatId)] || []) : [];
 
   return (
     <div style={{ display: 'flex', height: '100%', width: '100%', overflow: 'hidden' }}>

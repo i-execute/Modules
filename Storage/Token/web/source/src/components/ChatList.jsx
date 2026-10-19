@@ -1,5 +1,27 @@
 import React, { useState } from 'react';
 
+const AVATAR_COLORS = [
+  '#e17076', '#faa774', '#a695e7', '#7bc862', '#6ec9cb', '#65aadd', '#ee7aae'
+];
+
+function getAvatarColor(idOrName) {
+  let hash = 0;
+  const str = String(idOrName || 'user');
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  }
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
+function getInitials(name) {
+  if (!name) return 'U';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return parts[0].slice(0, 2).toUpperCase();
+}
+
 export default function ChatList({ bot, chats, activeChatId, onSelectChat }) {
   const [query, setQuery] = useState('');
 
@@ -24,19 +46,21 @@ export default function ChatList({ bot, chats, activeChatId, onSelectChat }) {
         borderBottom: '1px solid var(--border)',
         display: 'flex',
         alignItems: 'center',
-        gap: 10
+        gap: 12
       }}>
         <div style={{
-          width: 40,
-          height: 40,
+          width: 44,
+          height: 44,
           borderRadius: '50%',
           backgroundColor: 'var(--primary)',
           color: '#ffffff',
           fontWeight: 700,
+          fontSize: 18,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          flexShrink: 0
+          flexShrink: 0,
+          boxShadow: '0 2px 8px rgba(51, 144, 236, 0.3)'
         }}>
           {bot?.name ? bot.name[0].toUpperCase() : 'B'}
         </div>
@@ -44,39 +68,42 @@ export default function ChatList({ bot, chats, activeChatId, onSelectChat }) {
           <div style={{ fontWeight: 600, fontSize: 15, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
             {bot?.name || 'Telegram Bot'}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-            {bot?.username ? `@${bot.username}` : ''} ({chats?.length || 0} диалогов)
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+            {bot?.username ? `@${bot.username}` : ''} • {chats?.length || 0} диалогов
           </div>
         </div>
       </div>
 
-      <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>
         <input
           type="search"
-          placeholder="Поиск диалогов..."
+          placeholder="Поиск по диалогам..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           style={{
             width: '100%',
-            padding: '8px 12px',
-            borderRadius: 8,
+            padding: '9px 12px',
+            borderRadius: 10,
             border: '1px solid var(--border)',
             backgroundColor: 'var(--bg)',
             color: 'var(--text)',
-            fontSize: 13
+            fontSize: 13,
+            outline: 'none'
           }}
         />
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {filtered.length === 0 ? (
-          <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
             Диалоги не найдены
           </div>
         ) : (
           filtered.map((c) => {
             const isActive = String(c.id) === String(activeChatId);
-            const initials = (c.name || 'U').trim()[0].toUpperCase();
+            const initials = getInitials(c.name);
+            const avatarColor = getAvatarColor(c.id || c.name);
+
             return (
               <div
                 key={c.id}
@@ -85,7 +112,7 @@ export default function ChatList({ bot, chats, activeChatId, onSelectChat }) {
                   display: 'flex',
                   alignItems: 'center',
                   padding: '10px 12px',
-                  gap: 10,
+                  gap: 12,
                   cursor: 'pointer',
                   backgroundColor: isActive ? 'var(--hover)' : 'transparent',
                   borderBottom: '1px solid var(--border)',
@@ -93,22 +120,23 @@ export default function ChatList({ bot, chats, activeChatId, onSelectChat }) {
                 }}
               >
                 <div style={{
-                  width: 44,
-                  height: 44,
+                  width: 46,
+                  height: 46,
                   borderRadius: '50%',
-                  backgroundColor: '#708499',
-                  color: '#fff',
+                  backgroundColor: avatarColor,
+                  color: '#ffffff',
                   fontWeight: 600,
                   fontSize: 16,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  flexShrink: 0
+                  flexShrink: 0,
+                  letterSpacing: '0.5px'
                 }}>
                   {initials}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
                     <span style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {c.name || `Chat ${c.id}`}
                     </span>
@@ -126,9 +154,9 @@ export default function ChatList({ bot, chats, activeChatId, onSelectChat }) {
                         color: '#fff',
                         fontSize: 11,
                         borderRadius: 10,
-                        padding: '1px 6px',
+                        padding: '1px 7px',
                         fontWeight: 600,
-                        marginLeft: 4
+                        marginLeft: 6
                       }}>
                         {c.count}
                       </span>

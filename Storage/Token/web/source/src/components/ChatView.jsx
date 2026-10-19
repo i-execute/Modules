@@ -1,5 +1,27 @@
 import React, { useEffect, useRef } from 'react';
 
+const AVATAR_COLORS = [
+  '#e17076', '#faa774', '#a695e7', '#7bc862', '#6ec9cb', '#65aadd', '#ee7aae'
+];
+
+function getAvatarColor(idOrName) {
+  let hash = 0;
+  const str = String(idOrName || 'user');
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  }
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
+function getInitials(name) {
+  if (!name) return 'U';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return parts[0].slice(0, 2).toUpperCase();
+}
+
 export default function ChatView({ chat, messages, onBack, onOpenProfile }) {
   const bottomRef = useRef(null);
 
@@ -23,7 +45,8 @@ export default function ChatView({ chat, messages, onBack, onOpenProfile }) {
     );
   }
 
-  const initials = (chat.name || 'U').trim()[0].toUpperCase();
+  const initials = getInitials(chat.name);
+  const avatarColor = getAvatarColor(chat.id || chat.name);
 
   return (
     <div style={{
@@ -40,26 +63,30 @@ export default function ChatView({ chat, messages, onBack, onOpenProfile }) {
         justifyContent: 'space-between',
         backgroundColor: 'var(--panel)'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
           {onBack && (
             <button
               onClick={onBack}
               style={{
                 fontSize: 18,
                 padding: '4px 8px',
-                color: 'var(--primary)'
+                color: 'var(--primary)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer'
               }}
             >
               ←
             </button>
           )}
           <div style={{
-            width: 38,
-            height: 38,
+            width: 40,
+            height: 40,
             borderRadius: '50%',
-            backgroundColor: '#708499',
+            backgroundColor: avatarColor,
             color: '#fff',
             fontWeight: 600,
+            fontSize: 15,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -71,7 +98,7 @@ export default function ChatView({ chat, messages, onBack, onOpenProfile }) {
             <div style={{ fontWeight: 600, fontSize: 15, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
               {chat.name || `Chat ${chat.id}`}
             </div>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
               {chat.username ? `@${chat.username}` : `ID: ${chat.id}`}
             </div>
           </div>
@@ -80,12 +107,14 @@ export default function ChatView({ chat, messages, onBack, onOpenProfile }) {
         <button
           onClick={() => onOpenProfile(chat)}
           style={{
-            padding: '6px 12px',
+            padding: '7px 14px',
             backgroundColor: 'var(--hover)',
-            borderRadius: 6,
+            borderRadius: 8,
             fontSize: 13,
             color: 'var(--primary)',
-            fontWeight: 500
+            fontWeight: 500,
+            border: 'none',
+            cursor: 'pointer'
           }}
         >
           Профиль
@@ -98,23 +127,47 @@ export default function ChatView({ chat, messages, onBack, onOpenProfile }) {
         padding: '16px 14px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 8
+        gap: 10
       }}>
         {(messages || []).map((m) => {
           const isOut = Boolean(m.out);
+          const senderName = isOut ? 'Бот' : (chat.name || `User ${chat.id}`);
+          const senderColor = isOut ? 'var(--primary)' : avatarColor;
+
           return (
             <div
               key={m.id}
               style={{
                 display: 'flex',
                 justifyContent: isOut ? 'flex-end' : 'flex-start',
+                alignItems: 'flex-end',
+                gap: 8,
                 width: '100%'
               }}
             >
+              {!isOut && (
+                <div style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: '50%',
+                  backgroundColor: avatarColor,
+                  color: '#fff',
+                  fontWeight: 600,
+                  fontSize: 11,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  marginBottom: 2
+                }}>
+                  {initials}
+                </div>
+              )}
+
               <div style={{
                 maxWidth: '75%',
                 padding: '8px 12px',
-                borderRadius: 12,
+                borderRadius: isOut ? '14px 14px 2px 14px' : '14px 14px 14px 2px',
                 backgroundColor: isOut ? 'var(--out-bubble)' : 'var(--in-bubble)',
                 border: '1px solid var(--border)',
                 boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
@@ -122,11 +175,21 @@ export default function ChatView({ chat, messages, onBack, onOpenProfile }) {
                 fontSize: 14,
                 lineHeight: 1.4
               }}>
+                <div style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: senderColor,
+                  marginBottom: 4
+                }}>
+                  {senderName}
+                </div>
+
                 {m.text && (
                   <div style={{ whiteSpace: 'pre-wrap', marginBottom: 4 }}>
                     {m.text}
                   </div>
                 )}
+
                 {m.media && (
                   <div style={{
                     fontSize: 12,
@@ -139,13 +202,19 @@ export default function ChatView({ chat, messages, onBack, onOpenProfile }) {
                     📎 {m.media}
                   </div>
                 )}
+
                 <div style={{
                   fontSize: 11,
                   color: 'var(--muted)',
                   textAlign: 'right',
-                  marginTop: 2
+                  marginTop: 2,
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  alignItems: 'center',
+                  gap: 4
                 }}>
-                  {m.date ? m.date.slice(11, 16) : ''}
+                  <span>{m.date ? m.date.slice(11, 16) : ''}</span>
+                  {isOut && <span style={{ color: 'var(--primary)' }}>✓✓</span>}
                 </div>
               </div>
             </div>
@@ -162,7 +231,7 @@ export default function ChatView({ chat, messages, onBack, onOpenProfile }) {
         fontSize: 13,
         textAlign: 'center'
       }}>
-        Режим просмотра архива диалогов
+        Архив диалогов доступен только для чтения
       </div>
     </div>
   );
