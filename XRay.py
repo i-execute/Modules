@@ -2,16 +2,18 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (4, 2, 5)
+__version__ = (5, 0, 0)
 # meta developer: Execute_forge.t.me 
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
 import os
 import asyncio
+import base64
 import io
 import logging
 import signal
 import socket
+import threading
 import time
 import platform
 import json
@@ -27,6 +29,7 @@ import secrets
 import string
 import urllib.request
 from datetime import datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional, Dict, List, Tuple
 
 from telethon.tl.functions.messages import EditMessageRequest, EditForumTopicRequest
@@ -42,6 +45,9 @@ logger = logging.getLogger(__name__)
 LOG_TRIM_SIZE = 10 * 1024 * 1024
 BASE_PORT = 8443
 AUTOSTART_INTERVAL = 10
+SUB_POLL_INTERVAL = 30
+SUB_TOKEN_LEN = 24
+SUB_XRAY_CALL_TIMEOUT = 8
 
 def _escape(text):
     if not text:
@@ -55,6 +61,21 @@ def _strip_md(text: str) -> str:
 def _gen_secret(length: int) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _fmt_bytes(value: int) -> str:
+    try:
+        size = float(value or 0)
+    except (TypeError, ValueError):
+        return "0 B"
+    units = ("B", "KB", "MB", "GB", "TB", "PB")
+    idx = 0
+    while size >= 1024 and idx < len(units) - 1:
+        size /= 1024
+        idx += 1
+    if idx == 0:
+        return f"{int(size)} {units[idx]}"
+    return f"{size:.2f} {units[idx]}"
 
 def _in_docker():
     if os.path.isfile("/.dockerenv"):
@@ -453,6 +474,148 @@ class XRay(loader.Module):
             "<b>Autostart Disabled</b>\n"
             "<blockquote>{name} will need to be started manually</blockquote>"
         ),
+
+        "sub_on": "enabled",
+        "sub_off": "disabled",
+
+        "btn_sub": "Subscriptions",
+        "btn_sub_toggle": "Enable / Disable",
+        "btn_sub_port": "Change port",
+        "btn_sub_path": "Rotate path",
+        "btn_sub_url": "Link",
+        "btn_sub_users": "Tokens",
+        "btn_sub_stats": "Stats API",
+        "btn_sub_apply": "Rebuild configs",
+        "btn_sub_reset": "Reset counters",
+        "btn_sub_interval": "Interval",
+        "btn_sub_title": "Title",
+        "btn_sub_regen": "New token",
+
+        "sub_menu": (
+            "<b>Subscriptions</b>\n"
+            "<blockquote>"
+            "Status: {status}\n"
+            "Port: {port}\n"
+            "Path: <code>{path}</code>\n"
+            "Connections: {links}\n"
+            "Traffic: {traffic}\n"
+            "Stats API: {stats}\n"
+            "Interval: {interval} h\n"
+            "Title: {title}"
+            "</blockquote>"
+        ),
+
+        "sub_url_msg": (
+            "<b>Subscription link</b>\n"
+            "<blockquote>"
+            "Shared, all connections:\n"
+            "<code>{url}</code>\n\n"
+            "JSON: <code>{url_json}</code>\n\n"
+            "The link always reports unlimited traffic, "
+            "traffic is only counted."
+            "</blockquote>"
+        ),
+
+        "sub_users_menu": (
+            "<b>Subscription tokens</b>\n"
+            "<blockquote>"
+            "A separate link per connection. "
+            "SOCKS5 is not included."
+            "</blockquote>"
+        ),
+
+        "sub_user_msg": (
+            "<b>Subscription: {name}</b>\n"
+            "<blockquote>"
+            "Transport: {transport}\n"
+            "Port: {port}\n"
+            "Traffic: {traffic}\n\n"
+            "<code>{url}</code>"
+            "</blockquote>"
+        ),
+
+        "sub_empty": (
+            "<b>Subscriptions</b>\n"
+            "<blockquote>"
+            "No connections to serve. "
+            "SOCKS5 is not included."
+            "</blockquote>"
+        ),
+
+        "sub_started": (
+            "<b>Subscriptions enabled</b>\n"
+            "<blockquote>"
+            "Port: {port}\n"
+            "Path: <code>{path}</code>\n\n"
+            "{hint}"
+            "</blockquote>"
+        ),
+
+        "sub_stopped": (
+            "<b>Subscriptions disabled</b>\n"
+            "<blockquote>Server stopped, port released.</blockquote>"
+        ),
+
+        "sub_reset_done": (
+            "<b>Counters reset</b>\n"
+            "<blockquote>Accumulated traffic cleared.</blockquote>"
+        ),
+
+        "sub_apply_done": (
+            "<b>Configs rebuilt</b>\n"
+            "<blockquote>"
+            "Restarted: {restarted}\n"
+            "Waiting: {pending}"
+            "</blockquote>"
+        ),
+
+        "sub_apply_hint": (
+            "The stats API was added to the configs. "
+            "Press rebuild to apply it to running connections."
+        ),
+
+        "sub_docker_warn": (
+            "\n\nDocker detected. The port is only reachable "
+            "when it is published by the container."
+        ),
+
+        "sub_no_ip": (
+            "<b>Error</b>\n"
+            "<blockquote>Could not detect the external IP.</blockquote>"
+        ),
+
+        "sub_err_start": (
+            "<b>Start error</b>\n"
+            "<blockquote>{error}</blockquote>"
+        ),
+
+        "sub_input_interval": "Enter update interval in hours (1-168):",
+        "sub_input_title": "Enter profile title:",
+
+        "sub_interval_set": (
+            "<b>Interval updated</b>\n"
+            "<blockquote>{interval} h</blockquote>"
+        ),
+
+        "sub_title_set": (
+            "<b>Title updated</b>\n"
+            "<blockquote>{title}</blockquote>"
+        ),
+
+        "sub_regen_done": (
+            "<b>Token rotated</b>\n"
+            "<blockquote>The old link no longer works.</blockquote>"
+        ),
+
+        "sub_port_done": (
+            "<b>Port updated</b>\n"
+            "<blockquote>New port: {port}</blockquote>"
+        ),
+
+        "sub_path_done": (
+            "<b>Path rotated</b>\n"
+            "<blockquote><code>{path}</code></blockquote>"
+        ),
     }
 
     strings_ru = {
@@ -833,6 +996,148 @@ class XRay(loader.Module):
             "<b>Автозапуск выключен</b>\n"
             "<blockquote>{name} нужно будет запускать вручную</blockquote>"
         ),
+
+        "sub_on": "включено",
+        "sub_off": "выключено",
+
+        "btn_sub": "Подписки",
+        "btn_sub_toggle": "Включить / Выключить",
+        "btn_sub_port": "Сменить порт",
+        "btn_sub_path": "Обновить путь",
+        "btn_sub_url": "Ссылка",
+        "btn_sub_users": "Токены",
+        "btn_sub_stats": "API статистики",
+        "btn_sub_apply": "Пересобрать конфиги",
+        "btn_sub_reset": "Сбросить счётчики",
+        "btn_sub_interval": "Интервал",
+        "btn_sub_title": "Название",
+        "btn_sub_regen": "Новый токен",
+
+        "sub_menu": (
+            "<b>Подписки</b>\n"
+            "<blockquote>"
+            "Статус: {status}\n"
+            "Порт: {port}\n"
+            "Путь: <code>{path}</code>\n"
+            "Подключений: {links}\n"
+            "Трафик: {traffic}\n"
+            "API статистики: {stats}\n"
+            "Интервал: {interval} ч\n"
+            "Название: {title}"
+            "</blockquote>"
+        ),
+
+        "sub_url_msg": (
+            "<b>Ссылка подписки</b>\n"
+            "<blockquote>"
+            "Общая, все подключения:\n"
+            "<code>{url}</code>\n\n"
+            "JSON: <code>{url_json}</code>\n\n"
+            "Лимит в ссылке всегда безлимитный, "
+            "трафик только учитывается."
+            "</blockquote>"
+        ),
+
+        "sub_users_menu": (
+            "<b>Токены подписки</b>\n"
+            "<blockquote>"
+            "Отдельная ссылка на каждое подключение. "
+            "SOCKS5 в подписку не входит."
+            "</blockquote>"
+        ),
+
+        "sub_user_msg": (
+            "<b>Подписка: {name}</b>\n"
+            "<blockquote>"
+            "Транспорт: {transport}\n"
+            "Порт: {port}\n"
+            "Трафик: {traffic}\n\n"
+            "<code>{url}</code>"
+            "</blockquote>"
+        ),
+
+        "sub_empty": (
+            "<b>Подписки</b>\n"
+            "<blockquote>"
+            "Нет подключений для выдачи. "
+            "SOCKS5 в подписку не входит."
+            "</blockquote>"
+        ),
+
+        "sub_started": (
+            "<b>Подписки включены</b>\n"
+            "<blockquote>"
+            "Порт: {port}\n"
+            "Путь: <code>{path}</code>\n\n"
+            "{hint}"
+            "</blockquote>"
+        ),
+
+        "sub_stopped": (
+            "<b>Подписки выключены</b>\n"
+            "<blockquote>Сервер остановлен, порт освобождён.</blockquote>"
+        ),
+
+        "sub_reset_done": (
+            "<b>Счётчики сброшены</b>\n"
+            "<blockquote>Накопленный трафик обнулён.</blockquote>"
+        ),
+
+        "sub_apply_done": (
+            "<b>Конфиги пересобраны</b>\n"
+            "<blockquote>"
+            "Перезапущено: {restarted}\n"
+            "Ожидают запуска: {pending}"
+            "</blockquote>"
+        ),
+
+        "sub_apply_hint": (
+            "API статистики добавлен в конфиги. "
+            "Нажмите пересборку, чтобы применить к работающим подключениям."
+        ),
+
+        "sub_docker_warn": (
+            "\n\nОбнаружен Docker. Порт доступен только "
+            "если он проброшен контейнером."
+        ),
+
+        "sub_no_ip": (
+            "<b>Ошибка</b>\n"
+            "<blockquote>Не удалось определить внешний IP.</blockquote>"
+        ),
+
+        "sub_err_start": (
+            "<b>Ошибка запуска</b>\n"
+            "<blockquote>{error}</blockquote>"
+        ),
+
+        "sub_input_interval": "Введите интервал обновления в часах (1-168):",
+        "sub_input_title": "Введите название профиля:",
+
+        "sub_interval_set": (
+            "<b>Интервал обновлён</b>\n"
+            "<blockquote>{interval} ч</blockquote>"
+        ),
+
+        "sub_title_set": (
+            "<b>Название обновлено</b>\n"
+            "<blockquote>{title}</blockquote>"
+        ),
+
+        "sub_regen_done": (
+            "<b>Токен обновлён</b>\n"
+            "<blockquote>Старая ссылка больше не работает.</blockquote>"
+        ),
+
+        "sub_port_done": (
+            "<b>Порт обновлён</b>\n"
+            "<blockquote>Новый порт: {port}</blockquote>"
+        ),
+
+        "sub_path_done": (
+            "<b>Путь обновлён</b>\n"
+            "<blockquote><code>{path}</code></blockquote>"
+        ),
     }
 
     def __init__(self):
@@ -857,6 +1162,10 @@ class XRay(loader.Module):
         }
         self._logger_topic = None
         self._asset_channel = None
+        self._sub: Dict = {}
+        self._sub_server = None
+        self._sub_thread = None
+        self._sub_task = None
 
     async def client_ready(self, client, db):
         self._client = client
@@ -874,6 +1183,8 @@ class XRay(loader.Module):
         self._users = self._db.get("XR", "users", {})
         self._external_ip = await self._detect_external_ip()
         self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
+        self._sub = self._db.get("XR", "sub", {}) or {}
+        self._sub_ensure()
 
         if self._asset_channel:
             await self._ensure_logger_topic()
@@ -908,6 +1219,8 @@ class XRay(loader.Module):
             if not ok:
                 logger.error(f"[XR] WebSocket recovery failed for {name}: {error}")
         self._start_monitor()
+        await self._sub_autostart()
+        self._sub_start_task()
 
     async def _send_with_preview(self, chat_id, text):
         try:
@@ -978,6 +1291,9 @@ class XRay(loader.Module):
                 await self._monitor_task
             except asyncio.CancelledError:
                 pass
+
+        await self._sub_stop_task()
+        self._sub_stop_server()
         
         for name in list(self._processes.keys()):
             if name in self._users:
@@ -1825,6 +2141,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
 
     async def _get_next_port(self) -> int:
         used_ports = {u["port"] for u in self._users.values()}
+        if self._sub.get("port"):
+            used_ports.add(int(self._sub["port"]))
         port = BASE_PORT
         
         if await self._check_port_available(port) and port not in used_ports:
@@ -1853,7 +2171,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         transport = user["transport"]
 
         if transport == "socks5":
-            return {
+            socks_config = {
                 "log": {
                     "loglevel": "warning",
                     "access": os.path.join(self._root, "users", user["name"], "access.log"),
@@ -1882,6 +2200,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                     {"protocol": "freedom", "tag": "direct"},
                 ],
             }
+            self._inject_stats_api(user, socks_config)
+            return socks_config
 
         if transport == "tcp":
             sni = user.get("sni", "www.cloudflare.com")
@@ -1973,6 +2293,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 },
             }
 
+        self._inject_stats_api(user, config)
         return config
 
     def _build_vless_link(self, user: Dict) -> str:
@@ -2248,6 +2569,671 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         
         return " ".join(parts)
 
+    def _sub_save(self):
+        self._db.set("XR", "sub", self._sub)
+
+    def _sub_default(self) -> Dict:
+        return {
+            "enabled": False,
+            "port": 0,
+            "prefix": "",
+            "token": "",
+            "stats": True,
+            "interval": 12,
+            "title": "",
+            "traffic": {},
+            "baseline": {},
+        }
+
+    def _sub_ensure(self) -> Dict:
+        changed = False
+        for key, value in self._sub_default().items():
+            if key not in self._sub:
+                self._sub[key] = value
+                changed = True
+        if not self._sub.get("port"):
+            self._sub["port"] = self._sub_free_port(self._sub_taken_ports())
+            changed = True
+        if not self._sub.get("prefix"):
+            self._sub["prefix"] = _gen_secret(SUB_TOKEN_LEN)
+            changed = True
+        if not self._sub.get("token"):
+            self._sub["token"] = _gen_secret(SUB_TOKEN_LEN)
+            changed = True
+        if changed:
+            self._sub_save()
+        return self._sub
+
+    def _sub_b64(self, raw: str) -> str:
+        return base64.urlsafe_b64encode(str(raw).encode("utf-8")).decode("ascii").rstrip("=")
+
+    def _port_in_use(self, port: int) -> bool:
+        try:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        except OSError:
+            return True
+        try:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            probe.bind(("0.0.0.0", int(port)))
+        except OSError:
+            return True
+        finally:
+            probe.close()
+        return False
+
+    def _sub_taken_ports(self) -> set:
+        taken = set()
+        for user in self._users.values():
+            for key in ("port", "site_port", "api_port"):
+                value = user.get(key)
+                if value:
+                    try:
+                        taken.add(int(value))
+                    except (TypeError, ValueError):
+                        continue
+        if self._sub.get("port"):
+            try:
+                taken.add(int(self._sub["port"]))
+            except (TypeError, ValueError):
+                pass
+        return taken
+
+    def _sub_free_port(self, taken: set) -> int:
+        for _ in range(64):
+            port = self._find_free_loopback_port()
+            if port not in taken and not self._port_in_use(port):
+                return port
+        for _ in range(64):
+            port = random.randint(20000, 60000)
+            if port not in taken and not self._port_in_use(port):
+                return port
+        return random.randint(20000, 60000)
+
+    def _sub_forget_user(self, name: str):
+        if not self._sub:
+            return
+        self._sub.setdefault("traffic", {}).pop(name, None)
+        self._sub.setdefault("baseline", {}).pop(name, None)
+        self._sub_save()
+
+    def _sub_user_token(self, name: str) -> str:
+        user = self._users.get(name)
+        if not user:
+            return ""
+        token = user.get("sub_token")
+        if not token:
+            token = _gen_secret(SUB_TOKEN_LEN)
+            user["sub_token"] = token
+            self._save_users()
+        return token
+
+    def _sub_prefix(self) -> str:
+        return self._sub_b64(self._sub.get("prefix", ""))
+
+    def _sub_route(self, token: str) -> str:
+        return f"/{self._sub_prefix()}/{self._sub_b64(token)}"
+
+    def _sub_masked_path(self) -> str:
+        return f"/{self._sub_prefix()}/*"
+
+    def _sub_base_url(self) -> str:
+        if not self._external_ip:
+            return ""
+        return f"http://{self._external_ip}:{self._sub.get('port', 0)}"
+
+    def _sub_url(self, token: str = "") -> str:
+        base = self._sub_base_url()
+        if not base:
+            return ""
+        if not token:
+            token = self._sub.get("token", "")
+        return base + self._sub_route(token)
+
+    def _sub_link_host(self, link: str) -> str:
+        parts = link.split("@", 1)
+        if len(parts) < 2:
+            return ""
+        tail = parts[1].split("?", 1)[0]
+        if tail.startswith("["):
+            end = tail.find("]")
+            if end < 0:
+                return ""
+            return tail[1:end]
+        if ":" in tail:
+            return tail.rsplit(":", 1)[0]
+        return tail
+
+    def _sub_targets(self, only: str = "") -> List[Tuple]:
+        out = []
+        if not self._external_ip:
+            return out
+        for name, user in list(self._users.items()):
+            if only and name != only:
+                continue
+            if user.get("transport") == "socks5":
+                continue
+            try:
+                link = self._build_vless_link(user)
+            except Exception:
+                continue
+            if not link or "@" not in link:
+                continue
+            host = self._sub_link_host(link)
+            if not host or host.lower() in ("none", "null", "0.0.0.0"):
+                continue
+            out.append((name, user, link))
+        return out
+
+    def _sub_body(self, only: str = "") -> str:
+        return "\n".join(link for _, _, link in self._sub_targets(only))
+
+    def _sub_traffic_for(self, only: str = "") -> Tuple[int, int]:
+        up = 0
+        down = 0
+        rows = self._sub.get("traffic") or {}
+        for name, row in rows.items():
+            if only and name != only:
+                continue
+            if not isinstance(row, dict):
+                continue
+            up += int(row.get("up") or 0)
+            down += int(row.get("down") or 0)
+        return up, down
+
+    def _sub_userinfo(self, only: str = "") -> str:
+        up, down = self._sub_traffic_for(only)
+        return f"upload={up}; download={down}; total=0; expire=0"
+
+    def _sub_resolve(self, presented: str) -> Tuple[bool, str]:
+        given = presented.encode("utf-8", "ignore")
+        for name, user in self._users.items():
+            token = user.get("sub_token")
+            if not token:
+                continue
+            if secrets.compare_digest(given, self._sub_b64(token).encode("ascii")):
+                return True, name
+        if secrets.compare_digest(given, self._sub_b64(self._sub.get("token", "")).encode("ascii")):
+            return True, ""
+        return False, ""
+
+    def _sub_outbound(self, name: str, user: Dict) -> Dict:
+        transport = user.get("transport")
+        uuid_str = user.get("uuid") or ""
+        if not uuid_str:
+            return {}
+        address = self._external_ip
+        port = int(user.get("port") or 0)
+        vnext_user = {
+            "id": uuid_str,
+            "encryption": user.get("vless_encryption") or "none",
+            "email": name,
+        }
+        settings = {"vnext": [{"address": address, "port": port, "users": [vnext_user]}]}
+
+        if transport == "websocket":
+            path = user.get("path") or "/xhttps"
+            if not path.startswith("/"):
+                path = "/" + path
+            fallback = user.get("websocket_mode") == "tls-fallback"
+            host = (user.get("tunnel_host") or address) if fallback else address
+            target_port = 443 if fallback else port
+            settings["vnext"][0]["address"] = host
+            settings["vnext"][0]["port"] = target_port
+            stream = {"network": "ws", "wsSettings": {"path": path}}
+            if fallback:
+                stream["security"] = "tls"
+                stream["tlsSettings"] = {"serverName": host}
+            else:
+                stream["security"] = "none"
+            return {
+                "tag": "proxy",
+                "protocol": "vless",
+                "settings": settings,
+                "streamSettings": stream,
+            }
+
+        if transport == "xhttp":
+            path = user.get("path") or "/xhttps"
+            if not path.startswith("/"):
+                path = "/" + path
+            stream = {
+                "network": "xhttp",
+                "security": "reality",
+                "xhttpSettings": {"path": path},
+                "realitySettings": {
+                    "serverName": user.get("sni") or "www.cloudflare.com",
+                    "fingerprint": user.get("fingerprint") or "firefox",
+                    "publicKey": user.get("public_key") or "",
+                    "shortId": user.get("short_id") or "",
+                    "spiderX": "/",
+                },
+            }
+            return {
+                "tag": "proxy",
+                "protocol": "vless",
+                "settings": settings,
+                "streamSettings": stream,
+            }
+
+        stream = {
+            "network": "tcp",
+            "security": "reality",
+            "tcpSettings": {"header": {"type": "none"}},
+            "realitySettings": {
+                "serverName": user.get("sni") or "www.cloudflare.com",
+                "fingerprint": user.get("fingerprint") or "firefox",
+                "publicKey": user.get("public_key") or "",
+                "shortId": user.get("short_id") or "",
+                "spiderX": "/",
+            },
+        }
+        if (user.get("vless_decryption") or "none") == "none":
+            vnext_user["flow"] = "xtls-rprx-vision"
+        return {
+            "tag": "proxy",
+            "protocol": "vless",
+            "settings": settings,
+            "streamSettings": stream,
+        }
+
+    def _sub_client_config(self, name: str, user: Dict) -> Dict:
+        outbound = self._sub_outbound(name, user)
+        if not outbound:
+            return {}
+        return {
+            "log": {"loglevel": "warning"},
+            "inbounds": [
+                {
+                    "tag": "socks-in",
+                    "listen": "127.0.0.1",
+                    "port": 1080,
+                    "protocol": "socks",
+                    "settings": {"auth": "noauth", "udp": True},
+                },
+                {
+                    "tag": "http-in",
+                    "listen": "127.0.0.1",
+                    "port": 1081,
+                    "protocol": "http",
+                    "settings": {},
+                },
+            ],
+            "outbounds": [
+                outbound,
+                {"protocol": "freedom", "tag": "direct"},
+                {"protocol": "blackhole", "tag": "block"},
+            ],
+            "routing": {
+                "domainStrategy": "AsIs",
+                "rules": [
+                    {
+                        "type": "field",
+                        "ip": [
+                            "10.0.0.0/8",
+                            "172.16.0.0/12",
+                            "192.168.0.0/16",
+                            "127.0.0.0/8",
+                            "::1/128",
+                            "fc00::/7",
+                        ],
+                        "outboundTag": "direct",
+                    }
+                ],
+            },
+        }
+
+    def _sub_json_payload(self, only: str = "") -> bytes:
+        configs = []
+        for name, user, _ in self._sub_targets(only):
+            config = self._sub_client_config(name, user)
+            if config:
+                configs.append(config)
+        payload = configs[0] if len(configs) == 1 else configs
+        return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+
+    def _sub_info_payload(self, only: str = "", up: int = 0, down: int = 0) -> Dict:
+        targets = self._sub_targets(only)
+        return {
+            "profiles": [name for name, _, _ in targets],
+            "links": len(targets),
+            "upload": up,
+            "download": down,
+            "total": 0,
+            "expire": 0,
+            "unlimited": True,
+            "interval": self._sub.get("interval", 12),
+        }
+
+    def _sub_make_handler(self):
+        outer = self
+
+        class SubHandler(BaseHTTPRequestHandler):
+            server_version = "nginx"
+            sys_version = ""
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, fmt, *args):
+                return
+
+            def _abort(self):
+                try:
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                except Exception:
+                    pass
+
+            def _reply(self, code, payload, ctype, userinfo):
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Subscription-Userinfo", userinfo)
+                self.send_header("Profile-Update-Interval", str(outer._sub.get("interval", 12)))
+                title = outer._sub.get("title") or ""
+                if title:
+                    self.send_header("Profile-Title", "base64:" + outer._sub_b64(title))
+                self.end_headers()
+                if self.command != "HEAD" and payload:
+                    self.wfile.write(payload)
+
+            def do_HEAD(self):
+                self.do_GET()
+
+            def do_GET(self):
+                try:
+                    self._dispatch()
+                except Exception:
+                    self._abort()
+
+            def _dispatch(self):
+                raw = self.path or "/"
+                query = ""
+                if "?" in raw:
+                    raw, query = raw.split("?", 1)
+                if "#" in raw:
+                    raw = raw.split("#", 1)[0]
+                segments = [part for part in raw.split("/") if part]
+                fmt = ""
+                if len(segments) == 3:
+                    fmt = segments[2].lower()
+                    segments = segments[:2]
+                for chunk in query.split("&"):
+                    if not chunk:
+                        continue
+                    key, _, value = chunk.partition("=")
+                    if key.lower() == "format":
+                        fmt = value.lower()
+                if len(segments) != 2:
+                    self._abort()
+                    return
+                if not secrets.compare_digest(
+                    segments[0].encode("utf-8", "ignore"),
+                    outer._sub_prefix().encode("ascii"),
+                ):
+                    self._abort()
+                    return
+                resolved, only = outer._sub_resolve(segments[1])
+                if not resolved:
+                    self._abort()
+                    return
+                userinfo = outer._sub_userinfo(only)
+                if fmt != "info" and not outer._sub_targets(only):
+                    self._abort()
+                    return
+                if fmt == "info":
+                    up, down = outer._sub_traffic_for(only)
+                    body = json.dumps(outer._sub_info_payload(only, up, down), ensure_ascii=False).encode("utf-8")
+                    self._reply(200, body, "application/json; charset=utf-8", userinfo)
+                    return
+                if fmt == "json":
+                    self._reply(200, outer._sub_json_payload(only), "application/json; charset=utf-8", userinfo)
+                    return
+                if fmt == "raw":
+                    self._reply(200, outer._sub_body(only).encode("utf-8"), "text/plain; charset=utf-8", userinfo)
+                    return
+                encoded = base64.b64encode(outer._sub_body(only).encode("utf-8"))
+                self._reply(200, encoded, "text/plain; charset=utf-8", userinfo)
+
+        return SubHandler
+
+    def _sub_start_server(self) -> Tuple[bool, str]:
+        if self._sub_server:
+            return True, ""
+        self._sub_ensure()
+        port = int(self._sub["port"])
+        if self._port_in_use(port):
+            port = self._sub_free_port(self._sub_taken_ports())
+            self._sub["port"] = port
+            self._sub_save()
+        try:
+            httpd = ThreadingHTTPServer(("0.0.0.0", port), self._sub_make_handler())
+        except OSError as exc:
+            return False, str(exc)
+        httpd.daemon_threads = True
+        self._sub_server = httpd
+        self._sub_thread = threading.Thread(target=httpd.serve_forever, name="xray-sub", daemon=True)
+        self._sub_thread.start()
+        logger.info(f"[XR] subscription server listening on {port}")
+        return True, ""
+
+    def _sub_stop_server(self):
+        httpd = self._sub_server
+        self._sub_server = None
+        self._sub_thread = None
+        if not httpd:
+            return
+        try:
+            httpd.shutdown()
+        except Exception:
+            pass
+        try:
+            httpd.server_close()
+        except Exception:
+            pass
+
+    async def _sub_autostart(self):
+        if not self._sub.get("enabled"):
+            return
+        ok, err = self._sub_start_server()
+        if not ok:
+            logger.error(f"[XR] subscription server failed to start: {err}")
+
+    async def _sub_enable(self) -> Tuple[bool, str]:
+        self._sub_ensure()
+        self._sub["enabled"] = True
+        self._sub_save()
+        ok, err = self._sub_start_server()
+        if not ok:
+            self._sub["enabled"] = False
+            self._sub_save()
+            return False, err
+        self._sub_start_task()
+        return True, ""
+
+    async def _sub_disable(self):
+        self._sub["enabled"] = False
+        self._sub_save()
+        await self._sub_stop_task()
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._sub_stop_server)
+
+    def _sub_start_task(self):
+        if self._sub_task and not self._sub_task.done():
+            return
+        self._sub_task = asyncio.create_task(self._sub_traffic_loop())
+
+    async def _sub_stop_task(self):
+        task = self._sub_task
+        self._sub_task = None
+        if not task:
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+
+    async def _sub_traffic_loop(self):
+        while True:
+            await asyncio.sleep(SUB_POLL_INTERVAL)
+            try:
+                if self._sub.get("enabled") and self._sub.get("stats"):
+                    await self._sub_collect_traffic()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error(f"[XR] traffic poll failed: {exc}")
+
+    async def _sub_collect_traffic(self):
+        if not self._xray_installed():
+            return
+        changed = False
+        for name, user in list(self._users.items()):
+            port = user.get("api_port")
+            if not port or name not in self._processes:
+                continue
+            raw = await self._sub_query_stats(port)
+            if raw is None:
+                continue
+            totals = dict((self._sub["traffic"].get(name)) or {"up": 0, "down": 0})
+            baseline = self._sub["baseline"].get(name)
+            if not isinstance(baseline, dict):
+                self._sub["baseline"][name] = {"up": raw[0], "down": raw[1]}
+                self._sub["traffic"][name] = totals
+                changed = True
+                continue
+            for key, value in (("up", raw[0]), ("down", raw[1])):
+                previous = int(baseline.get(key) or 0)
+                current = int(totals.get(key) or 0)
+                if value < previous:
+                    totals[key] = current + value
+                else:
+                    totals[key] = current + (value - previous)
+                baseline[key] = value
+            self._sub["baseline"][name] = baseline
+            self._sub["traffic"][name] = totals
+            changed = True
+        if changed:
+            self._sub_save()
+
+    async def _sub_query_stats(self, port: int):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self._xray_path,
+                "api",
+                "statsquery",
+                f"--server=127.0.0.1:{int(port)}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except Exception:
+            return None
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=SUB_XRAY_CALL_TIMEOUT)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            return None
+        except Exception:
+            return None
+        if proc.returncode != 0:
+            return None
+        return self._sub_parse_stats(out.decode("utf-8", "replace"))
+
+    def _sub_parse_stats(self, text: str):
+        text = (text or "").strip()
+        if not text:
+            return None
+        start = text.find("{")
+        if start < 0:
+            return None
+        try:
+            data = json.loads(text[start:])
+        except Exception:
+            return None
+        user_up = 0
+        user_down = 0
+        seen_user = False
+        inbound_up = 0
+        inbound_down = 0
+        for item in data.get("stat") or []:
+            if not isinstance(item, dict):
+                continue
+            parts = str(item.get("name") or "").split(">>>")
+            if len(parts) != 4 or parts[2] != "traffic":
+                continue
+            try:
+                value = int(item.get("value") or 0)
+            except (TypeError, ValueError):
+                continue
+            kind, who, _, direction = parts
+            if kind == "user":
+                seen_user = True
+                if direction == "uplink":
+                    user_up += value
+                elif direction == "downlink":
+                    user_down += value
+            elif kind == "inbound" and who != "api":
+                if direction == "uplink":
+                    inbound_up += value
+                elif direction == "downlink":
+                    inbound_down += value
+        if seen_user:
+            return user_up, user_down
+        return inbound_up, inbound_down
+
+    def _inject_stats_api(self, user: Dict, config: Dict):
+        if not self._sub.get("enabled") or not self._sub.get("stats"):
+            return
+        if not user.get("api_port"):
+            user["api_port"] = self._sub_free_port(self._sub_taken_ports())
+        tag = f"in-{user.get('name', 'user')}"
+        for inbound in config.get("inbounds") or []:
+            if not isinstance(inbound, dict):
+                continue
+            if not inbound.get("tag"):
+                inbound["tag"] = tag
+            clients = (inbound.get("settings") or {}).get("clients")
+            if isinstance(clients, list):
+                for client in clients:
+                    if isinstance(client, dict) and not client.get("email"):
+                        client["email"] = user.get("name", "")
+        config["stats"] = {}
+        config["api"] = {"tag": "api", "services": ["StatsService"]}
+        config["policy"] = {
+            "levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}},
+            "system": {
+                "statsInboundUplink": True,
+                "statsInboundDownlink": True,
+                "statsOutboundUplink": True,
+                "statsOutboundDownlink": True,
+            },
+        }
+        config.setdefault("inbounds", []).append(
+            {
+                "tag": "api",
+                "listen": "127.0.0.1",
+                "port": int(user["api_port"]),
+                "protocol": "dokodemo-door",
+                "settings": {"address": "127.0.0.1"},
+            }
+        )
+        routing = config.setdefault("routing", {})
+        routing.setdefault("domainStrategy", "AsIs")
+        rules = routing.setdefault("rules", [])
+        if not any(rule.get("outboundTag") == "api" for rule in rules if isinstance(rule, dict)):
+            rules.append({"type": "field", "inboundTag": ["api"], "outboundTag": "api"})
+        outbounds = config.setdefault("outbounds", [])
+        if not any(outbound.get("tag") == "api" for outbound in outbounds if isinstance(outbound, dict)):
+            outbounds.append({"protocol": "blackhole", "tag": "api"})
+
     async def _cb_setup_menu(self, call: InlineCall):
         xray_status = await self._get_version("xray") if self._xray_installed() else "Not installed"
         cloudflared_status = await self._get_version("cloudflared") if self._cloudflared_installed() else "Not installed"
@@ -2440,6 +3426,11 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 "style": "primary",
             }],
             [{
+                "text": self.strings["btn_sub"],
+                "callback": self._cb_sub_menu,
+                "style": "primary",
+            }],
+            [{
                 "text": self.strings["btn_setup"],
                 "callback": self._cb_setup_menu,
                 "style": "primary",
@@ -2515,6 +3506,11 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         markup.append([
             {"text": self.strings["btn_get_link"], "callback": self._cb_get_user_link, "args": (name,), "style": "primary"},
         ])
+
+        if user.get("transport") != "socks5":
+            markup.append([
+                {"text": self.strings["btn_sub"], "callback": self._cb_sub_user_link, "args": (name,), "style": "primary"},
+            ])
         
         markup.append([
             {"text": "Xray-core logs", "callback": self._cb_logs_menu, "args": (name, "xray"), "style": "primary"},
@@ -2631,6 +3627,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         
         del self._users[name]
         self._save_users()
+        self._sub_forget_user(name)
         
         await call.edit(
             self.strings["user_deleted"].format(name=_escape(name)),
@@ -3367,6 +4364,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             "fingerprint": "firefox",
             "socks_user": _gen_secret(8),
             "socks_pass": _gen_secret(14),
+            "sub_token": _gen_secret(SUB_TOKEN_LEN),
             "autostart": False,
             "start_time": 0,
             "services": {
@@ -3390,6 +4388,330 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             ),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
         )
+
+    async def _cb_sub_menu(self, call: InlineCall):
+        self._sub_ensure()
+        targets = self._sub_targets()
+        up, down = self._sub_traffic_for()
+        running = bool(self._sub_server)
+
+        markup = [
+            [{"text": self.strings["btn_sub_toggle"], "callback": self._cb_sub_toggle, "style": "primary"}],
+        ]
+
+        if self._sub.get("enabled"):
+            markup.append([
+                {"text": self.strings["btn_sub_url"], "callback": self._cb_sub_url, "style": "primary"},
+                {"text": self.strings["btn_sub_users"], "callback": self._cb_sub_users, "style": "primary"},
+            ])
+            markup.append([
+                {"text": self.strings["btn_sub_port"], "callback": self._cb_sub_port, "style": "primary"},
+                {"text": self.strings["btn_sub_path"], "callback": self._cb_sub_path, "style": "primary"},
+            ])
+            markup.append([
+                {"text": self.strings["btn_sub_title"], "callback": self._cb_sub_title, "style": "primary"},
+                {"text": self.strings["btn_sub_interval"], "callback": self._cb_sub_interval, "style": "primary"},
+            ])
+            markup.append([
+                {"text": self.strings["btn_sub_stats"], "callback": self._cb_sub_stats, "style": "primary"},
+                {"text": self.strings["btn_sub_reset"], "callback": self._cb_sub_reset, "style": "danger"},
+            ])
+            markup.append([
+                {"text": self.strings["btn_sub_apply"], "callback": self._cb_sub_apply, "style": "primary"},
+            ])
+
+        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}])
+
+        text = self.strings["sub_menu"].format(
+                status=self.strings["sub_on"] if running else self.strings["sub_off"],
+                port=self._sub.get("port", 0),
+                path=_escape(self._sub_masked_path()),
+                links=len(targets),
+                traffic=f"{_fmt_bytes(up)} / {_fmt_bytes(down)}",
+                stats=self.strings["sub_on"] if self._sub.get("stats") else self.strings["sub_off"],
+                interval=self._sub.get("interval", 12),
+                title=_escape(self._sub.get("title") or "-"),
+        )
+
+        if _in_docker():
+            text = text.replace("</blockquote>", self.strings["sub_docker_warn"] + "</blockquote>")
+
+        await call.edit(text, reply_markup=markup)
+
+    async def _cb_sub_toggle(self, call: InlineCall):
+        await call.edit(self.strings["loading"], reply_markup=[])
+
+        if self._sub.get("enabled"):
+            await self._sub_disable()
+            await call.edit(
+                self.strings["sub_stopped"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+            )
+            return
+
+        if not self._external_ip:
+            self._external_ip = await self._detect_external_ip()
+        if not self._external_ip:
+            await call.edit(
+                self.strings["sub_no_ip"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+            )
+            return
+
+        ok, err = await self._sub_enable()
+        if not ok:
+            await call.edit(
+                self.strings["sub_err_start"].format(error=_escape(str(err)[:200])),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+            )
+            return
+
+        await call.edit(
+            self.strings["sub_started"].format(
+                port=self._sub.get("port", 0),
+                path=_escape(self._sub_masked_path()),
+                hint=self.strings["sub_apply_hint"],
+            ),
+            reply_markup=[
+                [{"text": self.strings["btn_sub_apply"], "callback": self._cb_sub_apply, "style": "primary"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}],
+            ],
+        )
+
+    async def _cb_sub_url(self, call: InlineCall):
+        if not self._sub_targets():
+            await call.edit(
+                self.strings["sub_empty"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+            )
+            return
+
+        url = self._sub_url()
+        if not url:
+            await call.edit(
+                self.strings["sub_no_ip"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+            )
+            return
+
+        json_url = f"{url}?format=json"
+        info_url = f"{url}?format=info"
+
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", prefix="sub_", delete=False)
+        try:
+            tmp.write(url + "\n" + json_url + "\n" + info_url + "\n")
+            tmp.close()
+            try:
+                await self._send_file_to_call_chat(call, tmp.name, force_document=True)
+            except Exception as exc:
+                logger.error(f"[XR] subscription url send failed: {exc}")
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
+        await call.edit(
+            self.strings["sub_url_msg"].format(url=_escape(url), url_json=_escape(json_url)),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+        )
+
+    async def _cb_sub_users(self, call: InlineCall):
+        markup = []
+        for name, user, _ in self._sub_targets():
+            label = f"{name} ({self._transport_label(user.get('transport', ''))})"
+            markup.append([{
+                "text": label,
+                "callback": self._cb_sub_user,
+                "args": (name,),
+                "style": "primary",
+            }])
+
+        if not markup:
+            await call.edit(
+                self.strings["sub_empty"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+            )
+            return
+
+        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}])
+        await call.edit(self.strings["sub_users_menu"], reply_markup=markup)
+
+    async def _cb_sub_user(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if not user:
+            await call.answer("Not found", show_alert=True)
+            return
+
+        token = self._sub_user_token(name)
+        up, down = self._sub_traffic_for(name)
+
+        await call.edit(
+            self.strings["sub_user_msg"].format(
+                name=_escape(name),
+                transport=_escape(self._transport_label(user.get("transport", ""))),
+                port=user.get("port", 0),
+                traffic=f"{_fmt_bytes(up)} / {_fmt_bytes(down)}",
+                url=_escape(self._sub_url(token)),
+            ),
+            reply_markup=[
+                [{"text": self.strings["btn_sub_regen"], "callback": self._cb_sub_regen, "args": (name,), "style": "danger"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_sub_users, "style": "primary"}],
+            ],
+        )
+
+    async def _cb_sub_regen(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if user:
+            user["sub_token"] = _gen_secret(SUB_TOKEN_LEN)
+            self._save_users()
+        await self._cb_sub_user(call, name)
+
+    async def _cb_sub_port(self, call: InlineCall):
+        await call.edit(self.strings["loading"], reply_markup=[])
+
+        port = self._sub_free_port(self._sub_taken_ports())
+        self._sub["port"] = port
+        self._sub_save()
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._sub_stop_server)
+        ok, err = self._sub_start_server()
+        if not ok:
+            self._sub["enabled"] = False
+            self._sub_save()
+            await self._sub_stop_task()
+            await call.edit(
+                self.strings["sub_err_start"].format(error=_escape(str(err)[:200])),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+            )
+            return
+
+        await call.edit(
+            self.strings["sub_port_done"].format(port=port),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+        )
+
+    async def _cb_sub_path(self, call: InlineCall):
+        self._sub["prefix"] = _gen_secret(SUB_TOKEN_LEN)
+        self._sub_save()
+        await call.edit(
+            self.strings["sub_path_done"].format(path=_escape(self._sub_masked_path())),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+        )
+
+    async def _cb_sub_stats(self, call: InlineCall):
+        self._sub["stats"] = not self._sub.get("stats")
+        self._sub_save()
+        await self._cb_sub_menu(call)
+
+    async def _cb_sub_reset(self, call: InlineCall):
+        self._sub["traffic"] = {}
+        self._sub["baseline"] = {}
+        self._sub_save()
+        await call.edit(
+            self.strings["sub_reset_done"],
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+        )
+
+    async def _cb_sub_apply(self, call: InlineCall):
+        await call.edit(self.strings["loading"], reply_markup=[])
+
+        restarted = 0
+        failed = 0
+
+        for name in list(self._processes.keys()):
+            await self._stop_user(name, reason="rebuild")
+            ok, _ = await self._start_user(name)
+            if ok:
+                restarted += 1
+            else:
+                failed += 1
+                user = self._users.get(name)
+                if user is not None:
+                    user["restart_required"] = True
+
+        self._save_users()
+
+        await call.edit(
+            self.strings["sub_apply_done"].format(restarted=restarted, pending=failed),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+        )
+
+    async def _cb_sub_interval(self, call: InlineCall):
+        await call.edit(
+            self.strings["sub_input_interval"],
+            reply_markup=[[
+                {
+                    "text": self.strings["btn_sub_interval"],
+                    "input": self.strings["sub_input_interval"],
+                    "handler": self._cb_set_sub_interval,
+                    "style": "primary",
+                }
+            ]],
+        )
+
+    async def _cb_set_sub_interval(self, call: InlineCall, raw: str):
+        try:
+            interval = int(str(raw).strip())
+        except (TypeError, ValueError):
+            await call.answer(self.strings["err_invalid_limit"], show_alert=True)
+            return
+
+        if interval < 1 or interval > 168:
+            await call.answer(self.strings["err_invalid_limit"], show_alert=True)
+            return
+
+        self._sub["interval"] = interval
+        self._sub_save()
+
+        await call.edit(
+            self.strings["sub_interval_set"].format(interval=interval),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+        )
+
+    async def _cb_sub_title(self, call: InlineCall):
+        await call.edit(
+            self.strings["sub_input_title"],
+            reply_markup=[[
+                {
+                    "text": self.strings["btn_sub_title"],
+                    "input": self.strings["sub_input_title"],
+                    "handler": self._cb_set_sub_title,
+                    "style": "primary",
+                }
+            ]],
+        )
+
+    async def _cb_set_sub_title(self, call: InlineCall, raw: str):
+        self._sub["title"] = _strip_md(str(raw)).strip()[:64]
+        self._sub_save()
+        await call.edit(
+            self.strings["sub_title_set"].format(title=_escape(self._sub["title"] or "-")),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+        )
+
+    async def _cb_sub_user_link(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if not user:
+            await call.answer("Not found", show_alert=True)
+            return
+
+        if not self._sub.get("enabled"):
+            await call.edit(
+                self.strings["sub_stopped"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]],
+            )
+            return
+
+        if user.get("transport") == "socks5":
+            await call.edit(
+                self.strings["sub_empty"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]],
+            )
+            return
+
+        await self._cb_sub_user(call, name)
 
     async def _cb_close(self, call: InlineCall):
         await call.delete()
@@ -3415,6 +4737,11 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 [{
                     "text": self.strings["btn_users"],
                     "callback": self._cb_users_menu,
+                    "style": "primary",
+                }],
+                [{
+                    "text": self.strings["btn_sub"],
+                    "callback": self._cb_sub_menu,
                     "style": "primary",
                 }],
                 [{
