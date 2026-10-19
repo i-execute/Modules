@@ -457,7 +457,7 @@ class InlineDL(loader.Module):
             "Inline bot: up to <b>2000 MB</b>\n"
             "Userbot account: up to <b>4096 MB</b> with Telegram Premium\n"
             "Premium: <b>{premium}</b></blockquote>\n"
-            "<blockquote><b>Usage:</b> <code>@{bot} link</code></blockquote>"
+            "<blockquote><b>Usage:</b> <code>@{bot} dl link</code></blockquote>"
         ),
         "reloaded": (
             "<blockquote><b>InlineDL reloaded, everything works</b></blockquote>\n"
@@ -614,7 +614,7 @@ class InlineDL(loader.Module):
             "Инлайн бот: до <b>2000 MB</b>\n"
             "Аккаунт юзербота: до <b>4096 MB</b> с Telegram Premium\n"
             "Premium: <b>{premium}</b></blockquote>\n"
-            "<blockquote><b>Использование:</b> <code>@{bot} ссылка</code></blockquote>"
+            "<blockquote><b>Использование:</b> <code>@{bot} dl ссылка</code></blockquote>"
         ),
         "reloaded": (
             "<blockquote><b>InlineDL перезагружен, все работает</b></blockquote>\n"
