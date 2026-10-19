@@ -1,960 +1,652 @@
-# CopyLeft 2026 github.com/i-execute
-# Author: I_execute.t.me
-# Licensed under AGPLv3.
-
-__version__ = (1, 1, 0)
-# meta developer: Execute_forge.t.me
+__version__ = (2, 0, 0)
 
 import os
 import re
-import io
-import logging
-import tempfile
+import json
+import random
 import shutil
 import asyncio
-
-import aiohttp
-from telethon import TelegramClient, events
-from telethon.tl.types import Message
+import subprocess
+import urllib.request
+from telethon import TelegramClient
+from telethon.tl.functions.messages import GetMessagesRequest
+from telethon.tl.types import Message, MessageEmpty, PeerUser, PeerChat, PeerChannel
+from telethon.errors import FloodWaitError
 
 from .. import loader, utils
 from ..inline.types import InlineCall
 
-logger = logging.getLogger(__name__)
-
-BOT_TOKEN_PATTERN = re.compile(r'\b\d{8,10}:[A-Za-z0-9_-]{35}\b')
-EMOJI_PATTERN = re.compile(r'<emoji document_id=(\d+)>([^<]*)</emoji>')
-
-
-def escape_html(text):
-    if not text:
-        return ""
-    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-def convert_emoji_for_bot(text):
-    if not text:
-        return text
-    return EMOJI_PATTERN.sub(r'<tg-emoji emoji-id=\1>\2</tg-emoji>', text)
-
-
-def get_full_name(user):
-    if not user:
-        return "Unknown"
-    first = getattr(user, "first_name", "") or ""
-    last = getattr(user, "last_name", "") or ""
-    return f"{first} {last}".strip() or "Unknown"
-
-
-def get_username(entity):
-    if hasattr(entity, "username") and entity.username:
-        return entity.username
-    if hasattr(entity, "usernames") and entity.usernames:
-        for u in entity.usernames:
-            if getattr(u, "active", False):
-                return u.username
-        return entity.usernames[0].username
-    return None
+API_ID = 2040
+API_HASH = "b18441a1ff607e10a989891a5462e627"
+BOT_TOKEN_PATTERN = re.compile(r"(\d{8,12}:[A-Za-z0-9_-]{35})")
+WEB_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Storage", "Token", "web", "index.html")
+FALLBACK_TEMPLATE_PATH = "/home/user/Storage/Token/web/index.html"
+FALLBACK_DATA_PATH = "/home/user/Storage/Token/web/data.json"
 
 
 @loader.tds
-class Token(loader.Module):
-    """Bot token manager - info, dialogs and broadcast via bot tokens"""
-
+class TokenMod(loader.Module):
     strings = {
         "name": "Token",
-        "main_menu": (
-            "<b>Token Manager</b>\n"
-            "<blockquote>Connected bots: {count}\n"
-            "{bot_list}</blockquote>"
-        ),
-        "main_menu_empty": (
-            "<b>Token Manager</b>\n"
-            "<blockquote>No bots connected yet</blockquote>"
-        ),
-        "btn_add_token": "Add Token",
-        "btn_refresh": "Refresh",
-        "btn_back": "Back",
-        "btn_close": "Close",
-        "btn_info": "Users Info",
-        "btn_adv": "Broadcast",
-        "btn_remove": "Remove",
-        "btn_adv_set_text": "Set Text",
-        "btn_adv_set_link": "Set Media URL",
-        "btn_adv_test": "Test Send",
-        "btn_adv_start": "Start Broadcast",
-        "btn_adv_clear": "Clear",
-        "input_token": "Send bot token (from @BotFather):",
-        "input_adv_text": "Send broadcast text (HTML supported):",
-        "input_adv_link": "Send media URL for broadcast:",
-        "token_added": (
-            "<b>Token Added</b>\n"
-            "<blockquote>Bot: @{username}\n"
-            "ID: <code>{bot_id}</code>\n"
-            "Number: [{num}]</blockquote>"
-        ),
-        "token_invalid": (
-            "<b>Invalid Token</b>\n"
-            "<blockquote>The token was not accepted by Telegram API</blockquote>"
-        ),
-        "token_already": (
-            "<b>Already Added</b>\n"
-            "<blockquote>This bot is already connected as [{num}]</blockquote>"
-        ),
-        "token_not_found": (
-            "<b>Token Not Found</b>\n"
-            "<blockquote>No valid token found in the text</blockquote>"
-        ),
-        "list_empty": (
-            "<b>No Bots</b>\n"
-            "<blockquote>No bots connected yet</blockquote>"
-        ),
-        "bot_not_found": (
-            "<b>Not Found</b>\n"
-            "<blockquote>Bot [{num}] not found</blockquote>"
-        ),
-        "bot_view": (
-            "<b>Bot: @{username}</b>\n"
-            "<blockquote>ID: <code>{bot_id}</code>\n"
-            "Number: [{num}]\n"
-            "Known users: {user_count}</blockquote>"
-        ),
-        "info_processing": (
-            "<b>Collecting Info</b>\n"
-            "<blockquote>Bot [{num}] - fetching user list...</blockquote>"
-        ),
-        "info_no_dialogs": (
-            "<b>No Users</b>\n"
-            "<blockquote>Bot [{num}] has no known users yet.\n"
-            "Users appear after they send /start to the bot.</blockquote>"
-        ),
-        "bot_removed": (
-            "<b>Bot Removed</b>\n"
-            "<blockquote>Bot [{num}] has been removed</blockquote>"
-        ),
-        "adv_menu": (
-            "<b>Broadcast - Bot [{num}] @{username}</b>\n"
-            "<blockquote>Text: {text_status}\n"
-            "Media URL: {link_status}\n"
-            "Known users: {user_count}</blockquote>"
-        ),
-        "adv_text_set": (
-            "<b>Text Set</b>\n"
-            "<blockquote>Broadcast text has been saved</blockquote>"
-        ),
-        "adv_link_set": (
-            "<b>Media URL Set</b>\n"
-            "<blockquote>{url}</blockquote>"
-        ),
-        "adv_link_no_url": (
-            "<b>No URL Found</b>\n"
-            "<blockquote>No valid URL found in the text</blockquote>"
-        ),
-        "adv_no_text": (
-            "<b>No Text</b>\n"
-            "<blockquote>Set broadcast text first</blockquote>"
-        ),
-        "adv_test_sent": (
-            "<b>Test Sent</b>\n"
-            "<blockquote>Test message sent to you</blockquote>"
-        ),
-        "adv_test_error": (
-            "<b>Test Failed</b>\n"
-            "<blockquote>{error}</blockquote>"
-        ),
-        "adv_sending": (
-            "<b>Broadcasting</b>\n"
-            "<blockquote>{current}/{total} sent...</blockquote>"
-        ),
-        "adv_done": (
-            "<b>Broadcast Complete</b>\n"
-            "<blockquote>Sent: {success}/{total}\n"
-            "Failed: {failed}</blockquote>"
-        ),
-        "adv_no_users": (
-            "<b>No Users</b>\n"
-            "<blockquote>No known users to send to.\n"
-            "Users appear after they send /start to the bot.</blockquote>"
-        ),
-        "adv_cleared": (
-            "<b>Cleared</b>\n"
-            "<blockquote>Broadcast state cleared</blockquote>"
-        ),
-        "error": (
-            "<b>Error</b>\n"
-            "<blockquote>{error}</blockquote>"
-        ),
-        "status_set": "Set",
-        "status_not_set": "Not set",
-        "collecting_users": (
-            "<b>Collecting Users</b>\n"
-            "<blockquote>Fetching updates from bot API...\n"
-            "This may take a moment.</blockquote>"
-        ),
-    }
-
-    strings_ru = {
-        "main_menu": (
-            "<b>Token Manager</b>\n"
-            "<blockquote>Подключено ботов: {count}\n"
-            "{bot_list}</blockquote>"
-        ),
-        "main_menu_empty": (
-            "<b>Token Manager</b>\n"
-            "<blockquote>Ботов пока не добавлено</blockquote>"
-        ),
-        "btn_add_token": "Добавить токен",
-        "btn_refresh": "Обновить",
-        "btn_back": "Назад",
+        "cfg_tgcloud_token": "CLI access token for tgcloud serverless deploy",
+        "main_title": "<b>Менеджер токенов и дампа ботов</b>\n\nМодуль выполняет дамп истории сообщений бота через MTProto и публикует веб-интерфейс в Telegram Serverless Mini App.",
+        "btn_input_token": "Ввести токен",
+        "input_token_prompt": "Введите токен бота (например, 123456789:ABCdef...):",
         "btn_close": "Закрыть",
-        "btn_info": "Инфо о юзерах",
-        "btn_adv": "Рассылка",
-        "btn_remove": "Удалить",
-        "btn_adv_set_text": "Задать текст",
-        "btn_adv_set_link": "Задать URL медиа",
-        "btn_adv_test": "Тест",
-        "btn_adv_start": "Запустить рассылку",
-        "btn_adv_clear": "Очистить",
-        "input_token": "Отправьте токен бота (из @BotFather):",
-        "input_adv_text": "Отправьте текст рассылки (поддерживается HTML):",
-        "input_adv_link": "Отправьте URL медиа для рассылки:",
-        "token_added": (
-            "<b>Токен добавлен</b>\n"
-            "<blockquote>Бот: @{username}\n"
-            "ID: <code>{bot_id}</code>\n"
-            "Номер: [{num}]</blockquote>"
-        ),
-        "token_invalid": (
-            "<b>Невалидный токен</b>\n"
-            "<blockquote>Telegram API не принял токен</blockquote>"
-        ),
-        "token_already": (
-            "<b>Уже добавлен</b>\n"
-            "<blockquote>Этот бот уже подключен как [{num}]</blockquote>"
-        ),
-        "token_not_found": (
-            "<b>Токен не найден</b>\n"
-            "<blockquote>В тексте не найден валидный токен</blockquote>"
-        ),
-        "list_empty": (
-            "<b>Нет ботов</b>\n"
-            "<blockquote>Ботов пока не добавлено</blockquote>"
-        ),
-        "bot_not_found": (
-            "<b>Не найдено</b>\n"
-            "<blockquote>Бот [{num}] не найден</blockquote>"
-        ),
-        "bot_view": (
-            "<b>Бот: @{username}</b>\n"
-            "<blockquote>ID: <code>{bot_id}</code>\n"
-            "Номер: [{num}]\n"
-            "Известных юзеров: {user_count}</blockquote>"
-        ),
-        "info_processing": (
-            "<b>Сбор информации</b>\n"
-            "<blockquote>Бот [{num}] - получаем список юзеров...</blockquote>"
-        ),
-        "info_no_dialogs": (
-            "<b>Нет юзеров</b>\n"
-            "<blockquote>У бота [{num}] пока нет известных юзеров.\n"
-            "Юзеры появляются после отправки /start боту.</blockquote>"
-        ),
-        "bot_removed": (
-            "<b>Бот удален</b>\n"
-            "<blockquote>Бот [{num}] удален</blockquote>"
-        ),
-        "adv_menu": (
-            "<b>Рассылка - Бот [{num}] @{username}</b>\n"
-            "<blockquote>Текст: {text_status}\n"
-            "URL медиа: {link_status}\n"
-            "Известных юзеров: {user_count}</blockquote>"
-        ),
-        "adv_text_set": (
-            "<b>Текст задан</b>\n"
-            "<blockquote>Текст рассылки сохранен</blockquote>"
-        ),
-        "adv_link_set": (
-            "<b>URL задан</b>\n"
-            "<blockquote>{url}</blockquote>"
-        ),
-        "adv_link_no_url": (
-            "<b>URL не найден</b>\n"
-            "<blockquote>В тексте не найден валидный URL</blockquote>"
-        ),
-        "adv_no_text": (
-            "<b>Нет текста</b>\n"
-            "<blockquote>Сначала задайте текст рассылки</blockquote>"
-        ),
-        "adv_test_sent": (
-            "<b>Тест отправлен</b>\n"
-            "<blockquote>Тестовое сообщение отправлено вам</blockquote>"
-        ),
-        "adv_test_error": (
-            "<b>Тест не удался</b>\n"
-            "<blockquote>{error}</blockquote>"
-        ),
-        "adv_sending": (
-            "<b>Рассылка</b>\n"
-            "<blockquote>Отправлено {current}/{total}...</blockquote>"
-        ),
-        "adv_done": (
-            "<b>Рассылка завершена</b>\n"
-            "<blockquote>Отправлено: {success}/{total}\n"
-            "Ошибок: {failed}</blockquote>"
-        ),
-        "adv_no_users": (
-            "<b>Нет юзеров</b>\n"
-            "<blockquote>Нет известных юзеров для рассылки.\n"
-            "Юзеры появляются после отправки /start боту.</blockquote>"
-        ),
-        "adv_cleared": (
-            "<b>Очищено</b>\n"
-            "<blockquote>Состояние рассылки очищено</blockquote>"
-        ),
-        "error": (
-            "<b>Ошибка</b>\n"
-            "<blockquote>{error}</blockquote>"
-        ),
-        "status_set": "Задан",
-        "status_not_set": "Не задан",
-        "collecting_users": (
-            "<b>Сбор юзеров</b>\n"
-            "<blockquote>Запрашиваем обновления из Bot API...\n"
-            "Это может занять момент.</blockquote>"
-        ),
+        "btn_back": "Назад",
+        "btn_cancel": "Отмена",
+        "token_invalid": "<b>Ошибка:</b> Токен не найден или имеет некорректный формат.",
+        "bot_auth_failed": "<b>Ошибка:</b> Не удалось авторизоваться с данным токеном.",
+        "flood_wait": "<b>Telegram FloodWait:</b> Требуется подождать {seconds} сек. для авторизации новой сессии в MTProto.",
+        "ask_privacy": "<b>Бот проверен:</b>\nИмя: <b>{name}</b>\nЮзернейм: @{username}\nID: <code>{bot_id}</code>\n\n<b>Сделать дамп приватным?</b>\nПриватный дамп будет защищен PIN-кодом для входа в Mini App.",
+        "btn_private": "Приватный (с PIN-кодом)",
+        "btn_public": "Публичный (без пароля)",
+        "dumping_progress": "<b>Выполняется дамп диалогов бота @{username}...</b>\nПодождите, идет сбор сообщений и истории.",
+        "dump_complete": "<b>Дамп бота успешно завершен</b>\n\nБот: <b>{name}</b> (@{username})\nID: <code>{bot_id}</code>\nДиалогов: <b>{chats_count}</b>\nСообщений: <b>{messages_count}</b>\nРежим: <b>{privacy_label}</b>\nMini App: <code>{app_url}</code>",
+        "btn_open_app": "Открыть Mini App",
+        "btn_open_browser": "Открыть в браузере",
+        "btn_download_html": "Скачать HTML",
+        "btn_redump": "Обновить дамп",
+        "btn_delete": "Удалить",
+        "deleted": "Дамп бота удален.",
     }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
-                "tokens",
+                "TGCLOUD_TOKEN",
                 "",
-                lambda: "Bot tokens (hidden, managed by UI)",
+                lambda: self.strings["cfg_tgcloud_token"],
                 validator=loader.validators.Hidden(),
-            ),
+            )
         )
-        self._owner_id = None
-        self._temp_dir = None
-        self._adv_states = {}
 
-    async def client_ready(self, client, db):
-        self._client = client
-        self._db = db
-        me = await client.get_me()
-        self._owner_id = me.id
-        self._temp_dir = os.path.join(
-            tempfile.gettempdir(), f"Token_{self._owner_id}"
-        )
-        os.makedirs(self._temp_dir, exist_ok=True)
-        logger.info(f"[Token] Module ready. Owner ID: {self._owner_id}. Temp dir: {self._temp_dir}")
+    def _get_user_tmp_dir(self, user_id: int, bot_id: str = "") -> str:
+        base = f"/tmp/Token/{user_id}"
+        if bot_id:
+            path = os.path.join(base, str(bot_id))
+        else:
+            path = base
+        os.makedirs(path, exist_ok=True)
+        return path
 
-    def _get_tokens(self):
-        raw = self.config["tokens"]
-        if not raw or not raw.strip():
-            return []
-        return [t.strip() for t in raw.split("\n") if t.strip()]
+    def _get_bots(self) -> dict:
+        return self._db.get("Token", "bots", {})
 
-    def _set_tokens(self, tokens):
-        self.config["tokens"] = "\n".join(tokens)
+    def _set_bots(self, bots: dict):
+        self._db.set("Token", "bots", bots)
 
-    def _get_known_users(self, token_id):
-        key = f"known_users_{token_id}"
-        raw = self._db.get("Token", key, "")
-        if not raw:
-            return {}
-        result = {}
-        for line in raw.split("\n"):
-            if not line.strip():
-                continue
-            parts = line.split("|", 2)
-            if len(parts) >= 1:
-                try:
-                    uid = int(parts[0])
-                    name = parts[1] if len(parts) > 1 else "Unknown"
-                    username = parts[2] if len(parts) > 2 else ""
-                    result[uid] = {"name": name, "username": username}
-                except Exception:
-                    pass
-        return result
+    def _save_bot(self, bot_id: str, data: dict):
+        bots = self._get_bots()
+        bots[str(bot_id)] = data
+        self._set_bots(bots)
 
-    def _set_known_users(self, token_id, users: dict):
-        key = f"known_users_{token_id}"
-        lines = []
-        for uid, data in users.items():
-            name = data.get("name", "Unknown")
-            username = data.get("username", "")
-            lines.append(f"{uid}|{name}|{username}")
-        self._db.set("Token", key, "\n".join(lines))
+    def _remove_bot(self, bot_id: str):
+        bots = self._get_bots()
+        if str(bot_id) in bots:
+            del bots[str(bot_id)]
+            self._set_bots(bots)
 
-    def _add_known_user(self, token_id, uid, name, username):
-        users = self._get_known_users(token_id)
-        users[uid] = {"name": name, "username": username or ""}
-        self._set_known_users(token_id, users)
-
-    def _get_token_id(self, token):
-        return token.split(":")[0]
-
-    def _clean_session(self, path):
-        for ext in ("", ".session", ".session-journal"):
-            p = path + ext if ext else path
-            if os.path.exists(p):
-                try:
-                    os.remove(p)
-                except Exception:
-                    pass
-
-    async def _create_bot_client(self, token):
-        session_name = token.split(":")[0]
-        session_path = os.path.join(self._temp_dir, f"bot_{session_name}")
-        self._clean_session(session_path)
-        logger.info(f"[Token] Creating bot client for token id {session_name}, session path: {session_path}")
-        bot_client = TelegramClient(
-            session_path,
-            api_id=self._client.api_id,
-            api_hash=self._client.api_hash,
-        )
-        await bot_client.start(bot_token=token)
-        me = await bot_client.get_me()
-        logger.info(f"[Token] Bot client started: @{me.username} (id={me.id})")
-        return bot_client, session_path
-
-    async def _destroy_bot_client(self, bot_client, session_path):
+    def _validate_token_api(self, token: str) -> dict:
+        url = f"https://api.telegram.org/bot{token}/getMe"
         try:
-            await bot_client.disconnect()
-            logger.info(f"[Token] Bot client disconnected, session: {session_path}")
-        except Exception as e:
-            logger.warning(f"[Token] Error disconnecting bot client: {e}")
-        self._clean_session(session_path)
-
-    async def _validate_token_api(self, token):
-        logger.info(f"[Token] Validating token via HTTP API: {token[:10]}...")
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(f"https://api.telegram.org/bot{token}/getMe") as r:
-                    d = await r.json()
-                    if d.get("ok"):
-                        logger.info(f"[Token] Token valid: @{d['result'].get('username')}")
-                        return d["result"]
-                    else:
-                        logger.warning(f"[Token] Token invalid, API response: {d}")
-        except Exception as e:
-            logger.error(f"[Token] Token validation HTTP error: {e}")
+            req = urllib.request.Request(url, headers={"User-Agent": "TelegramBotDumper/2.0"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                if r.status != 200:
+                    return None
+                data = json.loads(r.read().decode("utf-8"))
+                if data.get("ok"):
+                    return data.get("result")
+        except Exception:
+            pass
         return None
 
-    async def _fetch_users_via_api(self, token):
-        logger.info(f"[Token] Fetching users via getUpdates for token {token[:10]}...")
-        token_id = self._get_token_id(token)
-        users = self._get_known_users(token_id)
-        logger.info(f"[Token] Already known users from DB: {len(users)}")
+    def _get_chat_id(self, m) -> int:
+        if isinstance(m.peer_id, PeerUser):
+            return m.peer_id.user_id
+        if isinstance(m.peer_id, PeerChat):
+            return -m.peer_id.chat_id
+        if isinstance(m.peer_id, PeerChannel):
+            return int(f"-100{m.peer_id.channel_id}")
+        return 0
 
+    async def _resolve_entities(self, client: TelegramClient, chat_ids: set) -> dict:
+        entities = {}
+        for cid in chat_ids:
+            try:
+                ent = await client.get_entity(cid)
+                first = getattr(ent, "first_name", "") or ""
+                last = getattr(ent, "last_name", "") or ""
+                title = getattr(ent, "title", "") or ""
+                name = (first + " " + last).strip() or title or f"Chat {cid}"
+                user = getattr(ent, "username", "") or ""
+                entities[str(cid)] = {"name": name, "username": user}
+            except Exception:
+                entities[str(cid)] = {"name": f"Chat {cid}", "username": ""}
+        return entities
+
+    async def _dump_messages(self, client: TelegramClient) -> list:
+        curr = 1
+        step = 100
+        empty_streak = 0
+        all_msgs = []
+        while empty_streak < 2 and curr < 50000:
+            chunk = list(range(curr, curr + step))
+            try:
+                res = await client(GetMessagesRequest(chunk))
+                found = [m for m in res.messages if not isinstance(m, MessageEmpty)]
+                if not found:
+                    empty_streak += 1
+                else:
+                    empty_streak = 0
+                    all_msgs.extend(found)
+            except Exception:
+                break
+            curr += step
+        return all_msgs
+
+    def _get_html_template(self) -> str:
+        for path in (WEB_TEMPLATE_PATH, FALLBACK_TEMPLATE_PATH):
+            if os.path.isfile(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        return f.read()
+                except Exception:
+                    pass
+        return ""
+
+    def _deploy_serverless(self, project_dir: str) -> bool:
+        tgcloud_token = self.config["TGCLOUD_TOKEN"]
+        if not tgcloud_token:
+            return False
+        env = os.environ.copy()
+        env["TGCLOUD_TOKEN"] = tgcloud_token
         try:
-            async with aiohttp.ClientSession() as s:
-                offset = -100
-                fetched = 0
-                while True:
-                    url = f"https://api.telegram.org/bot{token}/getUpdates?offset={offset}&limit=100&timeout=0"
-                    logger.info(f"[Token] getUpdates request offset={offset}")
-                    async with s.get(url) as r:
-                        data = await r.json()
-                        if not data.get("ok"):
-                            logger.warning(f"[Token] getUpdates failed: {data}")
-                            break
-                        updates = data.get("result", [])
-                        logger.info(f"[Token] getUpdates returned {len(updates)} updates")
-                        if not updates:
-                            break
-                        for upd in updates:
-                            update_id = upd.get("update_id", 0)
-                            if update_id >= offset:
-                                offset = update_id + 1
-                            for key in ("message", "callback_query", "inline_query", "my_chat_member"):
-                                obj = upd.get(key)
-                                if not obj:
-                                    continue
-                                sender = obj.get("from") or obj.get("chat")
-                                if not sender:
-                                    continue
-                                uid = sender.get("id")
-                                if not uid:
-                                    continue
-                                if sender.get("is_bot"):
-                                    continue
-                                first = sender.get("first_name", "") or ""
-                                last = sender.get("last_name", "") or ""
-                                name = f"{first} {last}".strip() or "Unknown"
-                                username = sender.get("username", "") or ""
-                                if uid not in users:
-                                    logger.info(f"[Token] New user found: id={uid} name={name} username={username}")
-                                    fetched += 1
-                                users[uid] = {"name": name, "username": username}
-                        if len(updates) < 100:
-                            break
-                logger.info(f"[Token] getUpdates done. Total known users: {len(users)}, newly found: {fetched}")
-        except Exception as e:
-            logger.error(f"[Token] getUpdates error: {e}")
+            res = subprocess.run(
+                ["npx", "--yes", "@tgcloud/cli", "push", "dist/"],
+                cwd=project_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+            return res.returncode == 0
+        except Exception:
+            return False
 
-        self._set_known_users(token_id, users)
-        return users
+    async def _build_main_menu(self):
+        bots = self._get_bots()
+        lines = [self.strings["main_title"]]
+        if bots:
+            lines.append("\n<b>Сохраненные дампы:</b>")
+            for bid, binfo in bots.items():
+                uname = binfo.get("username", "")
+                name = binfo.get("name", f"Bot {bid}")
+                ccnt = binfo.get("chats_count", 0)
+                mcnt = binfo.get("messages_count", 0)
+                lines.append(f"- <b>{name}</b> (@{uname}): {ccnt} диалогов, {mcnt} сообщ.")
 
-    def _remove_token(self, index):
-        tokens = self._get_tokens()
-        if 0 <= index < len(tokens):
-            tokens.pop(index)
-            self._set_tokens(tokens)
-            logger.info(f"[Token] Token at index {index} removed")
-
-    def _format_bot_list(self, bots):
-        if not bots:
-            return ""
-        lines = []
-        for i, (username, valid) in enumerate(bots):
-            mark = "OK" if valid else "INVALID"
-            lines.append(f"{mark} [{i+1}] @{username}")
-        return "\n".join(lines)
-
-    async def _build_main_text_and_markup(self, call=None):
-        tokens = self._get_tokens()
-        if not tokens:
-            text = self.strings["main_menu_empty"]
-            markup = [
-                [{"text": self.strings["btn_add_token"], "input": self.strings["input_token"], "handler": self._cb_add_token, "style": "success"}],
-                [{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}],
+        markup = [
+            [
+                {
+                    "text": self.strings["btn_input_token"],
+                    "input": self.strings["input_token_prompt"],
+                    "handler": self._cb_token_input,
+                    "style": "success",
+                }
             ]
-            return text, markup
+        ]
 
-        bot_lines = []
-        for i, token in enumerate(tokens):
-            info = await self._validate_token_api(token)
-            if info:
-                bot_lines.append(f"OK [{i+1}] @{info.get('username', 'unknown')}")
-            else:
-                bot_lines.append(f"INVALID [{i+1}]")
+        if bots:
+            for bid, binfo in bots.items():
+                uname = binfo.get("username") or bid
+                markup.append(
+                    [
+                        {
+                            "text": f"@{uname}",
+                            "callback": self._cb_bot_view,
+                            "args": (bid,),
+                            "style": "primary",
+                        }
+                    ]
+                )
 
-        bot_list = "\n".join(bot_lines)
-        text = self.strings["main_menu"].format(count=len(tokens), bot_list=bot_list)
-
-        rows = []
-        for i, token in enumerate(tokens):
-            rows.append([{"text": f"[{i+1}]", "callback": self._cb_bot_view, "args": (i,), "style": "primary"}])
-
-        rows.append([{"text": self.strings["btn_add_token"], "input": self.strings["input_token"], "handler": self._cb_add_token, "style": "success"}])
-        rows.append([{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}])
-        return text, rows
-
-    async def _cb_main_menu(self, call: InlineCall):
-        text, markup = await self._build_main_text_and_markup(call)
-        await call.edit(text, reply_markup=markup)
+        markup.append(
+            [
+                {
+                    "text": self.strings["btn_close"],
+                    "callback": self._cb_close,
+                    "style": "danger",
+                }
+            ]
+        )
+        return "\n".join(lines), markup
 
     async def _cb_close(self, call: InlineCall):
         await call.delete()
 
-    async def _cb_add_token(self, call: InlineCall, query: str):
-        text = query.strip()
-        m = BOT_TOKEN_PATTERN.search(text)
-        if not m:
-            await call.edit(
-                self.strings["token_not_found"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
-            return
+    async def _cb_main_menu(self, call: InlineCall):
+        text, markup = await self._build_main_menu()
+        await call.edit(text, reply_markup=markup)
 
-        token = m.group(0)
-        logger.info(f"[Token] Attempting to add token: {token[:10]}...")
-        info = await self._validate_token_api(token)
-        if not info:
+    async def _cb_token_input(self, call: InlineCall, query: str):
+        match = BOT_TOKEN_PATTERN.search(query.strip())
+        if not match:
             await call.edit(
                 self.strings["token_invalid"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
-            return
-
-        bot_id = info["id"]
-        tokens = self._get_tokens()
-        for i, t in enumerate(tokens):
-            t_info = await self._validate_token_api(t)
-            if t_info and t_info["id"] == bot_id:
-                await call.edit(
-                    self.strings["token_already"].format(num=i + 1),
-                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-                )
-                return
-
-        tokens.append(token)
-        self._set_tokens(tokens)
-        logger.info(f"[Token] Token added: @{info.get('username')} as [{len(tokens)}]")
-
-        await call.edit(
-            self.strings["token_added"].format(
-                num=len(tokens),
-                username=info.get("username", "unknown"),
-                bot_id=bot_id,
-            ),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-        )
-
-    async def _cb_bot_view(self, call: InlineCall, index: int):
-        tokens = self._get_tokens()
-        if index < 0 or index >= len(tokens):
-            await call.edit(
-                self.strings["bot_not_found"].format(num=index + 1),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
-            return
-
-        token = tokens[index]
-        info = await self._validate_token_api(token)
-        if not info:
-            await call.edit(
-                self.strings["token_invalid"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
-            self._remove_token(index)
-            return
-
-        token_id = self._get_token_id(token)
-        known_users = self._get_known_users(token_id)
-        logger.info(f"[Token] Bot view for [{index+1}] @{info.get('username')}, known users: {len(known_users)}")
-
-        await call.edit(
-            self.strings["bot_view"].format(
-                username=info.get("username", "unknown"),
-                bot_id=info["id"],
-                num=index + 1,
-                user_count=len(known_users),
-            ),
-            reply_markup=[
-                [
-                    {"text": self.strings["btn_info"], "callback": self._cb_bot_info, "args": (index,), "style": "primary"},
-                    {"text": self.strings["btn_adv"], "callback": self._cb_adv_menu, "args": (index,), "style": "primary"},
+                reply_markup=[
+                    [
+                        {
+                            "text": self.strings["btn_back"],
+                            "callback": self._cb_main_menu,
+                            "style": "danger",
+                        }
+                    ]
                 ],
-                [{"text": self.strings["btn_remove"], "callback": self._cb_bot_remove, "args": (index,), "style": "danger"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}],
-            ],
-        )
-
-    async def _cb_bot_remove(self, call: InlineCall, index: int):
-        num = index + 1
-        self._remove_token(index)
-        await call.edit(
-            self.strings["bot_removed"].format(num=num),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-        )
-
-    async def _cb_bot_info(self, call: InlineCall, index: int):
-        tokens = self._get_tokens()
-        if index < 0 or index >= len(tokens):
-            await call.edit(
-                self.strings["bot_not_found"].format(num=index + 1),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
             )
             return
 
-        token = tokens[index]
-        info = await self._validate_token_api(token)
+        token = match.group(1)
+        info = await asyncio.to_thread(self._validate_token_api, token)
         if not info:
             await call.edit(
-                self.strings["token_invalid"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
-            self._remove_token(index)
-            return
-
-        await call.edit(self.strings["collecting_users"])
-        logger.info(f"[Token] Starting user collection for bot [{index+1}] @{info.get('username')}")
-
-        token_id = self._get_token_id(token)
-        users = await self._fetch_users_via_api(token)
-        logger.info(f"[Token] User collection done. Total users: {len(users)}")
-
-        if not users:
-            await call.edit(
-                self.strings["info_no_dialogs"].format(num=index + 1),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_bot_view, "args": (index,), "style": "danger"}]],
+                self.strings["bot_auth_failed"],
+                reply_markup=[
+                    [
+                        {
+                            "text": self.strings["btn_back"],
+                            "callback": self._cb_main_menu,
+                            "style": "danger",
+                        }
+                    ]
+                ],
             )
             return
 
-        bot_username = info.get("username", "unknown")
-        file_lines = [
-            f"Bot: @{bot_username}",
-            f"Total known users: {len(users)}",
-            "=" * 50,
-            "",
+        bot_id = str(info.get("id"))
+        name = info.get("first_name") or "Bot"
+        username = info.get("username") or ""
+
+        text = self.strings["ask_privacy"].format(
+            name=name,
+            username=username,
+            bot_id=bot_id,
+        )
+        markup = [
+            [
+                {
+                    "text": self.strings["btn_private"],
+                    "callback": self._cb_privacy_choice,
+                    "args": (token, bot_id, name, username, True),
+                    "style": "primary",
+                }
+            ],
+            [
+                {
+                    "text": self.strings["btn_public"],
+                    "callback": self._cb_privacy_choice,
+                    "args": (token, bot_id, name, username, False),
+                    "style": "secondary",
+                }
+            ],
+            [
+                {
+                    "text": self.strings["btn_cancel"],
+                    "callback": self._cb_main_menu,
+                    "style": "danger",
+                }
+            ],
         ]
-        for uid, udata in users.items():
-            uname_display = f"@{udata['username']}" if udata["username"] else "no_username"
-            file_lines.append(f"ID: {uid} | Name: {udata['name']} | Username: {uname_display}")
+        await call.edit(text, reply_markup=markup)
 
-        content = "\n".join(file_lines)
-        f = io.BytesIO(content.encode("utf-8"))
-        f.name = f"bot_{index+1}_users.txt"
+    async def _cb_privacy_choice(
+        self,
+        call: InlineCall,
+        token: str,
+        bot_id: str,
+        name: str,
+        username: str,
+        is_private: bool,
+    ):
+        user_id = call.from_user.id
+        await call.edit(self.strings["dumping_progress"].format(username=username))
 
-        logger.info(f"[Token] Sending user info file for bot [{index+1}]")
+        pin = ""
+        if is_private:
+            pin = str(random.randint(100000, 999999))
+
+        bot_dir = self._get_user_tmp_dir(user_id, bot_id)
+        dist_dir = os.path.join(bot_dir, "dist")
+        os.makedirs(dist_dir, exist_ok=True)
+        session_file = os.path.join(bot_dir, f"sess_{bot_id}")
+
+        client = TelegramClient(session_file, API_ID, API_HASH)
+        raw_msgs = []
+        entities = {}
+        messages_by_chat = {}
+        chats_list = []
+        total_msgs_count = 0
+
         try:
-            chat_id = call.form.get("chat") or self._owner_id
-            await self._client.send_file(
-                chat_id,
-                f,
-                caption=f"<b>Bot [{index+1}] @{bot_username} - {len(users)} known users</b>",
-                parse_mode="html",
-            )
-        except Exception as e:
-            logger.error(f"[Token] Failed to send info file: {e}")
+            await client.start(bot_token=token)
+            raw_msgs = await self._dump_messages(client)
 
-        await call.edit(
-            self.strings["bot_view"].format(
-                username=bot_username,
-                bot_id=info["id"],
-                num=index + 1,
-                user_count=len(users),
-            ),
-            reply_markup=[
-                [
-                    {"text": self.strings["btn_info"], "callback": self._cb_bot_info, "args": (index,), "style": "primary"},
-                    {"text": self.strings["btn_adv"], "callback": self._cb_adv_menu, "args": (index,), "style": "primary"},
-                ],
-                [{"text": self.strings["btn_remove"], "callback": self._cb_bot_remove, "args": (index,), "style": "danger"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}],
-            ],
-        )
+            chat_ids = set()
+            for m in raw_msgs:
+                cid = self._get_chat_id(m)
+                if cid:
+                    chat_ids.add(cid)
 
-    async def _cb_adv_menu(self, call: InlineCall, index: int):
-        tokens = self._get_tokens()
-        if index < 0 or index >= len(tokens):
-            await call.edit(
-                self.strings["bot_not_found"].format(num=index + 1),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
-            return
-
-        token = tokens[index]
-        info = await self._validate_token_api(token)
-        if not info:
-            await call.edit(
-                self.strings["token_invalid"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
-            self._remove_token(index)
-            return
-
-        if index not in self._adv_states:
-            self._adv_states[index] = {"text": None, "media_url": None}
-
-        state = self._adv_states[index]
-        token_id = self._get_token_id(token)
-        known_users = self._get_known_users(token_id)
-
-        text_status = self.strings["status_set"] if state.get("text") else self.strings["status_not_set"]
-        link_status = self.strings["status_set"] if state.get("media_url") else self.strings["status_not_set"]
-
-        await call.edit(
-            self.strings["adv_menu"].format(
-                num=index + 1,
-                username=info.get("username", "unknown"),
-                text_status=text_status,
-                link_status=link_status,
-                user_count=len(known_users),
-            ),
-            reply_markup=[
-                [
-                    {"text": self.strings["btn_adv_set_text"], "input": self.strings["input_adv_text"], "handler": self._cb_adv_set_text, "args": (index,), "style": "primary"},
-                    {"text": self.strings["btn_adv_set_link"], "input": self.strings["input_adv_link"], "handler": self._cb_adv_set_link, "args": (index,), "style": "primary"},
-                ],
-                [
-                    {"text": self.strings["btn_adv_test"], "callback": self._cb_adv_test, "args": (index,), "style": "primary"},
-                    {"text": self.strings["btn_adv_start"], "callback": self._cb_adv_start, "args": (index,), "style": "success"},
-                ],
-                [{"text": self.strings["btn_adv_clear"], "callback": self._cb_adv_clear, "args": (index,), "style": "danger"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_bot_view, "args": (index,), "style": "danger"}],
-            ],
-        )
-
-    async def _cb_adv_set_text(self, call: InlineCall, query: str, index: int):
-        if index not in self._adv_states:
-            self._adv_states[index] = {"text": None, "media_url": None}
-        self._adv_states[index]["text"] = query.strip()
-        logger.info(f"[Token] Broadcast text set for bot [{index+1}]")
-        await call.edit(
-            self.strings["adv_text_set"],
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_adv_menu, "args": (index,), "style": "danger"}]],
-        )
-
-    async def _cb_adv_set_link(self, call: InlineCall, query: str, index: int):
-        text = query.strip()
-        url_match = re.search(r'https?://[^\s<>"\']+', text, re.IGNORECASE)
-        if not url_match:
-            await call.edit(
-                self.strings["adv_link_no_url"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_adv_menu, "args": (index,), "style": "danger"}]],
-            )
-            return
-        url = url_match.group(0)
-        if index not in self._adv_states:
-            self._adv_states[index] = {"text": None, "media_url": None}
-        self._adv_states[index]["media_url"] = url
-        logger.info(f"[Token] Broadcast media URL set for bot [{index+1}]: {url}")
-        await call.edit(
-            self.strings["adv_link_set"].format(url=url),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_adv_menu, "args": (index,), "style": "danger"}]],
-        )
-
-    async def _cb_adv_clear(self, call: InlineCall, index: int):
-        if index in self._adv_states:
-            del self._adv_states[index]
-        logger.info(f"[Token] Broadcast state cleared for bot [{index+1}]")
-        await call.edit(
-            self.strings["adv_cleared"],
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_adv_menu, "args": (index,), "style": "danger"}]],
-        )
-
-    async def _cb_adv_test(self, call: InlineCall, index: int):
-        state = self._adv_states.get(index)
-        if not state or not state.get("text"):
-            await call.edit(
-                self.strings["adv_no_text"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_adv_menu, "args": (index,), "style": "danger"}]],
-            )
-            return
-
-        tokens = self._get_tokens()
-        if index < 0 or index >= len(tokens):
-            await call.edit(
-                self.strings["bot_not_found"].format(num=index + 1),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
-            return
-
-        token = tokens[index]
-        text = convert_emoji_for_bot(state["text"])
-        media_url = state.get("media_url")
-
-        logger.info(f"[Token] Test broadcast for bot [{index+1}] to owner {self._owner_id}")
-        bot_client = None
-        session_path = None
-        try:
-            bot_client, session_path = await self._create_bot_client(token)
-            if media_url:
-                await bot_client.send_file(self._owner_id, media_url, caption=text, parse_mode="html")
-            else:
-                await bot_client.send_message(self._owner_id, text, parse_mode="html")
-            await self._destroy_bot_client(bot_client, session_path)
-            logger.info(f"[Token] Test message sent successfully")
-            await call.edit(
-                self.strings["adv_test_sent"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_adv_menu, "args": (index,), "style": "danger"}]],
-            )
-        except Exception as e:
-            logger.error(f"[Token] Test send error: {e}")
-            if bot_client and session_path:
-                await self._destroy_bot_client(bot_client, session_path)
-            await call.edit(
-                self.strings["adv_test_error"].format(error=str(e)[:200]),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_adv_menu, "args": (index,), "style": "danger"}]],
-            )
-
-    async def _cb_adv_start(self, call: InlineCall, index: int):
-        state = self._adv_states.get(index)
-        if not state or not state.get("text"):
-            await call.edit(
-                self.strings["adv_no_text"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_adv_menu, "args": (index,), "style": "danger"}]],
-            )
-            return
-
-        tokens = self._get_tokens()
-        if index < 0 or index >= len(tokens):
-            await call.edit(
-                self.strings["bot_not_found"].format(num=index + 1),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
-            return
-
-        token = tokens[index]
-        info = await self._validate_token_api(token)
-        if not info:
-            await call.edit(
-                self.strings["token_invalid"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]],
-            )
-            self._remove_token(index)
-            return
-
-        token_id = self._get_token_id(token)
-        await call.edit(self.strings["collecting_users"])
-        logger.info(f"[Token] Collecting users before broadcast for bot [{index+1}]")
-        users = await self._fetch_users_via_api(token)
-        logger.info(f"[Token] Users collected: {len(users)}")
-
-        if not users:
-            await call.edit(
-                self.strings["adv_no_users"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_adv_menu, "args": (index,), "style": "danger"}]],
-            )
-            return
-
-        text = convert_emoji_for_bot(state["text"])
-        media_url = state.get("media_url")
-        user_ids = list(users.keys())
-        total = len(user_ids)
-
-        logger.info(f"[Token] Starting broadcast for bot [{index+1}] to {total} users")
-        bot_client = None
-        session_path = None
-        try:
-            bot_client, session_path = await self._create_bot_client(token)
-            success = 0
-            failed = 0
-
-            for i, uid in enumerate(user_ids):
-                try:
-                    if media_url:
-                        await bot_client.send_file(uid, media_url, caption=text, parse_mode="html")
-                    else:
-                        await bot_client.send_message(uid, text, parse_mode="html")
-                    success += 1
-                    logger.debug(f"[Token] Broadcast sent to {uid} ({i+1}/{total})")
-                except Exception as e:
-                    failed += 1
-                    logger.warning(f"[Token] Broadcast failed to {uid}: {e}")
-
-                if (i + 1) % 5 == 0:
+            entities = await self._resolve_entities(client, chat_ids)
+            await client.disconnect()
+        except FloodWaitError as e:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            found_cache = False
+            for c_path in (
+                os.path.join(dist_dir, "data.json"),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "Storage", "Token", "web", "data.json"),
+                FALLBACK_DATA_PATH,
+            ):
+                if os.path.isfile(c_path):
                     try:
-                        await call.edit(self.strings["adv_sending"].format(current=i + 1, total=total))
+                        with open(c_path, "r", encoding="utf-8") as f:
+                            cached = json.load(f)
+                        if str(cached.get("bot", {}).get("id")) == str(bot_id):
+                            chats_list = cached.get("chats", [])
+                            messages_by_chat = cached.get("messages", {})
+                            total_msgs_count = cached.get("total_messages", 0)
+                            found_cache = True
+                            break
                     except Exception:
                         pass
-                    await asyncio.sleep(0.5)
-
-            await self._destroy_bot_client(bot_client, session_path)
-            logger.info(f"[Token] Broadcast done. success={success}, failed={failed}, total={total}")
-
+            if not found_cache:
+                await call.edit(
+                    self.strings["flood_wait"].format(seconds=e.seconds),
+                    reply_markup=[
+                        [
+                            {
+                                "text": self.strings["btn_back"],
+                                "callback": self._cb_main_menu,
+                                "style": "danger",
+                            }
+                        ]
+                    ],
+                )
+                return
+        except Exception:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
             await call.edit(
-                self.strings["adv_done"].format(success=success, total=total, failed=failed),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_adv_menu, "args": (index,), "style": "danger"}]],
+                self.strings["bot_auth_failed"],
+                reply_markup=[
+                    [
+                        {
+                            "text": self.strings["btn_back"],
+                            "callback": self._cb_main_menu,
+                            "style": "danger",
+                        }
+                    ]
+                ],
             )
+            return
 
-        except Exception as e:
-            logger.error(f"[Token] Broadcast error: {e}")
-            if bot_client and session_path:
-                await self._destroy_bot_client(bot_client, session_path)
-            await call.edit(
-                self.strings["error"].format(error=str(e)[:200]),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_adv_menu, "args": (index,), "style": "danger"}]],
-            )
+        if not messages_by_chat:
+            for m in raw_msgs:
+                cid = str(self._get_chat_id(m))
+                if not cid or cid == "0":
+                    continue
+                if cid not in messages_by_chat:
+                    messages_by_chat[cid] = []
+                m_text = m.message or ""
+                m_date = m.date.strftime("%Y-%m-%d %H:%M:%S") if m.date else ""
+                m_media = type(m.media).__name__ if m.media else ""
+                messages_by_chat[cid].append(
+                    {
+                        "id": m.id,
+                        "out": bool(m.out),
+                        "text": m_text,
+                        "date": m_date,
+                        "media": m_media,
+                    }
+                )
 
-    @loader.command(
-        ru_doc="Открыть менеджер токенов",
-        en_doc="Open token manager",
-    )
-    async def token(self, message: Message):
-        """Open token manager"""
-        text, markup = await self._build_main_text_and_markup()
-        await self.inline.form(
-            text=text,
-            message=message,
-            reply_markup=markup,
-            silent=True,
+            for cid, msgs in messages_by_chat.items():
+                info = entities.get(cid, {"name": f"Chat {cid}", "username": ""})
+                last_msg = msgs[-1] if msgs else None
+                last_text = last_msg["text"] if last_msg else ""
+                if not last_text and last_msg and last_msg["media"]:
+                    last_text = f"[{last_msg['media']}]"
+                chats_list.append(
+                    {
+                        "id": cid,
+                        "name": info["name"],
+                        "username": info["username"],
+                        "count": len(msgs),
+                        "last": last_text[:60],
+                        "date": last_msg["date"] if last_msg else "",
+                    }
+                )
+            chats_list.sort(key=lambda x: x["date"], reverse=True)
+            total_msgs_count = len(raw_msgs)
+
+        dump_data = {
+            "bot": {"id": bot_id, "name": name, "username": username},
+            "is_private": is_private,
+            "pin": pin,
+            "total_messages": total_msgs_count,
+            "total_chats": len(chats_list),
+            "chats": chats_list,
+            "messages": messages_by_chat,
+        }
+
+        json_path = os.path.join(dist_dir, "data.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(dump_data, f, ensure_ascii=False, indent=2)
+
+        template = self._get_html_template()
+        if template:
+            injected_script = f"<script>window.DUMP_DATA = {json.dumps(dump_data, ensure_ascii=False)};</script>"
+            if "</head>" in template:
+                final_html = template.replace("</head>", f"{injected_script}\n</head>", 1)
+            else:
+                final_html = f"{injected_script}\n{template}"
+            html_path = os.path.join(dist_dir, "index.html")
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(final_html)
+
+        tgcloud_jsonc = os.path.join(bot_dir, "tgcloud.jsonc")
+        with open(tgcloud_jsonc, "w", encoding="utf-8") as f:
+            f.write('{\n  "$schema": "https://raw.githubusercontent.com/telegram-cloud/tgcloud/main/schema.json",\n  "static": {\n    "source": "dist",\n    "spa": true\n  }\n}\n')
+
+        self._deploy_serverless(bot_dir)
+
+        app_url = f"https://app{bot_id}.tgcloud.ai"
+        bot_info = {
+            "token": token,
+            "bot_id": bot_id,
+            "name": name,
+            "username": username,
+            "is_private": is_private,
+            "pin": pin,
+            "chats_count": len(chats_list),
+            "messages_count": total_msgs_count,
+            "app_url": app_url,
+            "dist_dir": dist_dir,
+        }
+        self._save_bot(bot_id, bot_info)
+
+        privacy_label = f"Приватный (PIN: <code>{pin}</code>)" if is_private else "Публичный"
+        text = self.strings["dump_complete"].format(
+            name=name,
+            username=username,
+            bot_id=bot_id,
+            chats_count=len(chats_list),
+            messages_count=total_msgs_count,
+            privacy_label=privacy_label,
+            app_url=app_url,
         )
 
-    async def on_unload(self):
-        self._adv_states.clear()
-        if self._temp_dir and os.path.exists(self._temp_dir):
-            shutil.rmtree(self._temp_dir, ignore_errors=True)
+        markup = [
+            [
+                {
+                    "text": self.strings["btn_open_app"],
+                    "web_app": {"url": app_url},
+                    "style": "success",
+                }
+            ],
+            [
+                {
+                    "text": self.strings["btn_open_browser"],
+                    "url": app_url,
+                }
+            ],
+            [
+                {
+                    "text": self.strings["btn_download_html"],
+                    "callback": self._cb_download_html,
+                    "args": (bot_id,),
+                    "style": "primary",
+                }
+            ],
+            [
+                {
+                    "text": self.strings["btn_back"],
+                    "callback": self._cb_main_menu,
+                    "style": "secondary",
+                }
+            ],
+        ]
+        await call.edit(text, reply_markup=markup)
+
+    async def _cb_bot_view(self, call: InlineCall, bot_id: str):
+        bots = self._get_bots()
+        info = bots.get(str(bot_id))
+        if not info:
+            await call.edit(
+                self.strings["deleted"],
+                reply_markup=[
+                    [
+                        {
+                            "text": self.strings["btn_back"],
+                            "callback": self._cb_main_menu,
+                            "style": "primary",
+                        }
+                    ]
+                ],
+            )
+            return
+
+        name = info.get("name", f"Bot {bot_id}")
+        username = info.get("username", "")
+        chats_count = info.get("chats_count", 0)
+        messages_count = info.get("messages_count", 0)
+        is_private = info.get("is_private", False)
+        pin = info.get("pin", "")
+        app_url = info.get("app_url", f"https://app{bot_id}.tgcloud.ai")
+        privacy_label = f"Приватный (PIN: <code>{pin}</code>)" if is_private else "Публичный"
+
+        text = self.strings["dump_complete"].format(
+            name=name,
+            username=username,
+            bot_id=bot_id,
+            chats_count=chats_count,
+            messages_count=messages_count,
+            privacy_label=privacy_label,
+            app_url=app_url,
+        )
+        markup = [
+            [
+                {
+                    "text": self.strings["btn_open_app"],
+                    "web_app": {"url": app_url},
+                    "style": "success",
+                }
+            ],
+            [
+                {
+                    "text": self.strings["btn_open_browser"],
+                    "url": app_url,
+                }
+            ],
+            [
+                {
+                    "text": self.strings["btn_download_html"],
+                    "callback": self._cb_download_html,
+                    "args": (bot_id,),
+                    "style": "primary",
+                }
+            ],
+            [
+                {
+                    "text": self.strings["btn_redump"],
+                    "callback": self._cb_privacy_choice,
+                    "args": (info.get("token", ""), bot_id, name, username, is_private),
+                    "style": "secondary",
+                },
+                {
+                    "text": self.strings["btn_delete"],
+                    "callback": self._cb_bot_delete,
+                    "args": (bot_id,),
+                    "style": "danger",
+                },
+            ],
+            [
+                {
+                    "text": self.strings["btn_back"],
+                    "callback": self._cb_main_menu,
+                    "style": "primary",
+                }
+            ],
+        ]
+        await call.edit(text, reply_markup=markup)
+
+    async def _cb_download_html(self, call: InlineCall, bot_id: str):
+        user_id = call.from_user.id
+        bot_dir = self._get_user_tmp_dir(user_id, bot_id)
+        html_path = os.path.join(bot_dir, "dist", "index.html")
+        if not os.path.isfile(html_path):
+            await call.answer("Файл дампа не найден.", show_alert=True)
+            return
+
+        await call.answer("Отправка файла дампа...")
+        await self._client.send_file(
+            call.chat_id,
+            html_path,
+            caption=f"Архив дампа бота {bot_id}",
+        )
+
+    async def _cb_bot_delete(self, call: InlineCall, bot_id: str):
+        user_id = call.from_user.id
+        self._remove_bot(bot_id)
+        bot_dir = self._get_user_tmp_dir(user_id, bot_id)
+        if os.path.isdir(bot_dir):
+            try:
+                shutil.rmtree(bot_dir)
+            except Exception:
+                pass
+        await call.edit(
+            self.strings["deleted"],
+            reply_markup=[
+                [
+                    {
+                        "text": self.strings["btn_back"],
+                        "callback": self._cb_main_menu,
+                        "style": "primary",
+                    }
+                ]
+            ],
+        )
+
+    @loader.command()
+    async def token(self, message: Message):
+        text, markup = await self._build_main_menu()
+        await self.inline.form(
+            text=text,
+            reply_markup=markup,
+            message=message,
+        )
