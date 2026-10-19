@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 1, 0)
+__version__ = (1, 2, 0)
 # meta developer: Execute_forge.t.me
 
 import asyncio
@@ -154,6 +154,84 @@ def _has_token(cookies):
     return any(cookies.get(key) for key in AUTH_TOKEN)
 
 
+EXPIRY_KEYS = ("expirationDate", "expires", "expiry", "expiresDate", "expires_at")
+
+
+def _ts(value):
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        ts = float(value)
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            ts = float(text)
+        except ValueError:
+            try:
+                dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                ts = dt.timestamp()
+            except ValueError:
+                return None
+    if ts > 1e11:
+        ts /= 1000
+    return ts if ts > 1e9 else None
+
+
+def _walk_expiry(data, out):
+    if isinstance(data, list):
+        for item in data:
+            _walk_expiry(item, out)
+        return
+    if not isinstance(data, dict):
+        return
+    if "name" in data and "value" in data:
+        for key in EXPIRY_KEYS:
+            ts = _ts(data.get(key))
+            if ts:
+                out[str(data["name"]).strip()] = ts
+                break
+        return
+    for value in data.values():
+        if isinstance(value, (dict, list)):
+            _walk_expiry(value, out)
+
+
+def parse_expiry(raw, cookies):
+    """Earliest expiry (unix time) among auth token cookies, or None if the export has no dates."""
+    text = (raw or "").strip().lstrip("\ufeff")
+    out = {}
+    if text[:1] in "[{":
+        try:
+            _walk_expiry(json.loads(text), out)
+        except ValueError:
+            out = {}
+    if not out:
+        tokens = []
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("#HttpOnly_"):
+                line = line[10:]
+            elif line.startswith("#"):
+                continue
+            tokens.extend(line.split())
+        i = 0
+        while i + 6 < len(tokens):
+            t = tokens
+            if t[i + 1].upper() in TF and t[i + 3].upper() in TF and re.fullmatch(r"-?\d+(?:\.\d+)?", t[i + 4]):
+                ts = _ts(t[i + 4])
+                if ts:
+                    out[t[i + 5]] = ts
+                i += 7
+            else:
+                i += 1
+    stamps = [out[name] for name in AUTH_TOKEN if name in cookies and name in out]
+    return int(min(stamps)) if stamps else None
+
+
 def _fmt_left(seconds):
     seconds = max(int(seconds), 0)
     hours, rest = divmod(seconds, 3600)
@@ -192,7 +270,8 @@ class HoyoClaimer(loader.Module):
         "account": (
             "<b>HoyoClaimer</b>\n"
             "<blockquote><b>{nick}</b> | HoYoLab ID <code>{hid}</code> | {region}\n"
-            "<b>Added:</b> {added}</blockquote>\n"
+            "<b>Added:</b> {added}\n"
+            "<b>Cookies until:</b> {until}</blockquote>\n"
             "<blockquote expandable>{games}</blockquote>"
         ),
         "game_line": "<b>{game}</b>: {nick} | UID <code>{uid}</code> | {server} | Lv {level}\n{status}",
@@ -291,6 +370,20 @@ class HoyoClaimer(loader.Module):
         "_cfg_log": "Send logs to the HoyoClaimer topic of the asset channel",
         "_cfg_retries": "Retries on network errors and rate limits",
         "_cfg_proxy": "Proxy for HoYoLab requests, for example http://127.0.0.1:8080",
+        "_cfg_expiry": "Days before cookie expiry to tag the owner (0 - off)",
+        "until_unknown": "unknown",
+        "expiry_soon": (
+            "<blockquote><b>{tag}, cookies expire soon</b></blockquote>\n"
+            "<blockquote><b>{nick}</b> | <code>{hid}</code>\n"
+            "Expire: <code>{date}</code> ({left} left)\n"
+            "Export fresh cookies and reply <code>{prefix}hc</code> to the file.</blockquote>"
+        ),
+        "expiry_dead": (
+            "<blockquote><b>{tag}, cookies are no longer valid</b></blockquote>\n"
+            "<blockquote><b>{nick}</b> | <code>{hid}</code>\n"
+            "Auto claim does not work for this account until the cookies are updated.\n"
+            "Export fresh cookies and reply <code>{prefix}hc</code> to the file.</blockquote>"
+        ),
     }
 
     strings_ru = {
@@ -316,7 +409,8 @@ class HoyoClaimer(loader.Module):
         "account": (
             "<b>HoyoClaimer</b>\n"
             "<blockquote><b>{nick}</b> | HoYoLab ID <code>{hid}</code> | {region}\n"
-            "<b>Добавлен:</b> {added}</blockquote>\n"
+            "<b>Добавлен:</b> {added}\n"
+            "<b>Куки действуют до:</b> {until}</blockquote>\n"
             "<blockquote expandable>{games}</blockquote>"
         ),
         "game_line": "<b>{game}</b>: {nick} | UID <code>{uid}</code> | {server} | Ур. {level}\n{status}",
@@ -415,6 +509,20 @@ class HoyoClaimer(loader.Module):
         "_cfg_log": "Отправлять логи в топик HoyoClaimer канала ассетов",
         "_cfg_retries": "Повторы при сетевых ошибках и лимитах",
         "_cfg_proxy": "Прокси для запросов HoYoLab, например http://127.0.0.1:8080",
+        "_cfg_expiry": "За сколько дней до истечения куки тегать владельца (0 - выключено)",
+        "until_unknown": "неизвестно",
+        "expiry_soon": (
+            "<blockquote><b>{tag}, куки скоро протухнут</b></blockquote>\n"
+            "<blockquote><b>{nick}</b> | <code>{hid}</code>\n"
+            "Истекают: <code>{date}</code> (осталось {left})\n"
+            "Выгрузи свежие куки и ответь на файл командой <code>{prefix}hc</code>.</blockquote>"
+        ),
+        "expiry_dead": (
+            "<blockquote><b>{tag}, куки больше не действуют</b></blockquote>\n"
+            "<blockquote><b>{nick}</b> | <code>{hid}</code>\n"
+            "Автосбор для этого аккаунта не работает, пока куки не обновлены.\n"
+            "Выгрузи свежие куки и ответь на файл командой <code>{prefix}hc</code>.</blockquote>"
+        ),
     }
 
     def __init__(self):
@@ -468,6 +576,12 @@ class HoyoClaimer(loader.Module):
                 validator=loader.validators.Integer(minimum=0, maximum=10),
             ),
             loader.ConfigValue(
+                "EXPIRY_WARN_DAYS",
+                2,
+                lambda: self.strings["_cfg_expiry"],
+                validator=loader.validators.Integer(minimum=0, maximum=14),
+            ),
+            loader.ConfigValue(
                 "PROXY",
                 "",
                 lambda: self.strings["_cfg_proxy"],
@@ -482,6 +596,8 @@ class HoyoClaimer(loader.Module):
         self._startup_task = None
         self._scheduler = None
         self._acc = {}
+        self._me = None
+        self._expiry_checked = 0
 
     async def client_ready(self, client, db):
         self._client = client
@@ -625,12 +741,12 @@ class HoyoClaimer(loader.Module):
             cid = int(text[3:])
         return int(f"-100{cid}")
 
-    async def _log(self, text):
-        if not self.config["LOG_TOPIC"]:
-            return
+    async def _log(self, text, force=False):
+        if not self.config["LOG_TOPIC"] and not force:
+            return False
         channel = self._asset_channel()
         if not channel:
-            return
+            return False
         for attempt in range(2):
             try:
                 await self._ensure_topic(fresh=attempt > 0)
@@ -642,10 +758,102 @@ class HoyoClaimer(loader.Module):
                     await self._client.send_message(
                         channel, text, parse_mode="html", reply_to=self._topic_id, link_preview=False
                     )
-                return
+                return True
             except Exception as e:
                 if attempt:
                     logger.warning(f"[HoyoClaimer] topic log failed: {e}")
+        return False
+
+    async def _alert(self, text):
+        if await self._log(text, force=True):
+            return
+        try:
+            await self._client.send_message("me", text, parse_mode="html", link_preview=False)
+        except Exception as e:
+            logger.warning(f"[HoyoClaimer] alert failed: {e}")
+
+    async def _owner_tag(self):
+        try:
+            if self._me is None:
+                self._me = await self._client.get_me()
+            name = " ".join(x for x in (self._me.first_name, self._me.last_name) if x) or "owner"
+            return f"<a href='tg://user?id={self._me.id}'>{_esc(name)}</a>"
+        except Exception as e:
+            logger.debug(f"[HoyoClaimer] owner tag failed: {e}")
+            return "<b>!</b>"
+
+    def _until_text(self, acc):
+        exp = acc.get("expires")
+        if not exp:
+            return self.strings["until_unknown"]
+        date = datetime.fromtimestamp(exp, self._tz()).strftime("%Y-%m-%d %H:%M")
+        left = exp - time.time()
+        if left <= 0:
+            return f"<code>{date}</code>"
+        return f"<code>{date}</code> ({_fmt_left(left)})"
+
+    async def _send_expiry(self, uid, dead):
+        acc = self._acc[uid]
+        exp = acc.get("expires")
+        left = (exp - time.time()) if exp else 0
+        text = self._s(
+            "expiry_dead" if dead else "expiry_soon",
+            tag=await self._owner_tag(),
+            nick=_esc(acc["nick"]),
+            hid=acc["hid"],
+            date=datetime.fromtimestamp(exp, self._tz()).strftime("%Y-%m-%d %H:%M") if exp else "?",
+            left=_fmt_left(left),
+        )
+        acc["warned"] = time.time()
+        if dead:
+            acc["expires"] = None
+        self._save()
+        await self._alert(text)
+
+    async def _expiry_alert(self, uid):
+        acc = self._acc[uid]
+        dead = False
+        try:
+            g = await self._lib()
+            region, user, games = await self._login(g, acc["cookies"], [acc["region"]], uid)
+        except Exception as e:
+            if self._g is not None and isinstance(e, self._g.InvalidCookies):
+                dead = True
+            else:
+                logger.warning(f"[HoyoClaimer] expiry recheck failed, will retry: {self._err(e)}")
+                return
+        if not dead:
+            hid = getattr(user, "hoyolab_id", None) or acc.get("hid") or uid
+            acc["nick"] = getattr(user, "nickname", None) or acc["nick"]
+            acc["hid"] = str(hid)
+            acc["region"] = region
+            acc["games"] = self._game_info(games) or acc.get("games", [])
+            if acc["expires"] <= time.time():
+                acc["expires"] = None
+                self._save()
+                return
+            self._save()
+        await self._send_expiry(uid, dead)
+
+    async def _check_expiry(self):
+        now = time.time()
+        if now - self._expiry_checked < 1800:
+            return
+        self._expiry_checked = now
+        days = int(self.config["EXPIRY_WARN_DAYS"])
+        if days <= 0:
+            return
+        for uid in list(self._acc):
+            acc = self._acc.get(uid) or {}
+            exp = acc.get("expires")
+            if not exp or exp - now > days * 86400 or now - acc.get("warned", 0) < 86400:
+                continue
+            try:
+                await self._expiry_alert(uid)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("[HoyoClaimer] expiry check failed")
 
     async def _lib(self, status=None):
         if self._g is not None:
@@ -858,6 +1066,7 @@ class HoyoClaimer(loader.Module):
             return
         existed = uid in self._acc
         old = self._acc.get(uid, {})
+        expires = parse_expiry(raw, cookies)
         hid = getattr(user, "hoyolab_id", None) or uid
         self._acc[uid] = {
             "cookies": cookies,
@@ -867,6 +1076,8 @@ class HoyoClaimer(loader.Module):
             "games": self._game_info(games),
             "added": old.get("added") or int(time.time()),
             "last": old.get("last", {}),
+            "expires": expires,
+            "warned": 0,
         }
         self._save()
         acc = self._acc[uid]
@@ -940,6 +1151,8 @@ class HoyoClaimer(loader.Module):
                     if self.get("last_run") != today and now >= self._due(now.date()):
                         self.set("last_run", today)
                         await self._claim_all(auto=True)
+                if self._acc:
+                    await self._check_expiry()
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -1019,6 +1232,8 @@ class HoyoClaimer(loader.Module):
             hid=acc["hid"],
             lines=lines,
         ))
+        if any(r["status"] == "cookies" for r in results.values()) and time.time() - acc.get("warned", 0) > 43200:
+            await self._send_expiry(uid, True)
         return results, lines
 
     async def _claim_all(self, auto=False, only=None):
@@ -1102,6 +1317,7 @@ class HoyoClaimer(loader.Module):
             hid=acc["hid"],
             region=self._region_name(acc["region"]),
             added=datetime.fromtimestamp(acc.get("added", 0), CN_TZ).strftime("%Y-%m-%d"),
+            until=self._until_text(acc),
             games=self._games_text(acc),
         )
         markup = [
