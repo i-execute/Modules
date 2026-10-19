@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 # meta developer: Execute_forge.t.me
 
 import asyncio
@@ -59,8 +59,7 @@ from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = os.path.join(tempfile.gettempdir(), "covereditor")
-COVERS_DIR = os.path.join(DATA_DIR, "covers")
+
 THUMB_SIZE = 320
 MAX_TAG = 64
 CACHE_PAGE = 6
@@ -482,13 +481,26 @@ class CoverEditor(loader.Module):
         self._sessions = OrderedDict()
         self._ffmpeg = None
 
+    def _data_dir(self):
+        uid = getattr(self, "_tg_id", None) or (getattr(self, "_owner", None).id if getattr(self, "_owner", None) else "common")
+        p = os.path.join(tempfile.gettempdir(), "CoverEditor", str(uid))
+        os.makedirs(p, exist_ok=True)
+        return p
+
+    def _covers_dir(self):
+        p = os.path.join(self._data_dir(), "covers")
+        os.makedirs(p, exist_ok=True)
+        return p
+
     async def client_ready(self, client, db):
         self._client = client
-        os.makedirs(COVERS_DIR, exist_ok=True)
+        self._owner = await client.get_me()
+        self._tg_id = self._owner.id if self._owner else getattr(client, "tg_id", None)
+        os.makedirs(self._covers_dir(), exist_ok=True)
         try:
-            for name in os.listdir(DATA_DIR):
+            for name in os.listdir(self._data_dir()):
                 if name.startswith("work_"):
-                    shutil.rmtree(os.path.join(DATA_DIR, name), ignore_errors=True)
+                    shutil.rmtree(os.path.join(self._data_dir(), name), ignore_errors=True)
         except Exception:
             pass
 
@@ -514,13 +526,13 @@ class CoverEditor(loader.Module):
         return self._ffmpeg
 
     def _cache_list(self):
-        os.makedirs(COVERS_DIR, exist_ok=True)
+        os.makedirs(self._covers_dir(), exist_ok=True)
         items = []
-        for name in os.listdir(COVERS_DIR):
+        for name in os.listdir(self._covers_dir()):
             m = re.match(r"^(\d+)_(\d+)x(\d+)_([0-9a-f]{12})\.jpg$", name)
             if not m:
                 continue
-            path = os.path.join(COVERS_DIR, name)
+            path = os.path.join(self._covers_dir(), name)
             try:
                 size = os.path.getsize(path)
             except OSError:
@@ -547,7 +559,7 @@ class CoverEditor(loader.Module):
         old = self._cache_get(key)
         if old:
             os.remove(old["path"])
-        path = os.path.join(COVERS_DIR, f"{int(time.time() * 1000)}_{size[0]}x{size[1]}_{key}.jpg")
+        path = os.path.join(self._covers_dir(), f"{int(time.time() * 1000)}_{size[0]}x{size[1]}_{key}.jpg")
         with open(path, "wb") as fh:
             fh.write(data)
         for item in self._cache_list()[int(self.config["CACHE_LIMIT"]):]:
@@ -824,8 +836,8 @@ class CoverEditor(loader.Module):
         return AUDIO_EXTS.get((sess["mime"] or "").split(";")[0], ".mp3")
 
     async def _process(self, sess, call):
-        os.makedirs(DATA_DIR, exist_ok=True)
-        workdir = tempfile.mkdtemp(prefix="work_", dir=DATA_DIR)
+        os.makedirs(self._data_dir(), exist_ok=True)
+        workdir = tempfile.mkdtemp(prefix="work_", dir=self._data_dir())
         try:
             await self._status(call, self._s("st_download", file=_esc(sess["filename"]), size=_fmt_size(sess["size"])))
             ext = self._ext_for(sess)
