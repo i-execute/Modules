@@ -1,0 +1,14 @@
+{
+  "bot": {
+    "id": "",
+    "name": "",
+    "username": ""
+  },
+  "owner_id": 0,
+  "is_private": false,
+  "pin": "",
+  "total_messages": 0,
+  "total_chats": 0,
+  "chats": [],
+  "messages": {}
+}

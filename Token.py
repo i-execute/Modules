@@ -27,10 +27,8 @@ logger = logging.getLogger(__name__)
 API_ID = 2040
 API_HASH = "b18441a1ff607e10a989891a5462e627"
 BOT_TOKEN_PATTERN = re.compile(r"(\d{8,12}:[A-Za-z0-9_-]{35})")
-CLI_TOKEN_PATTERN = re.compile(r"(app\d+:[A-Za-z0-9_-]+)")
 DEFAULT_CLI_TOKEN = "app8288899778:OcG_KDo0FE73mbFbsiBB_FP7JMLeqJFYFpPd-67yHeE"
 GITHUB_WEB_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Token/web/index.html"
-GITHUB_DATA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Token/web/data.json"
 
 
 def _escape(text: str) -> str:
@@ -50,16 +48,14 @@ class Token(loader.Module):
         "_cfg_tgcloud_token": "CLI access token from @BotFather for tgcloud serverless deploy",
         "main_menu": (
             "<b>Token Dumper</b>\n"
-            "<blockquote>Connected bots: {count}\n"
+            "<blockquote>Dumped bots: {count}\n"
             "{bot_list}</blockquote>"
         ),
         "main_menu_empty": (
             "<b>Token Dumper</b>\n"
-            "<blockquote>No bots dumped yet. Press button below to add token.</blockquote>"
+            "<blockquote>No bots dumped yet. Press button below to add bot token.</blockquote>"
         ),
         "btn_add_token": "Add Bot Token",
-        "btn_add_cli_token": "Set CLI Token",
-        "btn_lang": "Language: EN",
         "btn_refresh": "Refresh",
         "btn_back": "Back",
         "btn_close": "Close",
@@ -71,15 +67,6 @@ class Token(loader.Module):
         "btn_public": "Public (Anyone)",
         "btn_cancel": "Cancel",
         "input_token": "Send bot API token (from @BotFather):",
-        "input_cli_token": "Send CLI access token (app<id>:<secret>):",
-        "cli_token_saved": (
-            "<b>CLI Token Saved</b>\n"
-            "<blockquote>Serverless CLI access token configured: <code>{token}</code></blockquote>"
-        ),
-        "cli_token_invalid": (
-            "<b>Invalid CLI Token</b>\n"
-            "<blockquote>CLI token must match format: app&lt;id&gt;:&lt;secret&gt;</blockquote>"
-        ),
         "token_invalid": (
             "<b>Invalid Token</b>\n"
             "<blockquote>The token was not accepted by Telegram API</blockquote>"
@@ -144,8 +131,6 @@ class Token(loader.Module):
             "<blockquote>Нет сохраненных ботов. Нажмите кнопку ниже для ввода токена.</blockquote>"
         ),
         "btn_add_token": "Ввести токен бота",
-        "btn_add_cli_token": "Задать CLI токен",
-        "btn_lang": "Язык: RU",
         "btn_refresh": "Обновить",
         "btn_back": "Назад",
         "btn_close": "Закрыть",
@@ -157,15 +142,6 @@ class Token(loader.Module):
         "btn_public": "Публичный (для всех)",
         "btn_cancel": "Отмена",
         "input_token": "Введите токен бота (например, 123456789:ABCdef...):",
-        "input_cli_token": "Введите CLI access токен (app<id>:<secret>):",
-        "cli_token_saved": (
-            "<b>CLI токен сохранен</b>\n"
-            "<blockquote>Access токен для деплоя на Serverless успешно настроен: <code>{token}</code></blockquote>"
-        ),
-        "cli_token_invalid": (
-            "<b>Некорректный CLI токен</b>\n"
-            "<blockquote>Токен должен быть формата app&lt;id&gt;:&lt;secret&gt;</blockquote>"
-        ),
         "token_invalid": (
             "<b>Некорректный токен</b>\n"
             "<blockquote>Токен не найден или отклонен Telegram API</blockquote>"
@@ -229,29 +205,11 @@ class Token(loader.Module):
         self._client = client
         self._db = db
 
-    def _get_lang(self) -> str:
-        lang = getattr(self, "_lang", None)
-        if not lang and hasattr(self, "_db") and self._db:
-            lang = (
-                self._db.get("Token", "language", None)
-                or self._db.get("friendly-telegram", "language", None)
-                or self._db.get("main", "language", None)
-                or self._db.get("feroku.main", "language", None)
-            )
-        if not lang:
-            lang = "ru"
-        return "ru" if "ru" in str(lang).lower() else "en"
-
     def _s(self, key, **kwargs):
-        lang = self._get_lang()
-        if lang == "ru":
-            text = self.strings_ru.get(key) or self.strings.get(key, key)
-        else:
-            text = self.strings.get(key) or self.strings_ru.get(key, key)
         try:
-            return text.format(prefix=self.get_prefix(), **kwargs)
+            return self.strings[key].format(prefix=self.get_prefix(), **kwargs)
         except (KeyError, IndexError):
-            return text
+            return self.strings.get(key, key)
 
     def _get_user_tmp_dir(self, user_id: int, bot_id: str = "") -> str:
         base = f"/tmp/Token/{user_id}"
@@ -416,30 +374,8 @@ class Token(loader.Module):
             logger.warning(f"Serverless push error: {e}")
             return False
 
-    async def _safe_edit(self, call: InlineCall, text: str, reply_markup=None):
-        try:
-            await call.edit(text, reply_markup=reply_markup)
-        except Exception as e:
-            logger.warning(f"call.edit error: {e}")
-            if reply_markup:
-                clean_markup = []
-                for row in reply_markup:
-                    clean_row = []
-                    for b in row:
-                        item = dict(b)
-                        if "web_app" in item:
-                            item["url"] = item["web_app"] if isinstance(item["web_app"], str) else item["web_app"].get("url", "")
-                            del item["web_app"]
-                        clean_row.append(item)
-                    clean_markup.append(clean_row)
-                try:
-                    await call.edit(text, reply_markup=clean_markup)
-                except Exception as e2:
-                    logger.error(f"Fallback call.edit error: {e2}")
-
     async def _build_main_menu(self):
         bots = self._get_bots()
-        is_ru = self._get_lang() == "ru"
         if not bots:
             text = self._s("main_menu_empty")
         else:
@@ -449,9 +385,7 @@ class Token(loader.Module):
                 name = binfo.get("name", f"Bot {bid}")
                 ccnt = binfo.get("chats_count", 0)
                 mcnt = binfo.get("messages_count", 0)
-                unit_chats = "диалогов" if is_ru else "dialogs"
-                unit_msgs = "сообщ." if is_ru else "msgs"
-                lines.append(f"- <b>{name}</b> (@{uname}): {ccnt} {unit_chats}, {mcnt} {unit_msgs}")
+                lines.append(f"- <b>{name}</b> (@{uname}): {ccnt} chats, {mcnt} msgs")
             text = self._s(
                 "main_menu",
                 count=len(bots),
@@ -465,13 +399,7 @@ class Token(loader.Module):
                     "input": self._s("input_token"),
                     "handler": self._cb_token_input,
                     "style": "success",
-                },
-                {
-                    "text": self._s("btn_add_cli_token"),
-                    "input": self._s("input_cli_token"),
-                    "handler": self._cb_cli_token_input,
-                    "style": "primary",
-                },
+                }
             ]
         ]
 
@@ -492,83 +420,25 @@ class Token(loader.Module):
         markup.append(
             [
                 {
-                    "text": self._s("btn_lang"),
-                    "callback": self._cb_toggle_lang,
-                    "style": "secondary",
-                },
-                {
                     "text": self._s("btn_close"),
                     "callback": self._cb_close,
                     "style": "danger",
-                },
+                }
             ]
         )
         return text, markup
-
-    async def _cb_toggle_lang(self, call: InlineCall):
-        curr = self._get_lang()
-        new_lang = "en" if curr == "ru" else "ru"
-        self._lang = new_lang
-        if hasattr(self, "_db") and self._db:
-            self._db.set("Token", "language", new_lang)
-        text, markup = await self._build_main_menu()
-        await self._safe_edit(call, text, reply_markup=markup)
 
     async def _cb_close(self, call: InlineCall):
         await call.delete()
 
     async def _cb_main_menu(self, call: InlineCall):
         text, markup = await self._build_main_menu()
-        await self._safe_edit(call, text, reply_markup=markup)
-
-    async def _cb_cli_token_input(self, call: InlineCall, query: str):
-        match = CLI_TOKEN_PATTERN.search(query.strip())
-        if not match:
-            await self._safe_edit(
-                call,
-                self._s("cli_token_invalid"),
-                reply_markup=[
-                    [
-                        {
-                            "text": self._s("btn_back"),
-                            "callback": self._cb_main_menu,
-                            "style": "danger",
-                        }
-                    ]
-                ],
-            )
-            return
-
-        cli_token = match.group(1)
-        self.config["TGCLOUD_TOKEN"] = cli_token
-        if hasattr(self, "_db") and self._db:
-            self._db.set("Token", "tgcloud_token", cli_token)
-        os.environ["TGCLOUD_TOKEN"] = cli_token
-        await self._safe_edit(
-            call,
-            self._s("cli_token_saved", token=cli_token),
-            reply_markup=[
-                [
-                    {
-                        "text": self._s("btn_back"),
-                        "callback": self._cb_main_menu,
-                        "style": "primary",
-                    }
-                ]
-            ],
-        )
+        await call.edit(text, reply_markup=markup)
 
     async def _cb_token_input(self, call: InlineCall, query: str):
-        stripped = query.strip()
-        cli_match = CLI_TOKEN_PATTERN.search(stripped)
-        if cli_match and not BOT_TOKEN_PATTERN.search(stripped):
-            await self._cb_cli_token_input(call, stripped)
-            return
-
-        match = BOT_TOKEN_PATTERN.search(stripped)
+        match = BOT_TOKEN_PATTERN.search(query.strip())
         if not match:
-            await self._safe_edit(
-                call,
+            await call.edit(
                 self._s("token_invalid"),
                 reply_markup=[
                     [
@@ -585,8 +455,7 @@ class Token(loader.Module):
         token = match.group(1)
         info = await asyncio.to_thread(self._validate_token_api, token)
         if not info:
-            await self._safe_edit(
-                call,
+            await call.edit(
                 self._s("bot_auth_failed"),
                 reply_markup=[
                     [
@@ -635,7 +504,7 @@ class Token(loader.Module):
                 }
             ],
         ]
-        await self._safe_edit(call, text, reply_markup=markup)
+        await call.edit(text, reply_markup=markup)
 
     async def _cb_privacy_choice(
         self,
@@ -647,7 +516,7 @@ class Token(loader.Module):
         is_private: bool,
     ):
         user_id = call.from_user.id
-        await self._safe_edit(call, self._s("dumping_progress", username=_escape(username)))
+        await call.edit(self._s("dumping_progress", username=_escape(username)))
 
         pin = ""
         if is_private:
@@ -659,7 +528,9 @@ class Token(loader.Module):
         serverless_dir = os.path.join(self._get_user_tmp_dir(user_id), "serverless")
         dist_dir = os.path.join(serverless_dir, "dist")
         bot_dist_dir = os.path.join(dist_dir, bot_id)
+        endpoints_dir = os.path.join(serverless_dir, "tgcloud", "endpoints")
         os.makedirs(bot_dist_dir, exist_ok=True)
+        os.makedirs(endpoints_dir, exist_ok=True)
 
         client = TelegramClient(session_file, API_ID, API_HASH)
         raw_msgs = []
@@ -689,7 +560,6 @@ class Token(loader.Module):
             candidates = [
                 os.path.join(bot_dist_dir, "data.json"),
                 os.path.join(dist_dir, "data.json"),
-                self._find_web_file("data.json"),
             ]
             for c_path in candidates:
                 if c_path and os.path.isfile(c_path):
@@ -705,21 +575,7 @@ class Token(loader.Module):
                     except Exception:
                         pass
             if not found_cache:
-                try:
-                    req = urllib.request.Request(GITHUB_DATA_URL, headers={"User-Agent": "TelegramBotDumper/2.0"})
-                    with urllib.request.urlopen(req, timeout=10) as r:
-                        if r.status == 200:
-                            cached = json.loads(r.read().decode("utf-8"))
-                            if str(cached.get("bot", {}).get("id")) == str(bot_id):
-                                chats_list = cached.get("chats", [])
-                                messages_by_chat = cached.get("messages", {})
-                                total_msgs_count = cached.get("total_messages", 0)
-                                found_cache = True
-                except Exception:
-                    pass
-            if not found_cache:
-                await self._safe_edit(
-                    call,
+                await call.edit(
                     self._s("flood_wait", seconds=e.seconds),
                     reply_markup=[
                         [
@@ -738,8 +594,7 @@ class Token(loader.Module):
                 await client.disconnect()
             except Exception:
                 pass
-            await self._safe_edit(
-                call,
+            await call.edit(
                 self._s("bot_auth_failed"),
                 reply_markup=[
                     [
@@ -803,6 +658,7 @@ class Token(loader.Module):
             "messages": messages_by_chat,
         }
 
+        # Save data files in dist
         with open(os.path.join(bot_dist_dir, "data.json"), "w", encoding="utf-8") as f:
             json.dump(dump_data, f, ensure_ascii=False, indent=2)
 
@@ -823,9 +679,33 @@ class Token(loader.Module):
             with open(os.path.join(dist_dir, "index.html"), "w", encoding="utf-8") as f:
                 f.write(final_html)
 
+        # Create tgcloud endpoint for this bot and all saved bots
+        all_bots = self._get_bots()
+        bots_to_endpoint = set(all_bots.keys())
+        bots_to_endpoint.add(str(bot_id))
+
+        for bid in bots_to_endpoint:
+            endpoint_file = os.path.join(endpoints_dir, f"bot_{bid}.js")
+            endpoint_code = (
+                "import { EndpointError } from 'sdk'\n\n"
+                "export default async function (input, ctx) {\n"
+                f"  return {{ bot_id: '{bid}', status: 'active' }}\n"
+                "}\n"
+            )
+            with open(endpoint_file, "w", encoding="utf-8") as f:
+                f.write(endpoint_code)
+
         tgcloud_jsonc = os.path.join(serverless_dir, "tgcloud.jsonc")
         with open(tgcloud_jsonc, "w", encoding="utf-8") as f:
-            f.write('{\n  "$schema": "https://raw.githubusercontent.com/telegram-cloud/tgcloud/main/schema.json",\n  "static": {\n    "source": "dist",\n    "spa": true\n  }\n}\n')
+            f.write(
+                '{\n'
+                '  "$schema": "https://raw.githubusercontent.com/telegram-cloud/tgcloud/main/schema.json",\n'
+                '  "static": {\n'
+                '    "source": "dist",\n'
+                '    "spa": true\n'
+                '  }\n'
+                '}\n'
+            )
 
         self._deploy_serverless(serverless_dir)
 
@@ -845,8 +725,7 @@ class Token(loader.Module):
         }
         self._save_bot(bot_id, bot_info)
 
-        is_ru = self._get_lang() == "ru"
-        privacy_label = ("Приватный (только владелец)" if is_private else "Публичный") if is_ru else ("Private (Owner only)" if is_private else "Public")
+        privacy_label = "Private" if is_private else "Public"
         text = self._s(
             "dump_complete",
             name=_escape(name),
@@ -862,7 +741,7 @@ class Token(loader.Module):
             [
                 {
                     "text": self._s("btn_open_app"),
-                    "web_app": app_url,
+                    "url": app_url,
                     "style": "success",
                 }
             ],
@@ -882,14 +761,13 @@ class Token(loader.Module):
                 }
             ],
         ]
-        await self._safe_edit(call, text, reply_markup=markup)
+        await call.edit(text, reply_markup=markup)
 
     async def _cb_bot_view(self, call: InlineCall, bot_id: str):
         bots = self._get_bots()
         info = bots.get(str(bot_id))
         if not info:
-            await self._safe_edit(
-                call,
+            await call.edit(
                 self._s("deleted"),
                 reply_markup=[
                     [
@@ -910,8 +788,7 @@ class Token(loader.Module):
         is_private = info.get("is_private", False)
         pin = info.get("pin", "")
         app_url = info.get("app_url", self._get_app_url(bot_id))
-        is_ru = self._get_lang() == "ru"
-        privacy_label = ("Приватный (только владелец)" if is_private else "Публичный") if is_ru else ("Private (Owner only)" if is_private else "Public")
+        privacy_label = "Private" if is_private else "Public"
 
         text = self._s(
             "bot_view",
@@ -927,7 +804,7 @@ class Token(loader.Module):
             [
                 {
                     "text": self._s("btn_open_app"),
-                    "web_app": app_url,
+                    "url": app_url,
                     "style": "success",
                 }
             ],
@@ -961,7 +838,7 @@ class Token(loader.Module):
                 }
             ],
         ]
-        await self._safe_edit(call, text, reply_markup=markup)
+        await call.edit(text, reply_markup=markup)
 
     async def _cb_download_html(self, call: InlineCall, bot_id: str):
         user_id = call.from_user.id
@@ -1011,15 +888,21 @@ class Token(loader.Module):
         user_id = call.from_user.id
         self._remove_bot(bot_id)
         bot_dir = self._get_user_tmp_dir(user_id, bot_id)
-        serverless_bot_dir = os.path.join(self._get_user_tmp_dir(user_id), "serverless", "dist", bot_id)
+        serverless_dir = os.path.join(self._get_user_tmp_dir(user_id), "serverless")
+        serverless_bot_dir = os.path.join(serverless_dir, "dist", bot_id)
+        endpoint_file = os.path.join(serverless_dir, "tgcloud", "endpoints", f"bot_{bot_id}.js")
         for d in (bot_dir, serverless_bot_dir):
             if os.path.isdir(d):
                 try:
                     shutil.rmtree(d)
                 except Exception:
                     pass
-        await self._safe_edit(
-            call,
+        if os.path.isfile(endpoint_file):
+            try:
+                os.remove(endpoint_file)
+            except Exception:
+                pass
+        await call.edit(
             self._s("deleted"),
             reply_markup=[
                 [
