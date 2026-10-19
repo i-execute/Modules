@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 1, 0)
+__version__ = (1, 2, 0)
 # meta developer: Execute_forge.t.me
 
 import asyncio
@@ -2031,14 +2031,31 @@ class MetaDataDumper(loader.Module):
         self._et_reason = "not checked"
         self._et_lock = asyncio.Lock()
         self._et_task = None
-        self._data_dir = os.path.join(tempfile.gettempdir(), "metadatadumper")
+
+    @property
+    def _data_dir(self):
+        uid = getattr(self, "_tg_id", None)
+        if not uid and getattr(self, "_client", None):
+            uid = getattr(self._client, "tg_id", None)
+        if not uid:
+            uid = "common"
+        path = os.path.join(tempfile.gettempdir(), "MetaDataDumper", str(uid))
+        os.makedirs(path, exist_ok=True)
+        return path
 
     async def client_ready(self, client, db):
         self._client = client
+        self._owner = await client.get_me()
+        self._tg_id = self._owner.id if self._owner else getattr(client, "tg_id", None)
         try:
             for name in os.listdir(self._data_dir):
-                if name.startswith(("dl_", "tmp")):
-                    shutil.rmtree(os.path.join(self._data_dir, name), ignore_errors=True)
+                if name.startswith(("dl_", "tmp", "blob")):
+                    p = os.path.join(self._data_dir, name)
+                    if os.path.isdir(p):
+                        shutil.rmtree(p, ignore_errors=True)
+                    else:
+                        with contextlib.suppress(Exception):
+                            os.remove(p)
         except Exception:
             pass
         self._et_task = asyncio.ensure_future(self._ensure_exiftool())
