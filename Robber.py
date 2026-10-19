@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (3, 0, 0)
+__version__ = (3, 1, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Robber/MetaBanner.jpeg
 
@@ -428,7 +428,13 @@ class Robber(loader.Module):
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
-        self._temp_dir = os.path.join(tempfile.gettempdir(), "robber_tmp")
+        me = None
+        try:
+            me = await client.get_me()
+        except Exception:
+            pass
+        uid = getattr(me, "id", None) or getattr(client, "tg_id", None) or "common"
+        self._temp_dir = os.path.join(tempfile.gettempdir(), "Robber", str(uid))
         os.makedirs(self._temp_dir, exist_ok=True)
         asyncio.ensure_future(self._notify_ready())
 
@@ -559,7 +565,7 @@ class Robber(loader.Module):
                 import imageio_ffmpeg
 
                 exe = imageio_ffmpeg.get_ffmpeg_exe()
-                bin_dir = "/tmp/robber_bin"
+                bin_dir = os.path.join(self._temp_dir, "bin")
                 os.makedirs(bin_dir, exist_ok=True)
                 path = os.path.join(bin_dir, "ffmpeg")
                 if os.path.realpath(path) != os.path.realpath(exe):
