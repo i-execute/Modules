@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (3, 2, 0)
+__version__ = (3, 3, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/MetaBannerNew.jpeg
 
@@ -94,7 +94,7 @@ RELOAD_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storag
 TOPIC_TITLE = "InlineDL"
 TOPIC_ICON = 5379758279851289726
 
-WORK_DIR = "/tmp/inlinedl"
+
 MB = 1024 * 1024
 BOT_LIMIT = 2000 * MB
 USER_LIMIT = 4096 * MB
@@ -714,10 +714,26 @@ class InlineDL(loader.Module):
         self._topic_id = None
         self._topic_lock = None
 
+    @property
+    def _work_dir(self):
+        uid = getattr(self, "_tg_id", None)
+        if not uid and getattr(self, "_client", None):
+            uid = getattr(self._client, "tg_id", None)
+        if not uid:
+            uid = "common"
+        p = os.path.join(tempfile.gettempdir(), "InlineDL", str(uid))
+        os.makedirs(p, exist_ok=True)
+        return p
+
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
-        os.makedirs(WORK_DIR, exist_ok=True)
+        try:
+            me = await client.get_me()
+            self._tg_id = me.id
+        except Exception:
+            self._tg_id = getattr(client, "tg_id", None)
+        os.makedirs(self._work_dir, exist_ok=True)
         self._spawn(self._startup())
         if self.config["AUTO_FEEDBACK"]:
             self._spawn(self._ensure_feedback())
@@ -861,7 +877,7 @@ class InlineDL(loader.Module):
             import imageio_ffmpeg
 
             exe = imageio_ffmpeg.get_ffmpeg_exe()
-            bin_dir = os.path.join(WORK_DIR, "bin")
+            bin_dir = os.path.join(self._work_dir, "bin")
             os.makedirs(bin_dir, exist_ok=True)
             path = os.path.join(bin_dir, "ffmpeg")
             if os.path.realpath(path) != os.path.realpath(exe):
@@ -1408,7 +1424,7 @@ class InlineDL(loader.Module):
             "entry": item,
             "title": title,
             "label": self._mode_title(mode),
-            "dir": os.path.join(WORK_DIR, secrets.token_hex(6)),
+            "dir": os.path.join(self._work_dir, secrets.token_hex(6)),
             "cancel": False,
             "done": asyncio.Event(),
             "t0": time.time(),
