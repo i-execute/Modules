@@ -1,4 +1,4 @@
-__version__ = (2, 0, 0)
+__version__ = (2, 0, 1)
 
 import os
 import re
@@ -19,13 +19,11 @@ from ..inline.types import InlineCall
 API_ID = 2040
 API_HASH = "b18441a1ff607e10a989891a5462e627"
 BOT_TOKEN_PATTERN = re.compile(r"(\d{8,12}:[A-Za-z0-9_-]{35})")
-WEB_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Storage", "Token", "web", "index.html")
-FALLBACK_TEMPLATE_PATH = "/home/user/Storage/Token/web/index.html"
-FALLBACK_DATA_PATH = "/home/user/Storage/Token/web/data.json"
+GITHUB_WEB_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Token/web/index.html"
 
 
 @loader.tds
-class TokenMod(loader.Module):
+class Token(loader.Module):
     strings = {
         "name": "Token",
         "cfg_tgcloud_token": "CLI access token for tgcloud serverless deploy",
@@ -69,6 +67,26 @@ class TokenMod(loader.Module):
             path = base
         os.makedirs(path, exist_ok=True)
         return path
+
+    def _find_web_file(self, rel_name: str) -> str:
+        candidates = [
+            os.path.join("Storage", "Token", "web", rel_name),
+            os.path.join(os.getcwd(), "Storage", "Token", "web", rel_name),
+            os.path.expanduser(f"~/Feroku/Storage/Token/web/{rel_name}"),
+            os.path.expanduser(f"~/Storage/Token/web/{rel_name}"),
+            f"/home/user/Storage/Token/web/{rel_name}",
+        ]
+        if hasattr(utils, "get_base_dir"):
+            try:
+                base = utils.get_base_dir()
+                if base:
+                    candidates.insert(0, os.path.join(base, "Storage", "Token", "web", rel_name))
+            except Exception:
+                pass
+        for path in candidates:
+            if path and os.path.isfile(path):
+                return path
+        return ""
 
     def _get_bots(self) -> dict:
         return self._db.get("Token", "bots", {})
@@ -146,13 +164,20 @@ class TokenMod(loader.Module):
         return all_msgs
 
     def _get_html_template(self) -> str:
-        for path in (WEB_TEMPLATE_PATH, FALLBACK_TEMPLATE_PATH):
-            if os.path.isfile(path):
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        return f.read()
-                except Exception:
-                    pass
+        local_path = self._find_web_file("index.html")
+        if local_path:
+            try:
+                with open(local_path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except Exception:
+                pass
+        try:
+            req = urllib.request.Request(GITHUB_WEB_URL, headers={"User-Agent": "TelegramBotDumper/2.0"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                if r.status == 200:
+                    return r.read().decode("utf-8")
+        except Exception:
+            pass
         return ""
 
     def _deploy_serverless(self, project_dir: str) -> bool:
@@ -345,12 +370,12 @@ class TokenMod(loader.Module):
             except Exception:
                 pass
             found_cache = False
-            for c_path in (
+            candidates = [
                 os.path.join(dist_dir, "data.json"),
-                os.path.join(os.path.dirname(os.path.abspath(__file__)), "Storage", "Token", "web", "data.json"),
-                FALLBACK_DATA_PATH,
-            ):
-                if os.path.isfile(c_path):
+                self._find_web_file("data.json"),
+            ]
+            for c_path in candidates:
+                if c_path and os.path.isfile(c_path):
                     try:
                         with open(c_path, "r", encoding="utf-8") as f:
                             cached = json.load(f)
