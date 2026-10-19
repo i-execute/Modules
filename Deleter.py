@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (2, 4, 0)
+__version__ = (2, 5, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/MetaBanner.jpeg
 
@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 import shutil
 import tempfile
 import time
@@ -46,8 +47,11 @@ def _rss_bytes():
 
 
 class _IdSpool:
-    def __init__(self, ram_limit):
-        self.dir = tempfile.mkdtemp(prefix=WIPE_PREFIX, dir=tempfile.gettempdir())
+    def __init__(self, ram_limit, base_dir=None):
+        if not base_dir:
+            base_dir = tempfile.gettempdir()
+        os.makedirs(base_dir, exist_ok=True)
+        self.dir = tempfile.mkdtemp(prefix=WIPE_PREFIX, dir=base_dir)
         self.limit = ram_limit
         self.queue = asyncio.Queue()
         self.mem = 0
@@ -147,10 +151,33 @@ class Deleter(loader.Module):
             "<blockquote>Deleted {count} messages from today.</blockquote>"
         ),
         "wipe_confirm": (
-            "<b>Wipe the entire chat?</b>\n"
-            "<blockquote>ALL messages from ALL members will be deleted, from the newest to the very first one. "
-            "This cannot be undone. In groups you need the right to delete messages of others.</blockquote>"
+            "<b>Wipe Entire Chat</b>\n"
+            "<blockquote>Target chat: <b>{chat_title}</b>\n"
+            "Chat ID: <code>{chat_id}</code>\n"
+            "Type: <b>{chat_type}</b>\n\n"
+            "ALL messages from ALL members will be fetched and deleted permanently. "
+            "This action cannot be undone.</blockquote>"
         ),
+        "wipe_progress_collect": (
+            "<b>Fetching messages...</b>\n"
+            "<blockquote>Chat: <b>{chat_title}</b>\n"
+            "Collected: <code>{collected}</code>\n"
+            "Spool on disk: <code>{disk}</code>\n"
+            "Elapsed: <code>{elapsed}</code></blockquote>"
+        ),
+        "wipe_progress_delete": (
+            "<b>Deleting messages...</b>\n"
+            "<blockquote>Chat: <b>{chat_title}</b>\n"
+            "Total collected: <code>{collected}</code>\n"
+            "Deleted: <code>{deleted}</code>\n"
+            "Failed: <code>{failed}</code>\n"
+            "Speed: <code>{speed}</code> msg/s\n"
+            "Elapsed: <code>{elapsed}</code></blockquote>"
+        ),
+        "btn_wipe_run": "Wipe Now",
+        "btn_input_chat_id": "Enter Chat ID",
+        "prompt_chat_id": "Enter chat ID (e.g. -1001234567890) or username:",
+        "wipe_chat_not_found": "<b>Error:</b>\n<blockquote>Could not resolve chat <code>{chat}</code></blockquote>",
         "wipe_progress": (
             "<b>Wiping chat...</b>\n"
             "<blockquote>Collected: <code>{collected}</code>\n"
@@ -254,10 +281,33 @@ class Deleter(loader.Module):
             "<blockquote>Удалено {count} сообщений за сегодня.</blockquote>"
         ),
         "wipe_confirm": (
-            "<b>Полностью очистить чат?</b>\n"
-            "<blockquote>Будут удалены ВСЕ сообщения от ВСЕХ участников, от последнего до самого первого. "
-            "Отменить нельзя. В группах нужно право удалять чужие сообщения.</blockquote>"
+            "<b>Полная очистка чата</b>\n"
+            "<blockquote>Целевой чат: <b>{chat_title}</b>\n"
+            "ID чата: <code>{chat_id}</code>\n"
+            "Тип: <b>{chat_type}</b>\n\n"
+            "ВСЕ сообщения от ВСЕХ участников будут выгружены и безвозвратно удалены. "
+            "Это действие нельзя отменить.</blockquote>"
         ),
+        "wipe_progress_collect": (
+            "<b>Выгрузка сообщений...</b>\n"
+            "<blockquote>Чат: <b>{chat_title}</b>\n"
+            "Собрано: <code>{collected}</code>\n"
+            "Чанков на диске: <code>{disk}</code>\n"
+            "Прошло: <code>{elapsed}</code></blockquote>"
+        ),
+        "wipe_progress_delete": (
+            "<b>Удаление сообщений...</b>\n"
+            "<blockquote>Чат: <b>{chat_title}</b>\n"
+            "Всего собрано: <code>{collected}</code>\n"
+            "Удалено: <code>{deleted}</code>\n"
+            "Ошибок: <code>{failed}</code>\n"
+            "Скорость: <code>{speed}</code> сообщ/с\n"
+            "Прошло: <code>{elapsed}</code></blockquote>"
+        ),
+        "btn_wipe_run": "Удалить сейчас",
+        "btn_input_chat_id": "Ввести ID чата",
+        "prompt_chat_id": "Введите ID чата (например -1001234567890) или юзернейм:",
+        "wipe_chat_not_found": "<b>Ошибка:</b>\n<blockquote>Не удалось найти чат <code>{chat}</code></blockquote>",
         "wipe_progress": (
             "<b>Очистка чата...</b>\n"
             "<blockquote>Собрано: <code>{collected}</code>\n"
@@ -329,12 +379,16 @@ class Deleter(loader.Module):
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
+        self._owner = await client.get_me()
+        self._tg_id = self._owner.id if self._owner else getattr(client, "tg_id", None)
 
-        tmp = tempfile.gettempdir()
+        uid = getattr(self, "_tg_id", None) or "common"
+        user_dir = os.path.join(tempfile.gettempdir(), "Deleter", str(uid))
+        os.makedirs(user_dir, exist_ok=True)
         try:
-            for name in os.listdir(tmp):
+            for name in os.listdir(user_dir):
                 if name.startswith(WIPE_PREFIX):
-                    shutil.rmtree(os.path.join(tmp, name), ignore_errors=True)
+                    shutil.rmtree(os.path.join(user_dir, name), ignore_errors=True)
         except Exception as e:
             logger.error("[Deleter] Failed to clean stale wipe chunks: %s", e)
 
@@ -648,16 +702,62 @@ class Deleter(loader.Module):
                 ],
             )
 
-    async def _cb_wipe_confirm(self, call: InlineCall):
-        await call.edit(
-            self.strings["wipe_confirm"],
-            reply_markup=[
-                [
-                    {"text": self.strings["btn_confirm"], "callback": self._cb_wipe_execute, "style": "danger"},
-                    {"text": self.strings["btn_cancel"], "callback": self._cb_main_menu, "style": "primary"},
-                ],
-            ],
+    async def _get_chat_info(self, chat_id):
+        try:
+            entity = await self._client.get_entity(chat_id)
+            title = getattr(entity, "title", None) or getattr(entity, "first_name", None) or str(chat_id)
+            if getattr(entity, "broadcast", False):
+                ctype = "Channel"
+            elif getattr(entity, "megagroup", False):
+                ctype = "Supergroup"
+            elif getattr(entity, "gigagroup", False):
+                ctype = "Gigagroup"
+            elif isinstance(entity, User):
+                ctype = "Private Chat"
+            else:
+                ctype = "Group"
+            cid = utils.get_chat_id(entity)
+            return entity, title, cid, ctype
+        except Exception:
+            return None, str(chat_id), chat_id, "Unknown"
+
+    async def _cb_wipe_confirm(self, call: InlineCall, target_chat=None):
+        if target_chat is None:
+            target_chat = call.form["chat"]
+        _, title, cid, ctype = await self._get_chat_info(target_chat)
+        text = self.strings["wipe_confirm"].format(
+            chat_title=utils.escape_html(title),
+            chat_id=cid,
+            chat_type=ctype,
         )
+        markup = [
+            [
+                {"text": self.strings["btn_wipe_run"], "callback": self._cb_wipe_execute, "args": (cid,), "style": "danger"},
+            ],
+            [
+                {"text": self.strings["btn_input_chat_id"], "input": self.strings["prompt_chat_id"], "handler": self._ih_wipe_chat_id, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_cancel"], "callback": self._cb_main_menu, "style": "primary"},
+            ],
+        ]
+        await call.edit(text, reply_markup=markup)
+
+    async def _ih_wipe_chat_id(self, call: InlineCall, raw_id: str):
+        raw_id = raw_id.strip()
+        target = raw_id
+        if re.match(r"^-?\d+$", raw_id):
+            target = int(raw_id)
+        try:
+            entity = await self._client.get_entity(target)
+            await self._cb_wipe_confirm(call, target_chat=utils.get_chat_id(entity))
+        except Exception as e:
+            await call.edit(
+                self.strings["wipe_chat_not_found"].format(chat=utils.escape_html(raw_id)),
+                reply_markup=[
+                    [{"text": self.strings["btn_back"], "callback": self._cb_wipe_confirm, "style": "primary"}],
+                ],
+            )
 
     async def _wipe_allowed(self, chat_id):
         try:
@@ -672,8 +772,9 @@ class Deleter(loader.Module):
         except Exception:
             return True
 
-    async def _cb_wipe_execute(self, call: InlineCall):
-        chat_id = call.form["chat"]
+    async def _cb_wipe_execute(self, call: InlineCall, chat_id=None):
+        if chat_id is None:
+            chat_id = call.form["chat"]
         task = self._wipe_tasks.get(chat_id)
         if task and not task.done():
             await call.answer(self.strings["wipe_running"], show_alert=True)
@@ -696,8 +797,13 @@ class Deleter(loader.Module):
 
     def _wipe_text(self, key, state, spool, chat=""):
         elapsed = max(time.monotonic() - state["started"], 0.001)
-        text = self.strings[key].format(
+        chat_title = state.get("chat_title") or chat or "Chat"
+        actual_key = key
+        if key == "wipe_progress":
+            actual_key = "wipe_progress_delete" if state.get("phase") == "delete" else "wipe_progress_collect"
+        text = self.strings[actual_key].format(
             chat=chat,
+            chat_title=utils.escape_html(chat_title),
             collected=state["collected"],
             deleted=state["deleted"],
             failed=state["failed"],
@@ -785,43 +891,47 @@ class Deleter(loader.Module):
             await asyncio.sleep(WIPE_PROGRESS_EVERY)
 
     async def _wipe_run(self, call, chat_id, protected):
-        state = {"collected": 0, "deleted": 0, "failed": 0, "error": None, "started": time.monotonic()}
+        state = {
+            "phase": "collect",
+            "collected": 0,
+            "deleted": 0,
+            "failed": 0,
+            "error": None,
+            "started": time.monotonic(),
+        }
         spool = None
         ticker = None
-        workers = []
         back = [[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]]
         try:
             peer = await self._client.get_input_entity(chat_id)
-            spool = _IdSpool(int(self.config["WIPE_RAM_LIMIT_MB"]) * 1024 * 1024)
+            _, title, cid, ctype = await self._get_chat_info(chat_id)
+            state["chat_title"] = title
+
+            uid = getattr(self, "_tg_id", None) or (self._owner.id if getattr(self, "_owner", None) else "common")
+            user_dir = os.path.join(tempfile.gettempdir(), "Deleter", str(uid))
+            os.makedirs(user_dir, exist_ok=True)
+            spool = _IdSpool(int(self.config["WIPE_RAM_LIMIT_MB"]) * 1024 * 1024, base_dir=user_dir)
             ticker = asyncio.ensure_future(self._wipe_progress(call, chat_id, spool, state))
-            workers = [
-                asyncio.ensure_future(self._wipe_collect(peer, spool, protected, state)),
-                asyncio.ensure_future(self._wipe_delete(peer, spool, state)),
-            ]
-            await asyncio.gather(*workers)
+
+            await self._wipe_collect(peer, spool, protected, state)
+
+            state["phase"] = "delete"
+            await self._wipe_delete(peer, spool, state)
+
             ticker.cancel()
-            try:
-                chat_name = (await self._client.get_entity(chat_id))
-                chat_name = getattr(chat_name, "title", None) or getattr(chat_name, "first_name", None) or str(chat_id)
-            except Exception:
-                chat_name = str(chat_id)
-            text = self._wipe_text("wipe_done", state, spool, chat=utils.escape_html(chat_name))
+            text = self._wipe_text("wipe_done", state, spool, chat=utils.escape_html(title))
             try:
                 await call.edit(text, reply_markup=back)
             except Exception:
                 pass
             await self._send_log(text)
         except asyncio.CancelledError:
-            for w in workers:
-                w.cancel()
             try:
                 await call.edit(self._wipe_text("wipe_stopped", state, spool), reply_markup=back)
             except Exception:
                 pass
         except Exception as e:
             logger.error("[Deleter] wipe error: %s", e)
-            for w in workers:
-                w.cancel()
             try:
                 await call.edit(self.strings["error"].format(error=utils.escape_html(str(e))), reply_markup=back)
             except Exception:
