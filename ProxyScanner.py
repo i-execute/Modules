@@ -2,23 +2,60 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 0, 1)
+__version__ = (2, 0, 0)
 # meta developer: Execute_forge.t.me
 
-import logging
-import json
 import asyncio
-import aiohttp
-import tempfile
+import contextlib
+import json
+import logging
 import os
+import random
+import re
 import struct
+import tempfile
+import time
 from typing import Dict, List, Optional, Tuple
 
+import aiohttp
 from telethon.tl.types import Message
+
 from .. import loader, utils
 from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
+
+PROXY_SOURCES = [
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+    "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",
+    "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
+    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt",
+    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/https.txt",
+    "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt",
+    "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-https.txt",
+    "https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt",
+    "https://raw.githubusercontent.com/mmpx12/proxy-list/master/https.txt",
+    "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
+    "https://raw.githubusercontent.com/UserR3X/proxy-list/main/online/http.txt",
+    "https://raw.githubusercontent.com/UserR3X/proxy-list/main/online/https.txt",
+    "https://raw.githubusercontent.com/proxy4parsing/proxy-list/main/http.txt",
+    "https://raw.githubusercontent.com/ALIILAPRO/Proxy/main/http.txt",
+    "https://raw.githubusercontent.com/aslisk/proxyhttps/main/https.txt",
+    "https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/http/http.txt",
+    "https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/https/https.txt",
+    "https://raw.githubusercontent.com/prxchk/proxy-list/main/http.txt",
+    "https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/master/http.txt",
+    "https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/master/https.txt",
+    "https://api.openproxylist.xyz/http.txt",
+    "https://api.proxyscrape.com/?request=displayproxies&proxytype=http",
+    "https://proxyspace.pro/http.txt",
+    "https://proxyspace.pro/https.txt",
+    "https://www.proxy-list.download/api/v1/get?type=http",
+    "https://www.proxy-list.download/api/v1/get?type=https",
+]
+
+PAGE_SIZE = 5
 
 
 def _escape(text):
@@ -27,11 +64,11 @@ def _escape(text):
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-async def _check_tcp_open(host: str, port: int, timeout: float = 5.0) -> bool:
+async def _check_tcp_open(host: str, port: int, timeout: float = 3.0) -> bool:
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port),
-            timeout=timeout
+            timeout=timeout,
         )
         writer.close()
         await writer.wait_closed()
@@ -40,29 +77,25 @@ async def _check_tcp_open(host: str, port: int, timeout: float = 5.0) -> bool:
         return False
 
 
-async def _check_socks5(host: str, port: int, username: Optional[str] = None, password: Optional[str] = None, timeout: float = 10.0) -> Tuple[bool, bool]:
+async def _check_socks5(host: str, port: int, username: Optional[str] = None, password: Optional[str] = None, timeout: float = 6.0) -> Tuple[bool, bool]:
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port),
-            timeout=timeout
+            timeout=timeout,
         )
-
         if username and password:
-            writer.write(b'\x05\x01\x02')
+            writer.write(b"\x05\x01\x02")
         else:
-            writer.write(b'\x05\x01\x00')
-        
+            writer.write(b"\x05\x01\x00")
         await writer.drain()
 
         response = await asyncio.wait_for(reader.read(2), timeout=timeout)
-        
         if len(response) != 2 or response[0] != 0x05:
             writer.close()
             await writer.wait_closed()
             return False, False
 
         auth_method = response[1]
-
         if auth_method == 0x00:
             pass
         elif auth_method == 0x02:
@@ -70,13 +103,11 @@ async def _check_socks5(host: str, port: int, username: Optional[str] = None, pa
                 writer.close()
                 await writer.wait_closed()
                 return True, True
-
-            auth_data = struct.pack('B', 1)
-            auth_data += struct.pack('B', len(username)) + username.encode()
-            auth_data += struct.pack('B', len(password)) + password.encode()
+            auth_data = struct.pack("B", 1)
+            auth_data += struct.pack("B", len(username)) + username.encode()
+            auth_data += struct.pack("B", len(password)) + password.encode()
             writer.write(auth_data)
             await writer.drain()
-
             auth_response = await asyncio.wait_for(reader.read(2), timeout=timeout)
             if len(auth_response) != 2 or auth_response[1] != 0x00:
                 writer.close()
@@ -87,294 +118,185 @@ async def _check_socks5(host: str, port: int, username: Optional[str] = None, pa
             await writer.wait_closed()
             return False, False
 
-        connect_request = b'\x05\x01\x00\x01'
-        connect_request += b'\x08\x08\x08\x08'
-        connect_request += struct.pack('>H', 80)
-        
+        connect_request = b"\x05\x01\x00\x01\x08\x08\x08\x08" + struct.pack(">H", 80)
         writer.write(connect_request)
         await writer.drain()
-
         connect_response = await asyncio.wait_for(reader.read(10), timeout=timeout)
-        
         writer.close()
         await writer.wait_closed()
-
         if len(connect_response) >= 2 and connect_response[1] == 0x00:
             return True, False
-        
         return False, False
-
-    except Exception as e:
-        logger.debug("_check_socks5 error: %s", e)
+    except Exception:
         return False, False
 
 
-async def _check_http_proxy(host: str, port: int, username: Optional[str] = None, password: Optional[str] = None, timeout: float = 10.0) -> Tuple[bool, bool]:
+async def _check_http_proxy(host: str, port: int, username: Optional[str] = None, password: Optional[str] = None, timeout: float = 6.0) -> Tuple[bool, bool]:
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port),
-            timeout=timeout
+            timeout=timeout,
         )
-
-        request = b"CONNECT example.com:80 HTTP/1.1\r\n"
-        request += b"Host: example.com:80\r\n"
-        
+        request = b"CONNECT example.com:80 HTTP/1.1\r\nHost: example.com:80\r\n"
         if username and password:
             import base64
             auth = base64.b64encode(f"{username}:{password}".encode()).decode()
             request += f"Proxy-Authorization: Basic {auth}\r\n".encode()
-        
         request += b"\r\n"
-
         writer.write(request)
         await writer.drain()
-
         response = await asyncio.wait_for(reader.read(1024), timeout=timeout)
-        
         writer.close()
         await writer.wait_closed()
-
-        response_str = response.decode('utf-8', errors='ignore')
-
-        if "200" in response_str and "Connection" in response_str:
+        resp_text = response.decode("latin-1", errors="ignore")
+        if " 200 " in resp_text:
             return True, False
-        elif "407" in response_str:
+        if " 407 " in resp_text:
             return True, True
-        
         return False, False
-
-    except Exception as e:
-        logger.debug("_check_http_proxy error: %s", e)
+    except Exception:
         return False, False
 
 
-async def _detect_proxy_type(host: str, port: int, username: Optional[str] = None, password: Optional[str] = None, timeout: float = 10.0) -> Dict:
+async def _detect_proxy_type(host: str, port: int, username: Optional[str] = None, password: Optional[str] = None, timeout: float = 6.0) -> Dict:
     tcp_open = await _check_tcp_open(host, port, timeout=3.0)
-    
     if not tcp_open:
         return {
             "type": "unknown",
             "working": False,
             "auth_required": False,
-            "reason": "Port closed or unreachable"
+            "reason": "Port closed or unreachable",
         }
-
     socks5_ok, socks5_auth = await _check_socks5(host, port, username, password, timeout)
     http_ok, http_auth = await _check_http_proxy(host, port, username, password, timeout)
-
-    if socks5_ok and http_ok:
+    if socks5_ok:
         return {
-            "type": "multi-protocol",
-            "working": True,
-            "auth_required": socks5_auth or http_auth,
-            "reason": "Both SOCKS5 and HTTP handshake successful"
-        }
-    elif socks5_ok:
-        return {
-            "type": "socks5",
+            "type": "SOCKS5",
             "working": True,
             "auth_required": socks5_auth,
-            "reason": "SOCKS5 handshake successful"
+            "reason": "SOCKS5 connection successful",
         }
-    elif http_ok:
+    if http_ok:
         return {
-            "type": "http",
+            "type": "HTTP",
             "working": True,
             "auth_required": http_auth,
-            "reason": "HTTP CONNECT successful"
+            "reason": "HTTP CONNECT successful",
         }
-    else:
-        return {
-            "type": "unknown",
-            "working": False,
-            "auth_required": False,
-            "reason": "No valid proxy protocol detected"
-        }
+    return {
+        "type": "unknown",
+        "working": False,
+        "auth_required": False,
+        "reason": "Neither SOCKS5 nor HTTP CONNECT succeeded",
+    }
 
 
-async def _test_proxy(proxy_type: str, host: str, port: int, username: str = None, password: str = None, timeout: int = 10) -> bool:
-    if not AIOHTTP_OK:
-        return False
-    
+async def _test_proxy(proxy_type: str, host: str, port: int, username: str = None, password: str = None, timeout: int = 6) -> bool:
     try:
-        if proxy_type == "http":
-            proxy_url = f"http://{host}:{port}"
-            if username and password:
-                proxy_url = f"http://{username}:{password}@{host}:{port}"
-        elif proxy_type == "socks5":
-            proxy_url = f"socks5://{host}:{port}"
-            if username and password:
-                proxy_url = f"socks5://{username}:{password}@{host}:{port}"
+        t0 = time.monotonic()
+        if proxy_type == "SOCKS5":
+            ok, _ = await _check_socks5(host, port, username, password, timeout)
+            return ok
+        elif proxy_type in ("HTTP", "HTTPS"):
+            ok, _ = await _check_http_proxy(host, port, username, password, timeout)
+            return ok
         else:
-            return False
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://api.ipify.org?format=json",
-                proxy=proxy_url,
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as resp:
-                if resp.status == 200:
-                    return True
-                return False
-    except Exception as e:
-        logger.debug("_test_proxy error: %s", e)
+            return await _check_tcp_open(host, port, timeout=3.0)
+    except Exception:
         return False
 
 
 @loader.tds
 class ProxyScanner(loader.Module):
-    """Proxy manager and tester with auto-detection"""
+    """Proxy manager and tester with auto-detection and public fetch"""
 
     strings = {
         "name": "ProxyScanner",
-
         "main_menu": (
             "<b>Proxy Manager</b>\n"
             "<blockquote>Total proxies: {total}</blockquote>"
         ),
-
-        "add_type_menu": (
-            "<b>Add Proxy</b>\n"
-            "<blockquote>Select proxy type:</blockquote>"
+        "btn_manage": "Proxy List",
+        "btn_fetch": "Fetch Public Proxies",
+        "btn_add_manual": "Add Manually",
+        "btn_test_all": "Test All",
+        "btn_export": "Export JSON",
+        "btn_close": "Close",
+        "btn_back": "Back",
+        "btn_delete": "Delete",
+        "btn_test": "Test",
+        "fetching_sources": (
+            "<b>Fetching public proxy lists...</b>\n"
+            "<blockquote>Querying {sources} sources</blockquote>"
         ),
-
-        "add_ip_port": (
-            "<b>Add Proxy: IP + PORT</b>\n"
-            "<blockquote>Enter IP address:</blockquote>"
+        "validating_proxies": (
+            "<b>Validating proxies...</b>\n"
+            "<blockquote>Parsed: {parsed}\n"
+            "Testing live connections...</blockquote>"
         ),
-
-        "add_port": (
-            "<b>Add Proxy: IP + PORT</b>\n"
-            "<blockquote>IP: {ip}\nEnter port:</blockquote>"
+        "fetch_done": (
+            "<b>Fetch Complete</b>\n"
+            "<blockquote>Sources: {sources}\n"
+            "Parsed unique: {parsed}\n"
+            "Added working: {added}\n"
+            "Total in pool: {total}</blockquote>"
         ),
-
-        "add_ip_port_login": (
-            "<b>Add Proxy: IP + PORT + LOGIN</b>\n"
-            "<blockquote>Enter IP address:</blockquote>"
-        ),
-
-        "add_port_login": (
-            "<b>Add Proxy: IP + PORT + LOGIN</b>\n"
-            "<blockquote>IP: {ip}\nEnter port:</blockquote>"
-        ),
-
-        "add_username": (
-            "<b>Add Proxy: IP + PORT + LOGIN</b>\n"
-            "<blockquote>IP: {ip}\nPort: {port}\nEnter username:</blockquote>"
-        ),
-
-        "add_password": (
-            "<b>Add Proxy: IP + PORT + LOGIN</b>\n"
-            "<blockquote>IP: {ip}\nPort: {port}\nUsername: {username}\nEnter password:</blockquote>"
-        ),
-
-        "detecting": "<b>Detecting proxy type...</b>",
-
-        "detection_result": (
-            "<b>Detection Result</b>\n"
-            "<blockquote>"
-            "IP: {ip}\n"
-            "Port: {port}\n"
-            "Type: {type}\n"
-            "Auth required: {auth}\n"
-            "Reason: {reason}"
-            "</blockquote>"
-        ),
-
-        "confirm_menu": (
-            "<b>Confirm Proxy</b>\n"
-            "<blockquote>"
-            "Type: {type}\n"
-            "IP: {ip}\n"
-            "Port: {port}\n"
-            "Username: {username}\n"
-            "Password: {password}\n\n"
-            "Correct?"
-            "</blockquote>"
-        ),
-
-        "testing": "<b>Testing proxy...</b>",
-
-        "test_success": (
-            "<b>Proxy Test: Success</b>\n"
-            "<blockquote>"
-            "Type: {type}\n"
-            "IP: {ip}\n"
-            "Port: {port}\n"
-            "Username: {username}\n"
-            "Password: {password}\n\n"
-            "Proxy is working"
-            "</blockquote>"
-        ),
-
-        "test_failed": (
-            "<b>Proxy Test: Failed</b>\n"
-            "<blockquote>"
-            "Type: {type}\n"
-            "IP: {ip}\n"
-            "Port: {port}\n"
-            "Username: {username}\n"
-            "Password: {password}\n\n"
-            "Proxy is not working"
-            "</blockquote>"
-        ),
-
-        "proxy_added": (
-            "<b>Proxy Added</b>\n"
-            "<blockquote>{type}://{ip}:{port}</blockquote>"
-        ),
-
-        "manage_menu": (
-            "<b>Manage Proxies</b>\n"
-            "<blockquote>Total: {total}</blockquote>"
-        ),
-
-        "testing_all": "<b>Testing all proxies...</b>",
-
-        "test_results": (
-            "<b>Test Results</b>\n"
-            "<blockquote>"
-            "Total: {total}\n"
-            "Working: {working}\n"
-            "Failed: {failed}"
-            "</blockquote>"
-        ),
-
-        "export_done": (
-            "<b>Export Complete</b>\n"
-            "<blockquote>proxies.json sent to chat</blockquote>"
-        ),
-
         "no_proxies": (
             "<b>No Proxies</b>\n"
-            "<blockquote>Add proxies first</blockquote>"
+            "<blockquote>Add proxies or fetch public lists first</blockquote>"
         ),
-
-        "btn_ip_port": "IP + PORT",
-        "btn_ip_port_login": "IP + PORT + LOGIN",
-        "btn_manage": "Manage",
-        "btn_back": "Back",
-        "btn_test": "Test",
-        "btn_success": "Success",
-        "btn_test_all": "Test All",
-        "btn_export": "Export",
-        "btn_auto": "Auto-detect",
-
-        "input_ip": "Enter IP:",
+        "proxies_list": (
+            "<b>Proxy Pool</b>\n"
+            "<blockquote>Page {page}/{total_pages} (Total: {total})</blockquote>"
+        ),
+        "proxy_view": (
+            "<b>Proxy Details</b>\n"
+            "<blockquote>Type: <b>{type}</b>\n"
+            "Host: <code>{ip}</code>\n"
+            "Port: <code>{port}</code>\n"
+            "Auth: <b>{auth}</b>\n"
+            "Status: <b>{status}</b></blockquote>"
+        ),
+        "test_results": (
+            "<b>Test Results</b>\n"
+            "<blockquote>Total: {total}\n"
+            "Working: {working}\n"
+            "Failed: {failed}</blockquote>"
+        ),
+        "export_done": (
+            "<b>Export Complete</b>\n"
+            "<blockquote>File <code>proxies.json</code> sent to chat</blockquote>"
+        ),
+        "add_type_menu": (
+            "<b>Add Proxy</b>\n"
+            "<blockquote>Select format:</blockquote>"
+        ),
+        "btn_ip_port": "IP + Port",
+        "btn_ip_port_login": "IP + Port + Auth",
+        "input_ip": "Enter IP address:",
         "input_port": "Enter port:",
         "input_username": "Enter username:",
         "input_password": "Enter password:",
-
-        "err_invalid_port": (
-            "<b>Error</b>\n"
-            "<blockquote>Invalid port number</blockquote>"
+        "detecting": "<b>Detecting proxy type...</b>",
+        "detection_result": (
+            "<b>Detection Result</b>\n"
+            "<blockquote>IP: <code>{ip}</code>\n"
+            "Port: <code>{port}</code>\n"
+            "Type: <b>{type}</b>\n"
+            "Auth required: <b>{auth}</b>\n"
+            "Reason: {reason}</blockquote>"
         ),
-
-        "err_detection_failed": (
-            "<b>Detection Failed</b>\n"
-            "<blockquote>Could not determine proxy type</blockquote>"
+        "btn_save": "Save Proxy",
+        "proxy_added": (
+            "<b>Proxy Saved</b>\n"
+            "<blockquote>Type: {type}\n"
+            "Host: <code>{ip}:{port}</code></blockquote>"
         ),
+        "proxy_deleted": (
+            "<b>Proxy Deleted</b>\n"
+            "<blockquote>Removed <code>{ip}:{port}</code></blockquote>"
+        ),
+        "err_invalid_port": "<b>Error:</b>\n<blockquote>Invalid port number</blockquote>",
     }
 
     strings_ru = {
@@ -382,430 +304,339 @@ class ProxyScanner(loader.Module):
             "<b>Менеджер прокси</b>\n"
             "<blockquote>Всего прокси: {total}</blockquote>"
         ),
-
-        "add_type_menu": (
-            "<b>Добавить прокси</b>\n"
-            "<blockquote>Выберите тип прокси:</blockquote>"
+        "btn_manage": "Список прокси",
+        "btn_fetch": "Спарсить публичные прокси",
+        "btn_add_manual": "Добавить вручную",
+        "btn_test_all": "Проверить все",
+        "btn_export": "Экспорт JSON",
+        "btn_close": "Закрыть",
+        "btn_back": "Назад",
+        "btn_delete": "Удалить",
+        "btn_test": "Проверить",
+        "fetching_sources": (
+            "<b>Загрузка списков прокси...</b>\n"
+            "<blockquote>Опрос {sources} источников</blockquote>"
         ),
-
-        "add_ip_port": (
-            "<b>Добавить прокси: IP + ПОРТ</b>\n"
-            "<blockquote>Введите IP адрес:</blockquote>"
+        "validating_proxies": (
+            "<b>Проверка прокси...</b>\n"
+            "<blockquote>Спарсено: {parsed}\n"
+            "Тестирование подключений...</blockquote>"
         ),
-
-        "add_port": (
-            "<b>Добавить прокси: IP + ПОРТ</b>\n"
-            "<blockquote>IP: {ip}\nВведите порт:</blockquote>"
+        "fetch_done": (
+            "<b>Парсинг завершен</b>\n"
+            "<blockquote>Источников: {sources}\n"
+            "Уникальных: {parsed}\n"
+            "Добавлено рабочих: {added}\n"
+            "Всего в базе: {total}</blockquote>"
         ),
-
-        "add_ip_port_login": (
-            "<b>Добавить прокси: IP + ПОРТ + ЛОГИН</b>\n"
-            "<blockquote>Введите IP адрес:</blockquote>"
-        ),
-
-        "add_port_login": (
-            "<b>Добавить прокси: IP + ПОРТ + ЛОГИН</b>\n"
-            "<blockquote>IP: {ip}\nВведите порт:</blockquote>"
-        ),
-
-        "add_username": (
-            "<b>Добавить прокси: IP + ПОРТ + ЛОГИН</b>\n"
-            "<blockquote>IP: {ip}\nПорт: {port}\nВведите логин:</blockquote>"
-        ),
-
-        "add_password": (
-            "<b>Добавить прокси: IP + ПОРТ + ЛОГИН</b>\n"
-            "<blockquote>IP: {ip}\nПорт: {port}\nЛогин: {username}\nВведите пароль:</blockquote>"
-        ),
-
-        "detecting": "<b>Определение типа прокси...</b>",
-
-        "detection_result": (
-            "<b>Результат определения</b>\n"
-            "<blockquote>"
-            "IP: {ip}\n"
-            "Порт: {port}\n"
-            "Тип: {type}\n"
-            "Требуется авторизация: {auth}\n"
-            "Причина: {reason}"
-            "</blockquote>"
-        ),
-
-        "confirm_menu": (
-            "<b>Подтверждение прокси</b>\n"
-            "<blockquote>"
-            "Тип: {type}\n"
-            "IP: {ip}\n"
-            "Порт: {port}\n"
-            "Логин: {username}\n"
-            "Пароль: {password}\n\n"
-            "Правильно?"
-            "</blockquote>"
-        ),
-
-        "testing": "<b>Тестирование прокси...</b>",
-
-        "test_success": (
-            "<b>Тест прокси: Успешно</b>\n"
-            "<blockquote>"
-            "Тип: {type}\n"
-            "IP: {ip}\n"
-            "Порт: {port}\n"
-            "Логин: {username}\n"
-            "Пароль: {password}\n\n"
-            "Прокси работает"
-            "</blockquote>"
-        ),
-
-        "test_failed": (
-            "<b>Тест прокси: Ошибка</b>\n"
-            "<blockquote>"
-            "Тип: {type}\n"
-            "IP: {ip}\n"
-            "Порт: {port}\n"
-            "Логин: {username}\n"
-            "Пароль: {password}\n\n"
-            "Прокси не работает"
-            "</blockquote>"
-        ),
-
-        "proxy_added": (
-            "<b>Прокси добавлен</b>\n"
-            "<blockquote>{type}://{ip}:{port}</blockquote>"
-        ),
-
-        "manage_menu": (
-            "<b>Управление прокси</b>\n"
-            "<blockquote>Всего: {total}</blockquote>"
-        ),
-
-        "testing_all": "<b>Тестирование всех прокси...</b>",
-
-        "test_results": (
-            "<b>Результаты теста</b>\n"
-            "<blockquote>"
-            "Всего: {total}\n"
-            "Работает: {working}\n"
-            "Не работает: {failed}"
-            "</blockquote>"
-        ),
-
-        "export_done": (
-            "<b>Экспорт завершён</b>\n"
-            "<blockquote>proxies.json отправлен в чат</blockquote>"
-        ),
-
         "no_proxies": (
             "<b>Нет прокси</b>\n"
-            "<blockquote>Сначала добавьте прокси</blockquote>"
+            "<blockquote>Добавьте прокси вручную или спарсите публичные списки</blockquote>"
         ),
-
-        "btn_ip_port": "IP + ПОРТ",
-        "btn_ip_port_login": "IP + ПОРТ + ЛОГИН",
-        "btn_manage": "Управление",
-        "btn_back": "Назад",
-        "btn_test": "Тест",
-        "btn_success": "Готово",
-        "btn_test_all": "Тест всех",
-        "btn_export": "Экспорт",
-        "btn_auto": "Авто-определение",
-
-        "input_ip": "Введите IP:",
+        "proxies_list": (
+            "<b>Список прокси</b>\n"
+            "<blockquote>Страница {page}/{total_pages} (Всего: {total})</blockquote>"
+        ),
+        "proxy_view": (
+            "<b>Информация о прокси</b>\n"
+            "<blockquote>Тип: <b>{type}</b>\n"
+            "Хост: <code>{ip}</code>\n"
+            "Порт: <code>{port}</code>\n"
+            "Авторизация: <b>{auth}</b>\n"
+            "Статус: <b>{status}</b></blockquote>"
+        ),
+        "test_results": (
+            "<b>Результаты проверки</b>\n"
+            "<blockquote>Всего: {total}\n"
+            "Работают: {working}\n"
+            "Недоступны: {failed}</blockquote>"
+        ),
+        "export_done": (
+            "<b>Экспорт завершен</b>\n"
+            "<blockquote>Файл <code>proxies.json</code> отправлен в чат</blockquote>"
+        ),
+        "add_type_menu": (
+            "<b>Добавить прокси</b>\n"
+            "<blockquote>Выберите формат:</blockquote>"
+        ),
+        "btn_ip_port": "IP + Порт",
+        "btn_ip_port_login": "IP + Порт + Авторизация",
+        "input_ip": "Введите IP адрес:",
         "input_port": "Введите порт:",
         "input_username": "Введите логин:",
         "input_password": "Введите пароль:",
-
-        "err_invalid_port": (
-            "<b>Ошибка</b>\n"
-            "<blockquote>Неверный номер порта</blockquote>"
+        "detecting": "<b>Определение типа прокси...</b>",
+        "detection_result": (
+            "<b>Результат проверки</b>\n"
+            "<blockquote>IP: <code>{ip}</code>\n"
+            "Порт: <code>{port}</code>\n"
+            "Тип: <b>{type}</b>\n"
+            "Авторизация: <b>{auth}</b>\n"
+            "Причина: {reason}</blockquote>"
         ),
-
-        "err_detection_failed": (
-            "<b>Определение не удалось</b>\n"
-            "<blockquote>Не удалось определить тип прокси</blockquote>"
+        "btn_save": "Сохранить",
+        "proxy_added": (
+            "<b>Прокси добавлен</b>\n"
+            "<blockquote>Тип: {type}\n"
+            "Хост: <code>{ip}:{port}</code></blockquote>"
         ),
+        "proxy_deleted": (
+            "<b>Прокси удален</b>\n"
+            "<blockquote>Удален <code>{ip}:{port}</code></blockquote>"
+        ),
+        "err_invalid_port": "<b>Ошибка:</b>\n<blockquote>Некорректный номер порта</blockquote>",
     }
 
     def __init__(self):
-        self._proxies: List[Dict] = []
+        self._proxies = []
+        self._temp_data = {}
 
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
+        self._owner = await client.get_me()
+        self._tg_id = self._owner.id if self._owner else getattr(client, "tg_id", None)
         self._proxies = self._db.get("ProxyScanner", "proxies", [])
 
     def _save_proxies(self):
         self._db.set("ProxyScanner", "proxies", self._proxies)
 
+    def _get_tmp_dir(self):
+        uid = getattr(self, "_tg_id", None) or (self._owner.id if getattr(self, "_owner", None) else "common")
+        path = os.path.join(tempfile.gettempdir(), "ProxyScanner", str(uid))
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def _fmt_main(self):
+        return self.strings["main_menu"].format(total=len(self._proxies))
+
+    def _markup_main(self):
+        return [
+            [
+                {"text": self.strings["btn_manage"], "callback": self._cb_manage_list, "args": (0,), "style": "primary"},
+                {"text": self.strings["btn_fetch"], "callback": self._cb_fetch_public, "style": "success"},
+            ],
+            [
+                {"text": self.strings["btn_add_manual"], "callback": self._cb_add_type_menu, "style": "primary"},
+                {"text": self.strings["btn_test_all"], "callback": self._cb_test_all, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_export"], "callback": self._cb_export, "style": "primary"},
+                {"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"},
+            ],
+        ]
+
+    async def _cb_close(self, call: InlineCall):
+        await call.delete()
+
     async def _cb_main_menu(self, call: InlineCall):
-        text = self.strings["main_menu"].format(total=len(self._proxies))
+        await call.edit(self._fmt_main(), reply_markup=self._markup_main())
 
-        markup = [
-            [{"text": self.strings["btn_manage"], "callback": self._cb_manage_menu, "style": "primary"}],
-            [{"text": self.strings["btn_ip_port"], "callback": self._cb_add_ip_simple, "style": "primary"}],
-            [{"text": self.strings["btn_ip_port_login"], "callback": self._cb_add_ip_auth, "style": "primary"}],
-        ]
+    async def _cb_fetch_public(self, call: InlineCall):
+        await call.edit(self.strings["fetching_sources"].format(sources=len(PROXY_SOURCES)), reply_markup=[])
 
-        await call.edit(text, reply_markup=markup)
+        candidates = set()
+        timeout = aiohttp.ClientTimeout(total=8)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for url in PROXY_SOURCES:
+                try:
+                    async with session.get(url) as resp:
+                        if resp.status == 200:
+                            text = await resp.text()
+                            for line in text.splitlines():
+                                line = line.strip()
+                                m = re.match(r"^(\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})$", line)
+                                if m:
+                                    candidates.add((m.group(1), int(m.group(2))))
+                except Exception:
+                    continue
 
-    async def _cb_add_ip_simple(self, call: InlineCall):
-        text = self.strings["add_ip_port"]
-
-        markup = [[
-            {
-                "text": self.strings["input_ip"],
-                "input": self.strings["input_ip"],
-                "handler": self._cb_add_port_simple,
-                "style": "primary",
-            }
-        ]]
-
-        await call.edit(text, reply_markup=markup)
-
-    async def _cb_add_port_simple(self, call: InlineCall, ip: str):
-        text = self.strings["add_port"].format(ip=_escape(ip))
-
-        markup = [[
-            {
-                "text": self.strings["input_port"],
-                "input": self.strings["input_port"],
-                "handler": self._cb_detect_type,
-                "args": (ip.strip(), None, None),
-                "style": "primary",
-            }
-        ]]
-
-        await call.edit(text, reply_markup=markup)
-
-    async def _cb_add_ip_auth(self, call: InlineCall):
-        text = self.strings["add_ip_port_login"]
-
-        markup = [[
-            {
-                "text": self.strings["input_ip"],
-                "input": self.strings["input_ip"],
-                "handler": self._cb_add_port_auth,
-                "style": "primary",
-            }
-        ]]
-
-        await call.edit(text, reply_markup=markup)
-
-    async def _cb_add_port_auth(self, call: InlineCall, ip: str):
-        text = self.strings["add_port_login"].format(ip=_escape(ip))
-
-        markup = [[
-            {
-                "text": self.strings["input_port"],
-                "input": self.strings["input_port"],
-                "handler": self._cb_add_username,
-                "args": (ip.strip(),),
-                "style": "primary",
-            }
-        ]]
-
-        await call.edit(text, reply_markup=markup)
-
-    async def _cb_add_username(self, call: InlineCall, port_str: str, ip: str):
-        try:
-            port = int(port_str.strip())
-            if port <= 0 or port > 65535:
-                raise ValueError
-        except ValueError:
-            await call.answer(self.strings["err_invalid_port"], show_alert=True)
+        parsed = len(candidates)
+        if not parsed:
+            await call.edit(
+                self.strings["fetch_done"].format(sources=len(PROXY_SOURCES), parsed=0, added=0, total=len(self._proxies)),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}]],
+            )
             return
 
-        text = self.strings["add_username"].format(ip=_escape(ip), port=port)
+        await call.edit(self.strings["validating_proxies"].format(parsed=parsed), reply_markup=[])
 
-        markup = [[
-            {
-                "text": self.strings["input_username"],
-                "input": self.strings["input_username"],
-                "handler": self._cb_add_password,
-                "args": (ip, port),
-                "style": "primary",
-            }
-        ]]
+        sample_size = min(parsed, 120)
+        chosen = random.sample(list(candidates), sample_size)
+        sem = asyncio.Semaphore(25)
 
-        await call.edit(text, reply_markup=markup)
+        async def _test_candidate(host, port):
+            async with sem:
+                res = await _detect_proxy_type(host, port, timeout=4.0)
+                if res.get("working"):
+                    return {
+                        "type": res.get("type", "HTTP"),
+                        "ip": host,
+                        "port": port,
+                        "username": None,
+                        "password": None,
+                        "auth_required": res.get("auth_required", False),
+                        "status": "active",
+                    }
+                return None
 
-    async def _cb_add_password(self, call: InlineCall, username: str, ip: str, port: int):
-        text = self.strings["add_password"].format(
-            ip=_escape(ip),
-            port=port,
-            username=_escape(username),
+        results = await asyncio.gather(*(_test_candidate(h, p) for h, p in chosen))
+        working_proxies = [r for r in results if r is not None]
+
+        existing = {(p["ip"], p["port"]) for p in self._proxies}
+        added = 0
+        for wp in working_proxies:
+            key = (wp["ip"], wp["port"])
+            if key not in existing:
+                self._proxies.append(wp)
+                existing.add(key)
+                added += 1
+
+        if added:
+            self._save_proxies()
+
+        await call.edit(
+            self.strings["fetch_done"].format(
+                sources=len(PROXY_SOURCES),
+                parsed=parsed,
+                added=added,
+                total=len(self._proxies),
+            ),
+            reply_markup=[
+                [{"text": self.strings["btn_manage"], "callback": self._cb_manage_list, "args": (0,), "style": "primary"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
+            ],
         )
 
-        markup = [[
-            {
-                "text": self.strings["input_password"],
-                "input": self.strings["input_password"],
-                "handler": self._cb_detect_type,
-                "args": (ip, port, username.strip()),
-                "style": "primary",
-            }
-        ]]
-
-        await call.edit(text, reply_markup=markup)
-
-    async def _cb_detect_type(self, call: InlineCall, port_or_pass: str, ip: str, port: Optional[int], username: Optional[str]):
-        if port is None:
-            try:
-                port = int(port_or_pass.strip())
-                if port <= 0 or port > 65535:
-                    raise ValueError
-            except ValueError:
-                await call.answer(self.strings["err_invalid_port"], show_alert=True)
-                return
-            password = None
-        else:
-            password = port_or_pass.strip()
-
-        await call.edit(self.strings["detecting"], reply_markup=[])
-
-        result = await _detect_proxy_type(ip, port, username, password)
-
-        if not result["working"]:
-            text = self.strings["detection_result"].format(
-                ip=_escape(ip),
-                port=port,
-                type=_escape(result["type"]),
-                auth="Yes" if result["auth_required"] else "No",
-                reason=_escape(result["reason"]),
+    async def _cb_manage_list(self, call: InlineCall, page: int):
+        total = len(self._proxies)
+        if total == 0:
+            await call.edit(
+                self.strings["no_proxies"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}]],
             )
-
-            markup = [[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
-            await call.edit(text, reply_markup=markup)
             return
 
-        proxy_type = result["type"]
-        if proxy_type == "multi-protocol":
-            proxy_type = "socks5"
+        total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        page = max(0, min(page, total_pages - 1))
+        start = page * PAGE_SIZE
+        chunk = self._proxies[start:start + PAGE_SIZE]
 
-        text = self.strings["confirm_menu"].format(
-            type=proxy_type.upper(),
-            ip=_escape(ip),
-            port=port,
-            username=_escape(username) if username else "N/A",
-            password=_escape(password) if password else "N/A",
+        rows = []
+        for idx, p in enumerate(chunk):
+            real_idx = start + idx
+            proto = p.get("type", "HTTP")
+            host_str = f"{proto}://{p['ip']}:{p['port']}"
+            rows.append([{
+                "text": host_str,
+                "callback": self._cb_view_proxy,
+                "args": (real_idx, page),
+                "style": "primary",
+            }])
+
+        nav = []
+        if page > 0:
+            nav.append({"text": "<", "callback": self._cb_manage_list, "args": (page - 1,), "style": "primary"})
+        if page < total_pages - 1:
+            nav.append({"text": ">", "callback": self._cb_manage_list, "args": (page + 1,), "style": "primary"})
+        if nav:
+            rows.append(nav)
+
+        rows.append([{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}])
+
+        await call.edit(
+            self.strings["proxies_list"].format(page=page + 1, total_pages=total_pages, total=total),
+            reply_markup=rows,
         )
 
+    async def _cb_view_proxy(self, call: InlineCall, idx: int, page: int):
+        if idx >= len(self._proxies):
+            await self._cb_manage_list(call, page)
+            return
+        p = self._proxies[idx]
+        auth_str = "Yes" if p.get("username") or p.get("auth_required") else "None"
+        status_str = p.get("status", "unknown")
+        text = self.strings["proxy_view"].format(
+            type=p.get("type", "HTTP"),
+            ip=_escape(p.get("ip")),
+            port=p.get("port"),
+            auth=auth_str,
+            status=status_str,
+        )
         markup = [
-            [{"text": self.strings["btn_test"], "callback": self._cb_test_proxy, "args": (proxy_type, ip, port, username, password), "style": "success"}],
-            [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}],
+            [
+                {"text": self.strings["btn_test"], "callback": self._cb_test_single, "args": (idx, page), "style": "primary"},
+                {"text": self.strings["btn_delete"], "callback": self._cb_delete_proxy, "args": (idx, page), "style": "danger"},
+            ],
+            [{"text": self.strings["btn_back"], "callback": self._cb_manage_list, "args": (page,), "style": "primary"}],
         ]
-
         await call.edit(text, reply_markup=markup)
 
-    async def _cb_test_proxy(self, call: InlineCall, proxy_type: str, ip: str, port: int, username: Optional[str], password: Optional[str]):
-        await call.edit(self.strings["testing"], reply_markup=[])
-
-        result = await _test_proxy(proxy_type, ip, port, username, password)
-
-        if result:
-            text = self.strings["test_success"].format(
-                type=proxy_type.upper(),
-                ip=_escape(ip),
-                port=port,
-                username=_escape(username) if username else "N/A",
-                password=_escape(password) if password else "N/A",
-            )
-
-            markup = [
-                [{"text": self.strings["btn_success"], "callback": self._cb_save_proxy, "args": (proxy_type, ip, port, username, password), "style": "success"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}],
-            ]
-        else:
-            text = self.strings["test_failed"].format(
-                type=proxy_type.upper(),
-                ip=_escape(ip),
-                port=port,
-                username=_escape(username) if username else "N/A",
-                password=_escape(password) if password else "N/A",
-            )
-
-            markup = [[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "danger"}]]
-
-        await call.edit(text, reply_markup=markup)
-
-    async def _cb_save_proxy(self, call: InlineCall, proxy_type: str, ip: str, port: int, username: Optional[str], password: Optional[str]):
-        proxy = {
-            "type": proxy_type,
-            "ip": ip,
-            "port": port,
-            "username": username,
-            "password": password,
-        }
-
-        self._proxies.append(proxy)
+    async def _cb_test_single(self, call: InlineCall, idx: int, page: int):
+        if idx >= len(self._proxies):
+            await self._cb_manage_list(call, page)
+            return
+        p = self._proxies[idx]
+        ok = await _test_proxy(
+            p.get("type", "HTTP"),
+            p.get("ip"),
+            p.get("port"),
+            p.get("username"),
+            p.get("password"),
+        )
+        p["status"] = "working" if ok else "unreachable"
         self._save_proxies()
+        await self._cb_view_proxy(call, idx, page)
 
-        text = self.strings["proxy_added"].format(type=proxy_type, ip=_escape(ip), port=port)
-
-        markup = [[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}]]
-
-        await call.edit(text, reply_markup=markup)
-
-    async def _cb_manage_menu(self, call: InlineCall):
-        if not self._proxies:
-            text = self.strings["no_proxies"]
-            markup = [[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}]]
-            await call.edit(text, reply_markup=markup)
-            return
-
-        text = self.strings["manage_menu"].format(total=len(self._proxies))
-
-        markup = [
-            [{"text": self.strings["btn_test_all"], "callback": self._cb_test_all, "style": "primary"}],
-            [{"text": self.strings["btn_export"], "callback": self._cb_export, "style": "primary"}],
-            [{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}],
-        ]
-
-        await call.edit(text, reply_markup=markup)
+    async def _cb_delete_proxy(self, call: InlineCall, idx: int, page: int):
+        if idx < len(self._proxies):
+            p = self._proxies.pop(idx)
+            self._save_proxies()
+            await call.edit(
+                self.strings["proxy_deleted"].format(ip=_escape(p.get("ip")), port=p.get("port")),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_manage_list, "args": (page,), "style": "primary"}]],
+            )
+        else:
+            await self._cb_manage_list(call, page)
 
     async def _cb_test_all(self, call: InlineCall):
-        await call.edit(self.strings["testing_all"], reply_markup=[])
+        if not self._proxies:
+            await call.answer(self.strings["no_proxies"], show_alert=True)
+            return
+        await call.edit(self.strings["validating_proxies"].format(parsed=len(self._proxies)), reply_markup=[])
+        sem = asyncio.Semaphore(20)
 
-        tasks = []
-        for proxy in self._proxies:
-            tasks.append(_test_proxy(
-                proxy["type"],
-                proxy["ip"],
-                proxy["port"],
-                proxy.get("username"),
-                proxy.get("password"),
-            ))
+        async def _check_one(p):
+            async with sem:
+                ok = await _test_proxy(
+                    p.get("type", "HTTP"),
+                    p.get("ip"),
+                    p.get("port"),
+                    p.get("username"),
+                    p.get("password"),
+                )
+                p["status"] = "working" if ok else "unreachable"
+                return ok
 
-        results = await asyncio.gather(*tasks)
-
+        results = await asyncio.gather(*(_check_one(p) for p in self._proxies))
+        self._save_proxies()
         working = sum(1 for r in results if r)
         failed = len(results) - working
-
-        text = self.strings["test_results"].format(
-            total=len(self._proxies),
-            working=working,
-            failed=failed,
+        await call.edit(
+            self.strings["test_results"].format(total=len(self._proxies), working=working, failed=failed),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}]],
         )
-
-        markup = [[{"text": self.strings["btn_back"], "callback": self._cb_manage_menu, "style": "primary"}]]
-
-        await call.edit(text, reply_markup=markup)
 
     async def _cb_export(self, call: InlineCall):
         if not self._proxies:
             await call.answer(self.strings["no_proxies"], show_alert=True)
             return
-
+        tmp_dir = self._get_tmp_dir()
         tmp = tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".json",
-            prefix="proxies_",
-            delete=False,
+            mode="w", suffix=".json", prefix="proxies_", dir=tmp_dir, delete=False, encoding="utf-8"
         )
-
-        json.dump(self._proxies, tmp, indent=2)
+        json.dump(self._proxies, tmp, indent=2, ensure_ascii=False)
         tmp.close()
-
         try:
             await self._client.send_file(
                 call.form["chat"],
@@ -814,28 +645,145 @@ class ProxyScanner(loader.Module):
                 file_name="proxies.json",
             )
         except Exception as e:
-            logger.exception("send_file failed: %s", e)
+            logger.error("[ProxyScanner] export failed: %s", e)
         finally:
-            os.unlink(tmp.name)
+            with contextlib.suppress(Exception):
+                os.unlink(tmp.name)
+        await call.edit(
+            self.strings["export_done"],
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}]],
+        )
 
-        text = self.strings["export_done"]
-        markup = [[{"text": self.strings["btn_back"], "callback": self._cb_manage_menu, "style": "primary"}]]
+    async def _cb_add_type_menu(self, call: InlineCall):
+        markup = [
+            [
+                {"text": self.strings["btn_ip_port"], "input": self.strings["input_ip"], "handler": self._ih_add_ip_simple, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_ip_port_login"], "input": self.strings["input_ip"], "handler": self._ih_add_ip_auth, "style": "primary"},
+            ],
+            [
+                {"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"},
+            ],
+        ]
+        await call.edit(self.strings["add_type_menu"], reply_markup=markup)
 
+    async def _ih_add_ip_simple(self, call: InlineCall, ip: str):
+        ip = ip.strip()
+        await call.edit(
+            f"<b>Add Proxy: IP + Port</b>\n<blockquote>IP: <code>{_escape(ip)}</code></blockquote>",
+            reply_markup=[
+                [{"text": self.strings["input_port"], "input": self.strings["input_port"], "handler": self._ih_add_port_simple, "args": (ip,), "style": "primary"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_add_type_menu, "style": "primary"}],
+            ],
+        )
+
+    async def _ih_add_port_simple(self, call: InlineCall, port_str: str, ip: str):
+        try:
+            port = int(port_str.strip())
+            if not (1 <= port <= 65535):
+                raise ValueError
+        except ValueError:
+            await call.edit(
+                self.strings["err_invalid_port"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_add_type_menu, "style": "primary"}]],
+            )
+            return
+        await self._run_detection(call, ip, port, None, None)
+
+    async def _ih_add_ip_auth(self, call: InlineCall, ip: str):
+        ip = ip.strip()
+        await call.edit(
+            f"<b>Add Proxy: Auth</b>\n<blockquote>IP: <code>{_escape(ip)}</code></blockquote>",
+            reply_markup=[
+                [{"text": self.strings["input_port"], "input": self.strings["input_port"], "handler": self._ih_add_port_auth, "args": (ip,), "style": "primary"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_add_type_menu, "style": "primary"}],
+            ],
+        )
+
+    async def _ih_add_port_auth(self, call: InlineCall, port_str: str, ip: str):
+        try:
+            port = int(port_str.strip())
+            if not (1 <= port <= 65535):
+                raise ValueError
+        except ValueError:
+            await call.edit(
+                self.strings["err_invalid_port"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_add_type_menu, "style": "primary"}]],
+            )
+            return
+        await call.edit(
+            f"<blockquote>IP: <code>{_escape(ip)}</code>\nPort: <code>{port}</code></blockquote>",
+            reply_markup=[
+                [{"text": self.strings["input_username"], "input": self.strings["input_username"], "handler": self._ih_add_user_auth, "args": (ip, port), "style": "primary"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_add_type_menu, "style": "primary"}],
+            ],
+        )
+
+    async def _ih_add_user_auth(self, call: InlineCall, username: str, ip: str, port: int):
+        username = username.strip()
+        await call.edit(
+            f"<blockquote>IP: <code>{_escape(ip)}</code>\nPort: <code>{port}</code>\nUser: <code>{_escape(username)}</code></blockquote>",
+            reply_markup=[
+                [{"text": self.strings["input_password"], "input": self.strings["input_password"], "handler": self._ih_add_pass_auth, "args": (ip, port, username), "style": "primary"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_add_type_menu, "style": "primary"}],
+            ],
+        )
+
+    async def _ih_add_pass_auth(self, call: InlineCall, password: str, ip: str, port: int, username: str):
+        password = password.strip()
+        await self._run_detection(call, ip, port, username, password)
+
+    async def _run_detection(self, call: InlineCall, ip: str, port: int, username: Optional[str], password: Optional[str]):
+        await call.edit(self.strings["detecting"], reply_markup=[])
+        res = await _detect_proxy_type(ip, port, username, password, timeout=6.0)
+        proxy_type = res.get("type", "unknown")
+        auth_req = res.get("auth_required", False)
+        reason = res.get("reason", "")
+        text = self.strings["detection_result"].format(
+            ip=_escape(ip),
+            port=port,
+            type=proxy_type,
+            auth="Yes" if auth_req else "No",
+            reason=_escape(reason),
+        )
+        markup = []
+        if res.get("working"):
+            save_key = utils.rand(8)
+            self._temp_data[save_key] = {
+                "type": proxy_type,
+                "ip": ip,
+                "port": port,
+                "username": username,
+                "password": password,
+                "auth_required": auth_req,
+                "status": "working",
+            }
+            markup.append([{"text": self.strings["btn_save"], "callback": self._cb_save_detected, "args": (save_key,), "style": "success"}])
+        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}])
         await call.edit(text, reply_markup=markup)
 
+    async def _cb_save_detected(self, call: InlineCall, save_key: str):
+        data = self._temp_data.pop(save_key, None)
+        if not data:
+            await self._cb_main_menu(call)
+            return
+        self._proxies.append(data)
+        self._save_proxies()
+        await call.edit(
+            self.strings["proxy_added"].format(type=data["type"], ip=_escape(data["ip"]), port=data["port"]),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}]],
+        )
+
     @loader.command(
-        ru_doc="Менеджер прокси с авто-определением",
-        en_doc="Proxy manager with auto-detection",
+        ru_doc="Менеджер и сканер прокси",
+        en_doc="Proxy manager and scanner",
     )
     async def ps(self, message: Message):
-        """Proxy manager with auto-detection"""
+        """Proxy manager and scanner"""
         await self.inline.form(
-            text=self.strings["main_menu"].format(total=len(self._proxies)),
+            text=self._fmt_main(),
             message=message,
-            reply_markup=[
-                [{"text": self.strings["btn_manage"], "callback": self._cb_manage_menu, "style": "primary"}],
-                [{"text": self.strings["btn_ip_port"], "callback": self._cb_add_ip_simple, "style": "primary"}],
-                [{"text": self.strings["btn_ip_port_login"], "callback": self._cb_add_ip_auth, "style": "primary"}],
-            ],
+            reply_markup=self._markup_main(),
             silent=True,
         )
