@@ -406,7 +406,7 @@ class RaidProtection(loader.Module):
         except Exception as e:
             logger.error(f"[RaidProtection] _record_ban failed: {e}")
 
-    def _asset_channel_id(self):
+    def _asset_channel(self):
         cid = self._db.get("feroku.forums", "channel_id", None) or self._db.get(
             "heroku.forums", "channel_id", None
         )
@@ -416,18 +416,20 @@ class RaidProtection(loader.Module):
         text = str(cid)
         if text.startswith("100") and len(text) > 12:
             cid = int(text[3:])
-        return int(f"-100{cid}")
+        return cid
+
+    def _asset_channel_id(self):
+        cid = self._asset_channel()
+        return int(f"-100{cid}") if cid else None
 
     async def _ensure_log_topic(self):
         async with self._flood_lock:
             try:
-                cid = self._asset_channel_id()
+                cid = self._asset_channel()
                 if not cid:
                     self._setup_failed = True
                     return
-                self._asset_channel = abs(cid)
-                if str(self._asset_channel).startswith("100"):
-                    self._asset_channel = int(str(self._asset_channel)[3:])
+                self._asset_channel = cid
                 self._storage_topic = await utils.asset_forum_topic(
                     self._client,
                     self._db,

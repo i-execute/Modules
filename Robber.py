@@ -466,7 +466,7 @@ class Robber(loader.Module):
         text = str(cid)
         if text.startswith("100") and len(text) > 12:
             cid = int(text[3:])
-        return int(f"-100{cid}")
+        return cid
 
     async def _ensure_topic(self, fresh=False):
         if self._topic_id and not fresh:
@@ -496,7 +496,7 @@ class Robber(loader.Module):
                     pass
             return self._topic_id
         except Exception as e:
-            logger.debug(f"[Robber] topic creation failed: {e}")
+            logger.error(f"[Robber] topic creation failed: {e}")
             return None
 
     async def _send_with_preview(self, chat_id, topic_id, text):
@@ -510,7 +510,7 @@ class Robber(loader.Module):
                 msg_text,
                 parse_mode=None,
                 entities=entities,
-                reply_to=topic_id,
+                message_thread_id=topic_id,
             )
             try:
                 peer = await bot.get_input_entity(chat_id)
@@ -533,9 +533,9 @@ class Robber(loader.Module):
                     )
                 )
             except Exception as e:
-                logger.debug(f"[Robber] banner preview attach failed: {e}")
+                logger.error(f"[Robber] banner preview attach failed: {e}")
         except Exception as e:
-            logger.debug(f"[Robber] greeting message send failed: {e}")
+            logger.error(f"[Robber] greeting message send failed: {e}")
 
     async def _notify_ready(self):
         await asyncio.sleep(2)
@@ -545,16 +545,17 @@ class Robber(loader.Module):
         topic_id = await self._ensure_topic()
         if not topic_id:
             return
+        chat_id = int(f"-100{cid}")
         greet_key = f"robber_greeted_{cid}_{topic_id}"
         already = self.get(greet_key, False)
         ver_str = ".".join(map(str, __version__))
         if already:
             text = self.strings["reloaded"].format(ver=ver_str)
-            await self._send_with_preview(cid, topic_id, text)
+            await self._send_with_preview(chat_id, topic_id, text)
         else:
             self.set(greet_key, True)
             text = self.strings["greeting_first"].format(ver=ver_str)
-            await self._send_with_preview(cid, topic_id, text)
+            await self._send_with_preview(chat_id, topic_id, text)
 
     def _ffmpeg_bin(self):
         if self._ffmpeg and os.path.exists(self._ffmpeg):
