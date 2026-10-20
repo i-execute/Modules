@@ -107,11 +107,18 @@ class RaidProtection(loader.Module):
             "Report: {report_status}\n"
             "Message: <code>{text}</code></blockquote>"
         ),
-        "reloaded": "<blockquote><b>RaidProtection reloaded</b></blockquote>\n<blockquote>Spam reports: <b>{spam_reports}</b> | Active guard bots: <b>{guard_bots}</b> | Version: <b>{ver}</b></blockquote>",
+        "reloaded": (
+            "<blockquote><b>RaidProtection reloaded</b></blockquote>\n"
+            "<blockquote>Version: <b>{ver}</b>\n"
+            "Spam reports: <b>{spam_reports}</b>\n"
+            "Active guard bots: <b>{guard_bots}</b></blockquote>"
+        ),
         "greeting_first": (
             "<blockquote><b>RaidProtection installed successfully!</b></blockquote>\n"
-            "<blockquote>Protection for personal messages and groups is active. Spam reports: <b>{spam_reports}</b>.</blockquote>\n"
-            "<blockquote>Active guard bots: <b>{guard_bots}</b> | Version: <b>{ver}</b></blockquote>"
+            "<blockquote>Version: <b>{ver}</b>\n"
+            "Protection for personal messages and groups is active.\n"
+            "Spam reports: <b>{spam_reports}</b>\n"
+            "Active guard bots: <b>{guard_bots}</b></blockquote>"
         ),
         "inline_create_failed": (
             "<blockquote><b>Setup Failed</b></blockquote>\n"
@@ -249,11 +256,18 @@ class RaidProtection(loader.Module):
             "Жалоба: {report_status}\n"
             "Сообщение: <code>{text}</code></blockquote>"
         ),
-        "reloaded": "<blockquote><b>RaidProtection перезагружен</b></blockquote>\n<blockquote>Жалобы на спам: <b>{spam_reports}</b> | Активных guard-ботов: <b>{guard_bots}</b> | Версия: <b>{ver}</b></blockquote>",
+        "reloaded": (
+            "<blockquote><b>RaidProtection перезагружен</b></blockquote>\n"
+            "<blockquote>Версия: <b>{ver}</b>\n"
+            "Жалобы на спам: <b>{spam_reports}</b>\n"
+            "Активных guard-ботов: <b>{guard_bots}</b></blockquote>"
+        ),
         "greeting_first": (
             "<blockquote><b>RaidProtection успешно установлен!</b></blockquote>\n"
-            "<blockquote>Защита личных сообщений и групп активна. Отправка жалоб на спам: <b>{spam_reports}</b>.</blockquote>\n"
-            "<blockquote>Активных guard-ботов: <b>{guard_bots}</b> | Версия: <b>{ver}</b></blockquote>"
+            "<blockquote>Версия: <b>{ver}</b>\n"
+            "Защита личных сообщений и групп активна.\n"
+            "Жалобы на спам: <b>{spam_reports}</b>\n"
+            "Активных guard-ботов: <b>{guard_bots}</b></blockquote>"
         ),
         "inline_create_failed": (
             "<blockquote><b>Ошибка настройки</b></blockquote>\n"

@@ -45,8 +45,8 @@ class ServerBox(loader.Module):
 
     strings = {
         "name": "ServerBox",
-        "reloaded": "<blockquote><b>ServerBox reloaded</b></blockquote>\n<blockquote>CPU: <b>{cpu}%</b> | System RAM: <b>{ram}%</b> | Process RAM: <b>{process_ram} MB</b> | Swap: <b>{swap}%</b></blockquote>",
-        "greeting": "<blockquote><b>ServerBox is ready</b></blockquote>\n<blockquote>Alert thresholds: CPU <b>{cpu}%</b>, system RAM <b>{ram}%</b>, process RAM <b>{process_ram} MB</b>, swap <b>{swap}%</b>.</blockquote>\n<blockquote>Checks run every <b>{interval} seconds</b>; alerts are posted in this topic.</blockquote>",
+        "reloaded": "<blockquote><b>ServerBox reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nCPU threshold: <b>{cpu}%</b>\nSystem RAM threshold: <b>{ram}%</b>\nProcess RAM threshold: <b>{process_ram} MB</b>\nSwap threshold: <b>{swap}%</b></blockquote>",
+        "greeting": "<blockquote><b>ServerBox is ready</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nCPU threshold: <b>{cpu}%</b>\nSystem RAM threshold: <b>{ram}%</b>\nProcess RAM threshold: <b>{process_ram} MB</b>\nSwap threshold: <b>{swap}%</b>\nCheck interval: <b>{interval} seconds</b></blockquote>",
         "cpu_alert": (
             "<pre><code class=\"language-serverbox\">"
             "<b>CPU ALERT</b>\n"
@@ -103,8 +103,8 @@ class ServerBox(loader.Module):
 
     strings_ru = {
         "name": "ServerBox",
-        "reloaded": "<blockquote><b>ServerBox перезагружен</b></blockquote>\n<blockquote>CPU: <b>{cpu}%</b> | ОЗУ системы: <b>{ram}%</b> | ОЗУ процесса: <b>{process_ram} MB</b> | Swap: <b>{swap}%</b></blockquote>",
-        "greeting": "<blockquote><b>ServerBox готов к работе</b></blockquote>\n<blockquote>Пороги оповещений: CPU <b>{cpu}%</b>, ОЗУ системы <b>{ram}%</b>, ОЗУ процесса <b>{process_ram} MB</b>, swap <b>{swap}%</b>.</blockquote>\n<blockquote>Проверка выполняется каждые <b>{interval} секунд</b>; предупреждения будут приходить в этот топик.</blockquote>",
+        "reloaded": "<blockquote><b>ServerBox перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nПорог CPU: <b>{cpu}%</b>\nПорог ОЗУ системы: <b>{ram}%</b>\nПорог ОЗУ процесса: <b>{process_ram} MB</b>\nПорог swap: <b>{swap}%</b></blockquote>",
+        "greeting": "<blockquote><b>ServerBox готов к работе</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nПорог CPU: <b>{cpu}%</b>\nПорог ОЗУ системы: <b>{ram}%</b>\nПорог ОЗУ процесса: <b>{process_ram} MB</b>\nПорог swap: <b>{swap}%</b>\nИнтервал проверки: <b>{interval} секунд</b></blockquote>",
         "cpu_alert": (
             "<pre><code class=\"language-serverbox\">"
             "<b>CPU ALERT</b>\n"
@@ -230,6 +230,7 @@ class ServerBox(loader.Module):
         already_greeted = self.get(greeting_key, False)
 
         values = {
+            "version": ".".join(map(str, __version__)),
             "cpu": self.config["cpu_threshold"],
             "ram": self.config["ram_system_threshold"],
             "process_ram": self.config["ram_process_threshold"],

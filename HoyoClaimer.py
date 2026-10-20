@@ -340,17 +340,17 @@ class HoyoClaimer(loader.Module):
         "topic_desc": "HoyoClaimer daily rewards log.",
         "greeting": (
             "<blockquote><b>HoyoClaimer installed</b></blockquote>\n"
-            "<blockquote>This topic is the log of HoYoLab daily rewards: logins, claimed rewards and errors.</blockquote>\n"
-            "<blockquote><b>Add an account:</b> reply <code>{prefix}hc</code> to a txt/json file or a message with HoYoLab cookies.\n"
-            "<b>Menu:</b> <code>{prefix}hc</code></blockquote>\n"
-            "<blockquote><b>Auto claim:</b> {auto}\n"
-            "<b>Time:</b> <code>{time}</code> ({tz})</blockquote>"
+            "<blockquote>Version: <b>{version}</b>\nThis topic logs HoYoLab daily rewards, claims and errors.\n"
+            "Add an account by replying <code>{prefix}hc</code> to a file or message with cookies.\n"
+            "Menu: <code>{prefix}hc</code>\n"
+            "Auto claim: {auto}\nClaim time: <code>{time}</code> ({tz})</blockquote>"
         ),
         "reloaded": (
             "<blockquote><b>HoyoClaimer reloaded, everything works</b></blockquote>\n"
             "<blockquote>Version: <b>{version}</b>\n"
             "Accounts: <b>{count}</b>\n"
             "Auto claim: <b>{auto}</b>\n"
+            "Claim time: <code>{time}</code> ({tz})\n"
             "Next claim: {next}</blockquote>"
         ),
         "mode_auto": "auto",
@@ -479,17 +479,17 @@ class HoyoClaimer(loader.Module):
         "topic_desc": "Лог ежедневных наград HoyoClaimer.",
         "greeting": (
             "<blockquote><b>HoyoClaimer установлен</b></blockquote>\n"
-            "<blockquote>Этот топик хранит лог ежедневных наград HoYoLab: входы в аккаунты, полученные награды и ошибки.</blockquote>\n"
-            "<blockquote><b>Добавить аккаунт:</b> ответьте <code>{prefix}hc</code> на txt/json файл или сообщение с куки HoYoLab.\n"
-            "<b>Меню:</b> <code>{prefix}hc</code></blockquote>\n"
-            "<blockquote><b>Автосбор:</b> {auto}\n"
-            "<b>Время:</b> <code>{time}</code> ({tz})</blockquote>"
+            "<blockquote>Версия: <b>{version}</b>\nВ этот топик записываются ежедневные награды HoYoLab, сборы и ошибки.\n"
+            "Чтобы добавить аккаунт, ответьте <code>{prefix}hc</code> на файл или сообщение с куки.\n"
+            "Меню: <code>{prefix}hc</code>\n"
+            "Автосбор: {auto}\nВремя сбора: <code>{time}</code> ({tz})</blockquote>"
         ),
         "reloaded": (
-            "<blockquote><b>HoyoClaimer перезагружен, все работает</b></blockquote>\n"
+            "<blockquote><b>HoyoClaimer перезагружен, всё работает</b></blockquote>\n"
             "<blockquote>Версия: <b>{version}</b>\n"
             "Аккаунтов: <b>{count}</b>\n"
             "Автосбор: <b>{auto}</b>\n"
+            "Время сбора: <code>{time}</code> ({tz})\n"
             "Следующий сбор: {next}</blockquote>"
         ),
         "mode_auto": "авто",
@@ -682,13 +682,21 @@ class HoyoClaimer(loader.Module):
         is_greeting = not self.get(key, False)
         if is_greeting:
             self.set(key, True)
-            text = self._s("greeting", auto=auto, time=self.config["CLAIM_TIME"], tz=self._tz_name())
+            text = self._s(
+                "greeting",
+                version=".".join(map(str, __version__)),
+                auto=auto,
+                time=self.config["CLAIM_TIME"],
+                tz=self._tz_name(),
+            )
         else:
             text = self._s(
                 "reloaded",
                 version=".".join(map(str, __version__)),
                 count=len(self._acc),
                 auto=auto,
+                time=self.config["CLAIM_TIME"],
+                tz=self._tz_name(),
                 next=self._next_text(),
             )
         await self._send_with_preview(channel, topic_id, text, is_greeting=is_greeting)

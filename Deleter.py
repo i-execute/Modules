@@ -112,8 +112,8 @@ class Deleter(loader.Module):
 
     strings = {
         "name": "Deleter",
-        "reloaded": "<blockquote><b>Deleter reloaded</b></blockquote>\n<blockquote>Timezone: <b>UTC{timezone:+}</b> | Wipe memory limit: <b>{ram_limit} MB</b></blockquote>",
-        "greeting": "<blockquote><b>Deleter is ready</b></blockquote>\n<blockquote>Timezone: <b>UTC{timezone:+}</b> | Wipe memory limit: <b>{ram_limit} MB</b>.</blockquote>\n<blockquote>Use <code>{prefix}del</code> to manage and schedule message deletion.</blockquote>",
+        "reloaded": "<blockquote><b>Deleter reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nTimezone: <b>UTC{timezone:+}</b>\nWipe memory limit: <b>{ram_limit} MB</b></blockquote>",
+        "greeting": "<blockquote><b>Deleter is ready</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nTimezone: <b>UTC{timezone:+}</b>\nWipe memory limit: <b>{ram_limit} MB</b>\nUse <code>{prefix}del</code> to manage and schedule message deletion.</blockquote>",
         "help": (
             "<b>Deleter - swift message deletion</b>\n"
             "<b>Own messages:</b>\n"
@@ -243,8 +243,8 @@ class Deleter(loader.Module):
     }
 
     strings_ru = {
-        "reloaded": "<blockquote><b>Deleter перезагружен</b></blockquote>\n<blockquote>Часовой пояс: <b>UTC{timezone:+}</b> | Лимит памяти для очистки: <b>{ram_limit} MB</b></blockquote>",
-        "greeting": "<blockquote><b>Deleter готов к работе</b></blockquote>\n<blockquote>Часовой пояс: <b>UTC{timezone:+}</b> | Лимит памяти для очистки: <b>{ram_limit} MB</b>.</blockquote>\n<blockquote>Используйте <code>{prefix}del</code> для управления удалением сообщений.</blockquote>",
+        "reloaded": "<blockquote><b>Deleter перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nЧасовой пояс: <b>UTC{timezone:+}</b>\nЛимит памяти для очистки: <b>{ram_limit} MB</b></blockquote>",
+        "greeting": "<blockquote><b>Deleter готов к работе</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nЧасовой пояс: <b>UTC{timezone:+}</b>\nЛимит памяти для очистки: <b>{ram_limit} MB</b>\nИспользуйте <code>{prefix}del</code> для управления удалением сообщений.</blockquote>",
         "help": (
             "<b>Deleter - быстрое удаление сообщений</b>\n"
             "<b>Свои сообщения:</b>\n"
@@ -442,6 +442,7 @@ class Deleter(loader.Module):
         greeting_key = f"deleter_greeted_{self._asset_channel}_{self._deleter_topic.id}"
         already_greeted = self.get(greeting_key, False)
         values = {
+            "version": ".".join(map(str, __version__)),
             "timezone": int(self.config["TIMEZONE_OFFSET"]),
             "ram_limit": self.config["WIPE_RAM_LIMIT_MB"],
             "prefix": self.get_prefix(),

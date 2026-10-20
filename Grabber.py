@@ -415,8 +415,20 @@ class Grabber(loader.Module):
         "name": "Grabber",
         "enabled": "on",
         "disabled": "off",
-        "reloaded": "<blockquote><b>Grabber reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b> | Workers: <b>{workers}</b> | File limit: <b>{max_file} MB</b> | Delay: <b>{delay}s</b></blockquote>\n<blockquote>Autorunner: <b>{autorunner}</b> | Cookies: <b>{cookies}</b></blockquote>",
-        "greeting": "<blockquote><b>Grabber is ready</b></blockquote>\n<blockquote>Workers: <b>{workers}</b> | File limit: <b>{max_file} MB</b> | Action delay: <b>{delay}s</b></blockquote>\n<blockquote>Autorunner: <b>{autorunner}</b> | Cookies: <b>{cookies}</b> | Active groups/topics: <b>{targets}</b></blockquote>\n<blockquote>Use <code>{prefix}grab</code> to manage downloads.</blockquote>",
+        "reloaded": (
+            "<blockquote><b>Grabber reloaded</b></blockquote>\n"
+            "<blockquote>Version: <b>{version}</b>\n"
+            "Workers: <b>{workers}</b>\nFile limit: <b>{max_file} MB</b>\n"
+            "Delay: <b>{delay}s</b>\nAutorunner: <b>{autorunner}</b>\n"
+            "Cookies: <b>{cookies}</b></blockquote>"
+        ),
+        "greeting": (
+            "<blockquote><b>Grabber is ready</b></blockquote>\n"
+            "<blockquote>Version: <b>{version}</b>\nWorkers: <b>{workers}</b>\nFile limit: <b>{max_file} MB</b>\n"
+            "Action delay: <b>{delay}s</b>\nAutorunner: <b>{autorunner}</b>\n"
+            "Cookies: <b>{cookies}</b>\nActive groups/topics: <b>{targets}</b>\n"
+            "Use <code>{prefix}grab</code> to manage downloads.</blockquote>"
+        ),
         "btn_video": "Video",
         "btn_audio": "Audio (MP3)",
         "btn_cancel": "Cancel",
@@ -602,8 +614,20 @@ class Grabber(loader.Module):
         "name": "Grabber",
         "enabled": "включён",
         "disabled": "выключен",
-        "reloaded": "<blockquote><b>Grabber перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b> | Потоков: <b>{workers}</b> | Лимит файла: <b>{max_file} MB</b> | Задержка: <b>{delay}с</b></blockquote>\n<blockquote>Автозапуск: <b>{autorunner}</b> | Куки: <b>{cookies}</b></blockquote>",
-        "greeting": "<blockquote><b>Grabber готов к работе</b></blockquote>\n<blockquote>Потоков: <b>{workers}</b> | Лимит файла: <b>{max_file} MB</b> | Задержка: <b>{delay}с</b></blockquote>\n<blockquote>Автозапуск: <b>{autorunner}</b> | Куки: <b>{cookies}</b> | Активных групп и топиков: <b>{targets}</b></blockquote>\n<blockquote>Используйте <code>{prefix}grab</code>, чтобы управлять загрузками.</blockquote>",
+        "reloaded": (
+            "<blockquote><b>Grabber перезагружен</b></blockquote>\n"
+            "<blockquote>Версия: <b>{version}</b>\n"
+            "Потоков: <b>{workers}</b>\nЛимит файла: <b>{max_file} MB</b>\n"
+            "Задержка: <b>{delay}с</b>\nАвтозапуск: <b>{autorunner}</b>\n"
+            "Куки: <b>{cookies}</b></blockquote>"
+        ),
+        "greeting": (
+            "<blockquote><b>Grabber готов к работе</b></blockquote>\n"
+            "<blockquote>Версия: <b>{version}</b>\nПотоков: <b>{workers}</b>\nЛимит файла: <b>{max_file} MB</b>\n"
+            "Задержка: <b>{delay}с</b>\nАвтозапуск: <b>{autorunner}</b>\n"
+            "Куки: <b>{cookies}</b>\nАктивных групп и топиков: <b>{targets}</b>\n"
+            "Используйте <code>{prefix}grab</code> для управления загрузками.</blockquote>"
+        ),
         "btn_video": "Видео",
         "btn_audio": "Аудио (MP3)",
         "btn_cancel": "Отмена",

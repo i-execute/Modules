@@ -264,13 +264,16 @@ class Robber(loader.Module):
         "group": "group",
         "greeting_first": (
             "<blockquote><b>Robber</b> installed successfully!</blockquote>\n"
-            "<blockquote>Version: <b>{ver}</b> | Connected accounts: <b>{connected}/{max_accounts}</b></blockquote>\n"
-            "<blockquote>New copies are configured as a {output_type}. Ready to copy channels, steal posts and download stories.</blockquote>"
+            "<blockquote>Version: <b>{ver}</b>\n"
+            "Connected accounts: <b>{connected}/{max_accounts}</b>\n"
+            "New copies: <b>{output_type}</b></blockquote>"
         ),
         "reloaded": (
             "<blockquote><b>Robber</b> reloaded successfully!</blockquote>\n"
-            "<blockquote>Version: <b>{ver}</b> | Connected accounts: <b>{connected}/{max_accounts}</b></blockquote>\n"
-            "<blockquote>New copies are configured as a {output_type}. All systems are active.</blockquote>"
+            "<blockquote>Version: <b>{ver}</b>\n"
+            "Connected accounts: <b>{connected}/{max_accounts}</b>\n"
+            "New copies: <b>{output_type}</b>\n"
+            "All systems are active.</blockquote>"
         ),
     }
 
@@ -401,13 +404,16 @@ class Robber(loader.Module):
         "group": "группа",
         "greeting_first": (
             "<blockquote><b>Robber</b> успешно установлен!</blockquote>\n"
-            "<blockquote>Версия: <b>{ver}</b> | Подключённые аккаунты: <b>{connected}/{max_accounts}</b></blockquote>\n"
-            "<blockquote>Новые копии создаются как {output_type}. Готов к копированию каналов и скачиванию историй.</blockquote>"
+            "<blockquote>Версия: <b>{ver}</b>\n"
+            "Подключённые аккаунты: <b>{connected}/{max_accounts}</b>\n"
+            "Новые копии: <b>{output_type}</b></blockquote>"
         ),
         "reloaded": (
             "<blockquote><b>Robber</b> успешно перезагружен!</blockquote>\n"
-            "<blockquote>Версия: <b>{ver}</b> | Подключённые аккаунты: <b>{connected}/{max_accounts}</b></blockquote>\n"
-            "<blockquote>Новые копии создаются как {output_type}. Все системы активны.</blockquote>"
+            "<blockquote>Версия: <b>{ver}</b>\n"
+            "Подключённые аккаунты: <b>{connected}/{max_accounts}</b>\n"
+            "Новые копии: <b>{output_type}</b>\n"
+            "Все системы активны.</blockquote>"
         ),
     }
 

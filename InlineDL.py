@@ -462,7 +462,7 @@ class InlineDL(loader.Module):
         "topic_desc": "InlineDL large files storage.",
         "greeting": (
             "<blockquote><b>InlineDL installed</b></blockquote>\n"
-            "<blockquote>Files larger than <b>{direct} MB</b> are uploaded to this topic first and then sent into the inline message.</blockquote>\n"
+            "<blockquote>Version: <b>{version}</b>\nFiles larger than <b>{direct} MB</b> are uploaded to this topic first and then sent into the inline message.</blockquote>\n"
             "<blockquote><b>Upload limits:</b>\n"
             "Inline bot: up to <b>2000 MB</b>\n"
             "Userbot account: up to <b>4096 MB</b> with Telegram Premium\n"
@@ -619,7 +619,7 @@ class InlineDL(loader.Module):
         "topic_desc": "Хранилище больших файлов InlineDL.",
         "greeting": (
             "<blockquote><b>InlineDL установлен</b></blockquote>\n"
-            "<blockquote>Файлы больше <b>{direct} MB</b> сначала загружаются в этот топик, а затем отправляются в инлайн сообщение.</blockquote>\n"
+            "<blockquote>Версия: <b>{version}</b>\nФайлы больше <b>{direct} MB</b> сначала загружаются в этот топик, а затем отправляются в инлайн сообщение.</blockquote>\n"
             "<blockquote><b>Лимиты загрузки:</b>\n"
             "Инлайн бот: до <b>2000 MB</b>\n"
             "Аккаунт юзербота: до <b>4096 MB</b> с Telegram Premium\n"

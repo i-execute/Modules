@@ -44,8 +44,8 @@ class Logger(loader.Module):
 
     strings = {
         "name": "Logger",
-        "reloaded": "<blockquote><b>Logger reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b> | Registered commands: <b>{commands}</b></blockquote>",
-        "greeting": "<blockquote><b>Logger is ready</b></blockquote>\n<blockquote>This topic will receive activity logs from <b>{commands}</b> registered commands. Current prefix: <code>{prefix}</code>.</blockquote>",
+        "reloaded": "<blockquote><b>Logger reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nRegistered commands: <b>{commands}</b></blockquote>",
+        "greeting": "<blockquote><b>Logger is ready</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nRegistered commands: <b>{commands}</b>\nCurrent prefix: <code>{prefix}</code>\nThis topic will receive their activity logs.</blockquote>",
         "username_row": "@{uname}",
         "owner_attention": "<blockquote><b><a href='tg://user?id={owner_id}'>{owner_name}</a>, attention please</b></blockquote>\n",
         "log_dm_user": (
@@ -81,8 +81,8 @@ class Logger(loader.Module):
     }
 
     strings_ru = {
-        "reloaded": "<blockquote><b>Logger перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b> | Зарегистрировано команд: <b>{commands}</b></blockquote>",
-        "greeting": "<blockquote><b>Logger готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить логи активности для <b>{commands}</b> зарегистрированных команд. Текущий префикс: <code>{prefix}</code>.</blockquote>",
+        "reloaded": "<blockquote><b>Logger перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nЗарегистрировано команд: <b>{commands}</b></blockquote>",
+        "greeting": "<blockquote><b>Logger готов к работе</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nЗарегистрировано команд: <b>{commands}</b>\nТекущий префикс: <code>{prefix}</code>\nВ этот топик будут приходить логи активности.</blockquote>",
         "username_row": "@{uname}",
         "owner_attention": "<blockquote><b><a href='tg://user?id={owner_id}'>{owner_name}</a>, минуточку внимания</b></blockquote>\n",
         "log_dm_user": (

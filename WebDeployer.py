@@ -287,8 +287,8 @@ class WebDeployer(loader.Module):
 
     strings = {
         "name": "WebDeployer",
-        "reloaded": "<blockquote><b>WebDeployer reloaded</b></blockquote>\n<blockquote>Saved sites: <b>{sites}</b> | Version: <b>{version}</b></blockquote>",
-        "greeting": "<blockquote><b>WebDeployer is ready</b></blockquote>\n<blockquote>Saved sites: <b>{sites}</b>. Deployments and errors will be logged here.</blockquote>\n<blockquote>Use <code>{prefix}wd</code> to manage sites and your GitHub token.</blockquote>",
+        "reloaded": "<blockquote><b>WebDeployer reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nSaved sites: <b>{sites}</b></blockquote>",
+        "greeting": "<blockquote><b>WebDeployer is ready</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nSaved sites: <b>{sites}</b>\nDeployments and errors will be logged here.\nUse <code>{prefix}wd</code> to manage sites and your GitHub token.</blockquote>",
         "main_menu": (
             "<b>WebDeployer</b>\n"
             "<blockquote>"
@@ -410,8 +410,8 @@ class WebDeployer(loader.Module):
     }
 
     strings_ru = {
-        "reloaded": "<blockquote><b>WebDeployer перезагружен</b></blockquote>\n<blockquote>Сохранено сайтов: <b>{sites}</b> | Версия: <b>{version}</b></blockquote>",
-        "greeting": "<blockquote><b>WebDeployer готов к работе</b></blockquote>\n<blockquote>Сохранено сайтов: <b>{sites}</b>. В этот топик будут приходить логи деплоев и ошибок.</blockquote>\n<blockquote>Используйте <code>{prefix}wd</code>, чтобы управлять сайтами и GitHub-токеном.</blockquote>",
+        "reloaded": "<blockquote><b>WebDeployer перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nСохранено сайтов: <b>{sites}</b></blockquote>",
+        "greeting": "<blockquote><b>WebDeployer готов к работе</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nСохранено сайтов: <b>{sites}</b>\nВ этот топик будут приходить логи деплоев и ошибок.\nИспользуйте <code>{prefix}wd</code>, чтобы управлять сайтами и GitHub-токеном.</blockquote>",
         "main_menu": (
             "<b>WebDeployer</b>\n"
             "<blockquote>"

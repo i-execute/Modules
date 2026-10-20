@@ -48,8 +48,8 @@ class Note(loader.Module):
         "name": "Note",
         "yes": "enabled",
         "no": "disabled",
-        "reloaded": "<blockquote><b>Note reloaded</b></blockquote>\n<blockquote>Saved notes: <b>{notes}</b> | Premium: <b>{premium}</b></blockquote>",
-        "greeting": "<blockquote><b>Note is ready</b></blockquote>\n<blockquote><b>{notes}</b> notes are saved. Premium features: <b>{premium}</b>.</blockquote>\n<blockquote>Use <code>{prefix}note</code> to manage and open notes.</blockquote>",
+        "reloaded": "<blockquote><b>Note reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nSaved notes: <b>{notes}</b>\nPremium features: <b>{premium}</b></blockquote>",
+        "greeting": "<blockquote><b>Note is ready</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nSaved notes: <b>{notes}</b>\nPremium features: <b>{premium}</b>\nUse <code>{prefix}note</code> to manage and open notes.</blockquote>",
         "help": (
             "<b>Note module commands</b>\n"
             "<blockquote><code>{prefix}note create [name]</code> - save replied media\n"
@@ -90,8 +90,8 @@ class Note(loader.Module):
     strings_ru = {
         "yes": "включены",
         "no": "выключены",
-        "reloaded": "<blockquote><b>Note перезагружен</b></blockquote>\n<blockquote>Сохранено заметок: <b>{notes}</b> | Premium: <b>{premium}</b></blockquote>",
-        "greeting": "<blockquote><b>Note готов к работе</b></blockquote>\n<blockquote>Сохранено заметок: <b>{notes}</b>. Функции Premium: <b>{premium}</b>.</blockquote>\n<blockquote>Используйте <code>{prefix}note</code>, чтобы управлять заметками и открывать их.</blockquote>",
+        "reloaded": "<blockquote><b>Note перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nСохранено заметок: <b>{notes}</b>\nФункции Premium: <b>{premium}</b></blockquote>",
+        "greeting": "<blockquote><b>Note готов к работе</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nСохранено заметок: <b>{notes}</b>\nФункции Premium: <b>{premium}</b>\nИспользуйте <code>{prefix}note</code>, чтобы управлять заметками.</blockquote>",
         "help": (
             "<b>Команды модуля Note</b>\n"
             "<blockquote><code>{prefix}note create [название]</code> - сохранить медиа из реплая\n"
@@ -182,6 +182,7 @@ class Note(loader.Module):
         already_greeted = self.get(greeting_key, False)
         notes = self.config["NOTES"]
         values = {
+            "version": ".".join(map(str, __version__)),
             "notes": len(notes) if isinstance(notes, dict) else 0,
             "premium": self.strings["yes" if self._premium else "no"],
             "prefix": self.get_prefix(),

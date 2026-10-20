@@ -112,8 +112,8 @@ class XRay(loader.Module):
 
     strings = {
         "name": "XRay",
-        "reloaded": "<blockquote><b>XRay reloaded</b></blockquote>\n<blockquote>Users: <b>{users}</b> | Subscriptions: <b>{subscriptions}</b> | Log file limit: <b>{log_size} MB</b></blockquote>",
-        "greeting": "<blockquote><b>XRay is ready</b></blockquote>\n<blockquote>Configured users: <b>{users}</b> | Subscriptions: <b>{subscriptions}</b> | Log file limit: <b>{log_size} MB</b></blockquote>\n<blockquote>This topic receives VPN service, user and subscription notifications. Use <code>{prefix}xray</code> to manage the service.</blockquote>",
+        "reloaded": "<blockquote><b>XRay reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nUsers: <b>{users}</b>\nSubscriptions: <b>{subscriptions}</b>\nLog file limit: <b>{log_size} MB</b></blockquote>",
+        "greeting": "<blockquote><b>XRay is ready</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nConfigured users: <b>{users}</b>\nSubscriptions: <b>{subscriptions}</b>\nLog file limit: <b>{log_size} MB</b>\nUse <code>{prefix}xray</code> to manage the service.</blockquote>",
         
         "main_menu": (
             "<b>XRay Multi-User VPN</b>\n"
@@ -630,8 +630,8 @@ class XRay(loader.Module):
 
     strings_ru = {
         "name": "XRay",
-        "reloaded": "<blockquote><b>XRay перезагружен</b></blockquote>\n<blockquote>Пользователей: <b>{users}</b> | Подписок: <b>{subscriptions}</b> | Лимит файла лога: <b>{log_size} MB</b></blockquote>",
-        "greeting": "<blockquote><b>XRay готов к работе</b></blockquote>\n<blockquote>Настроено пользователей: <b>{users}</b> | Подписок: <b>{subscriptions}</b> | Лимит файла лога: <b>{log_size} MB</b></blockquote>\n<blockquote>В этот топик будут приходить уведомления о VPN-сервисе, пользователях и подписках. Для управления используйте <code>{prefix}xray</code>.</blockquote>",
+        "reloaded": "<blockquote><b>XRay перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nПользователей: <b>{users}</b>\nПодписок: <b>{subscriptions}</b>\nЛимит файла лога: <b>{log_size} MB</b></blockquote>",
+        "greeting": "<blockquote><b>XRay готов к работе</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nНастроено пользователей: <b>{users}</b>\nПодписок: <b>{subscriptions}</b>\nЛимит файла лога: <b>{log_size} MB</b>\nДля управления используйте <code>{prefix}xray</code>.</blockquote>",
         "main_menu": (
             "<b>XRay Мультиюзерный VPN</b>\n"
             "<blockquote>Всего юзеров: {total}\n"
@@ -1205,6 +1205,7 @@ class XRay(loader.Module):
             greeting_key = f"xray_greeted_{self._asset_channel}_{self._logger_topic.id}"
             already_greeted = self.get(greeting_key, False)
             values = {
+                "version": ".".join(map(str, __version__)),
                 "users": len(self._users),
                 "subscriptions": len(self._sub),
                 "log_size": self.config["MAX_LOG_FILE_SIZE"],
