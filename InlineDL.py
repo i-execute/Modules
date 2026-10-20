@@ -87,13 +87,21 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
+async def _retry_topic_send(send, refresh):
+    try:
+        return await send()
+    except Exception:
+        await refresh()
+        return await send()
+
+
 BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/InlineQuery.png"
 THUMB_IG = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/Instagram.png"
 THUMB_TT = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/TikTok.png"
 THUMB_PT = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/Pinterest.png"
 RELOAD_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/Reloading.jpeg"
 TOPIC_TITLE = "InlineDL"
-TOPIC_ICON = 5379758279851289726
+TOPIC_ICON = 5386654279341747455
 
 
 MB = 1024 * 1024
@@ -815,12 +823,15 @@ class InlineDL(loader.Module):
         bot = self._bot()
         try:
             msg_text, entities = await bot._parse_message_text(text, "html")
-            msg = await bot.send_message(
-                channel,
-                msg_text,
-                formatting_entities=entities,
-                reply_to=topic_id,
-                link_preview=False,
+            msg = await _retry_topic_send(
+                lambda: bot.send_message(
+                    channel,
+                    msg_text,
+                    formatting_entities=entities,
+                    reply_to=self._topic_id,
+                    link_preview=False,
+                ),
+                lambda: self._ensure_topic(fresh=True),
             )
             try:
                 peer = await bot.get_input_entity(channel)
@@ -2012,9 +2023,23 @@ class InlineDL(loader.Module):
             progress_callback=callback,
         )
         if size <= BOT_LIMIT:
-            msg = await bot.send_file(channel, path, **kwargs)
+            msg = await _retry_topic_send(
+                lambda: bot.send_file(
+                    channel,
+                    path,
+                    **{**kwargs, "reply_to": self._topic_id},
+                ),
+                lambda: self._ensure_topic(fresh=True),
+            )
         else:
-            sent = await self._client.send_file(channel, path, **kwargs)
+            sent = await _retry_topic_send(
+                lambda: self._client.send_file(
+                    channel,
+                    path,
+                    **{**kwargs, "reply_to": self._topic_id},
+                ),
+                lambda: self._ensure_topic(fresh=True),
+            )
             msg = await bot.get_messages(channel, ids=sent.id)
         if not msg or not getattr(msg, "media", None):
             raise RuntimeError(self.strings["no_media"])

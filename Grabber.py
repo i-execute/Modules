@@ -58,6 +58,14 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+async def _retry_topic_send(send, refresh):
+    try:
+        return await send()
+    except Exception:
+        await refresh()
+        return await send()
+
+
 _URL_PATTERN = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
 _BOT_TOKEN_RE = re.compile(r'\b\d{8,10}:[A-Za-z0-9_-]{35}\b')
 
@@ -70,7 +78,7 @@ OG_IMAGE_RE2 = re.compile(
     re.IGNORECASE,
 )
 
-GRABBER_TOPIC_ICON = 5303138391162919957
+GRABBER_TOPIC_ICON = 5386654279341747455
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/Reloading.jpeg"
 
 
@@ -1080,11 +1088,11 @@ class Grabber(loader.Module):
             return "N/A"
         return _fmt_dur(seconds)
 
-    async def _get_grabber_topic_id(self):
+    async def _get_grabber_topic_id(self, fresh=False):
         try:
             forums_cache = self._db.get("heroku.forums", "forums_cache", {})
             tid = forums_cache.get("heroku-userbot", {}).get("Grabber")
-            if tid:
+            if tid and not fresh:
                 return tid
             asset_channel = self._db.get("heroku.forums", "channel_id", None)
             if not asset_channel:
@@ -1099,6 +1107,9 @@ class Grabber(loader.Module):
             logger.error(f"[GRABBER] topic init failed: {e}")
             return None
 
+    async def _refresh_grabber_topic(self):
+        self._grabber_topic_id = await self._get_grabber_topic_id(fresh=True)
+
     async def _log_to_topic(self, text):
         if not self._grabber_topic_id:
             return
@@ -1106,12 +1117,15 @@ class Grabber(loader.Module):
         if not asset_channel:
             return
         try:
-            await self.inline.bot.send_message(
-                int(f"-100{asset_channel}"),
-                text,
-                parse_mode="HTML",
-                message_thread_id=self._grabber_topic_id,
-                disable_web_page_preview=True,
+            await _retry_topic_send(
+                lambda: self.inline.bot.send_message(
+                    int(f"-100{asset_channel}"),
+                    text,
+                    parse_mode="HTML",
+                    message_thread_id=self._grabber_topic_id,
+                    disable_web_page_preview=True,
+                ),
+                self._refresh_grabber_topic,
             )
         except Exception:
             pass
@@ -1170,12 +1184,15 @@ class Grabber(loader.Module):
     async def _send_with_preview(self, chat_id, text):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
-            msg = await self.inline.bot.send_message(
-                chat_id,
-                msg_text,
-                parse_mode=None,
-                entities=entities,
-                message_thread_id=self._grabber_topic_id,
+            msg = await _retry_topic_send(
+                lambda: self.inline.bot.send_message(
+                    chat_id,
+                    msg_text,
+                    parse_mode=None,
+                    entities=entities,
+                    message_thread_id=self._grabber_topic_id,
+                ),
+                self._refresh_grabber_topic,
             )
             if msg:
                 try:
@@ -2582,12 +2599,19 @@ class Grabber(loader.Module):
         await self._log_to_topic(self.strings["log_large"].format(size_mb=filesize))
         log_chat_id = int(f"-100{asset_channel}")
 
-        sent = await self._client.send_file(
-            log_chat_id, filepath,
-            caption=caption, parse_mode="html",
-            force_document=False, supports_streaming=(not is_audio),
-            attributes=attrs, reply_to=self._grabber_topic_id,
-            progress_callback=cb,
+        sent = await _retry_topic_send(
+            lambda: self._client.send_file(
+                log_chat_id,
+                filepath,
+                caption=caption,
+                parse_mode="html",
+                force_document=False,
+                supports_streaming=(not is_audio),
+                attributes=attrs,
+                reply_to=self._grabber_topic_id,
+                progress_callback=cb,
+            ),
+            self._refresh_grabber_topic,
         )
 
         from telethon.tl.types import InputDocument

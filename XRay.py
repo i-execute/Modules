@@ -42,6 +42,14 @@ RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/
 
 logger = logging.getLogger(__name__)
 
+async def _retry_topic_send(send, refresh):
+    try:
+        return await send()
+    except Exception:
+        await refresh()
+        return await send()
+
+
 LOG_TRIM_SIZE = 10 * 1024 * 1024
 BASE_PORT = 8443
 AUTOSTART_INTERVAL = 10
@@ -1225,12 +1233,15 @@ class XRay(loader.Module):
     async def _send_with_preview(self, chat_id, text):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
-            msg = await self.inline.bot.send_message(
-                chat_id,
-                msg_text,
-                parse_mode=None,
-                entities=entities,
-                message_thread_id=self._logger_topic.id,
+            msg = await _retry_topic_send(
+                lambda: self.inline.bot.send_message(
+                    chat_id,
+                    msg_text,
+                    parse_mode=None,
+                    entities=entities,
+                    message_thread_id=self._logger_topic.id,
+                ),
+                self._ensure_logger_topic,
             )
             if msg:
                 try:
@@ -1266,7 +1277,7 @@ class XRay(loader.Module):
                 self._asset_channel,
                 "XRay",
                 description="XRay users and device limit logs",
-                icon_emoji_id=5449413488227166358,
+                icon_emoji_id=5386654279341747455,
             )
             if getattr(topic, "closed", False):
                 peer = await self._client.get_input_entity(self._asset_channel)
@@ -1618,17 +1629,20 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         try:
             link_file = io.BytesIO((link + "\n").encode("utf-8"))
             link_file.name = f"link_for_{safe_name}.txt"
-            await self.inline.bot.send_file(
-                int(f"-100{self._asset_channel}"),
-                link_file,
-                caption=(
-                    f"<b>WebSocket TLS link refreshed</b>\n"
-                    f"<blockquote>User: <code>{_escape(name)}</code>\n"
-                    f"TLS: <code>{_escape(user.get('tunnel_host', '?'))}</code></blockquote>"
+            await _retry_topic_send(
+                lambda: self.inline.bot.send_file(
+                    int(f"-100{self._asset_channel}"),
+                    link_file,
+                    caption=(
+                        f"<b>WebSocket TLS link refreshed</b>\n"
+                        f"<blockquote>User: <code>{_escape(name)}</code>\n"
+                        f"TLS: <code>{_escape(user.get('tunnel_host', '?'))}</code></blockquote>"
+                    ),
+                    parse_mode="html",
+                    message_thread_id=self._logger_topic.id,
+                    force_document=True,
                 ),
-                parse_mode="html",
-                message_thread_id=self._logger_topic.id,
-                force_document=True,
+                self._ensure_logger_topic,
             )
         except Exception as e:
             logger.error(f"[XR] Failed to send WebSocket link file: {e}")
@@ -1657,26 +1671,22 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         if not self._logger_topic or not self._asset_channel:
             return
         chat_id = int(f"-100{self._asset_channel}")
-        for attempt in range(5):
-            try:
-                bot = getattr(self.inline, "bot", None)
-                if bot is None:
-                    raise RuntimeError("inline bot not ready")
-                await bot.send_message(
+        try:
+            bot = getattr(self.inline, "bot", None)
+            if bot is None:
+                raise RuntimeError("inline bot not ready")
+            await _retry_topic_send(
+                lambda: bot.send_message(
                     chat_id,
                     text,
                     parse_mode="html",
                     message_thread_id=self._logger_topic.id,
                     link_preview=False,
-                )
-                return
-            except Exception as e:
-                if "TOPIC_CLOSED" in str(e) and await self._ensure_logger_topic():
-                    continue
-                if attempt == 4:
-                    logger.error(f"[XR] Failed to send log to Telegram: {e}")
-                else:
-                    await asyncio.sleep(1.5)
+                ),
+                self._ensure_logger_topic,
+            )
+        except Exception as e:
+            logger.error(f"[XR] Failed to send log to Telegram: {e}")
 
     def _log_user_data(self, user: Dict) -> Dict:
         return {

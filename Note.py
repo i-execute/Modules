@@ -15,11 +15,19 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
+async def _retry_topic_send(send, refresh):
+    try:
+        return await send()
+    except Exception:
+        await refresh()
+        return await send()
+
+
 E_COOL = '<tg-emoji emoji-id=5255888339248125403>😎</tg-emoji>'
 E_DIZZY = '<tg-emoji emoji-id=5258511597898340942>😵</tg-emoji>'
 E_CAT = '<tg-emoji emoji-id=5255715243476164998>😸</tg-emoji>'
 E_ANGRY = '<tg-emoji emoji-id=5258084738278658226>😠</tg-emoji>'
-E_STORAGE = 5260682587902354590
+E_STORAGE = 5386654279341747455
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Note/Reloading.jpeg"
 
 
@@ -161,15 +169,28 @@ class Note(loader.Module):
         else:
             self.set(greeting_key, True)
 
+    async def _refresh_storage_topic(self):
+        self._storage_topic = await utils.asset_forum_topic(
+            self._client,
+            self._db,
+            self._asset_channel,
+            "Note Storage",
+            description="Media storage for Note module.",
+            icon_emoji_id=E_STORAGE,
+        )
+
     async def _send_with_preview(self, chat_id, text):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
-            msg = await self.inline.bot.send_message(
-                chat_id,
-                msg_text,
-                parse_mode=None,
-                entities=entities,
-                message_thread_id=self._storage_topic.id,
+            msg = await _retry_topic_send(
+                lambda: self.inline.bot.send_message(
+                    chat_id,
+                    msg_text,
+                    parse_mode=None,
+                    entities=entities,
+                    message_thread_id=self._storage_topic.id,
+                ),
+                self._refresh_storage_topic,
             )
             if msg:
                 try:

@@ -26,10 +26,18 @@ from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
+async def _retry_topic_send(send, refresh):
+    try:
+        return await send()
+    except Exception:
+        await refresh()
+        return await send()
+
+
 CN_TZ = timezone(timedelta(hours=8))
 RELOAD_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/HoyoClaimer/Reloading.jpeg"
 TOPIC_TITLE = "HoyoClaimer"
-TOPIC_ICON = 5384166020103578735
+TOPIC_ICON = 5386654279341747455
 HOYO_DOMAINS = ("hoyolab.com", "hoyoverse.com", "mihoyo.com", "miyoushe.com")
 CN_DOMAINS = ("mihoyo.com", "miyoushe.com")
 AUTH_UID = ("ltuid_v2", "ltuid", "account_id_v2", "account_id", "stuid", "login_uid")
@@ -687,12 +695,15 @@ class HoyoClaimer(loader.Module):
         bot = self._bot()
         try:
             msg_text, entities = await bot._parse_message_text(text, "html")
-            msg = await bot.send_message(
-                channel,
-                msg_text,
-                formatting_entities=entities,
-                reply_to=topic_id,
-                link_preview=False,
+            msg = await _retry_topic_send(
+                lambda: bot.send_message(
+                    channel,
+                    msg_text,
+                    formatting_entities=entities,
+                    reply_to=self._topic_id,
+                    link_preview=False,
+                ),
+                lambda: self._ensure_topic(fresh=True),
             )
             try:
                 peer = await bot.get_input_entity(channel)

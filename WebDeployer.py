@@ -30,6 +30,14 @@ from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
+async def _retry_topic_send(send, refresh):
+    try:
+        return await send()
+    except Exception:
+        await refresh()
+        return await send()
+
+
 CF_REPO = "cloudflare/cloudflared"
 VERSIONS_PER_PAGE = 5
 ARCHIVE_SUFFIXES = (
@@ -48,7 +56,7 @@ ARCHIVE_SUFFIXES = (
 PREFERRED_ROOT_NAMES = ("dist", "build", "public", "out", "www", ".output/public")
 SKIP_DIR_NAMES = {"node_modules", "__pycache__", ".git", ".svn", ".hg", ".next", ".cache"}
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/WebDeployer/Reloading.jpeg"
-TOPIC_ICON_EMOJI_ID = 5361553253513340256
+TOPIC_ICON_EMOJI_ID = 5386654279341747455
 
 
 def _escape(text):
@@ -559,15 +567,28 @@ class WebDeployer(loader.Module):
 
         await self._reattach_sites()
 
+    async def _refresh_webdeployer_topic(self):
+        self._logger_topic = await utils.asset_forum_topic(
+            self._client,
+            self._db,
+            self._asset_channel,
+            "WebDeployer",
+            description="WebDeployer notifications: deploys, cleanups, errors",
+            icon_emoji_id=TOPIC_ICON_EMOJI_ID,
+        )
+
     async def _send_with_preview(self, chat_id, text):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
-            msg = await self.inline.bot.send_message(
-                chat_id,
-                msg_text,
-                parse_mode=None,
-                entities=entities,
-                message_thread_id=self._logger_topic.id,
+            msg = await _retry_topic_send(
+                lambda: self.inline.bot.send_message(
+                    chat_id,
+                    msg_text,
+                    parse_mode=None,
+                    entities=entities,
+                    message_thread_id=self._logger_topic.id,
+                ),
+                self._refresh_webdeployer_topic,
             )
             if msg:
                 try:
@@ -598,11 +619,14 @@ class WebDeployer(loader.Module):
             return
         chat_id = int(f"-100{self._asset_channel}")
         try:
-            await self.inline.bot.send_message(
-                chat_id,
-                text,
-                parse_mode="html",
-                message_thread_id=self._logger_topic.id,
+            await _retry_topic_send(
+                lambda: self.inline.bot.send_message(
+                    chat_id,
+                    text,
+                    parse_mode="html",
+                    message_thread_id=self._logger_topic.id,
+                ),
+                self._refresh_webdeployer_topic,
             )
         except Exception as e:
             logger.error(f"[WD] Failed to send topic notification: {e}")

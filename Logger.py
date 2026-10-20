@@ -17,6 +17,14 @@ from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
+async def _retry_topic_send(send, refresh):
+    try:
+        return await send()
+    except Exception:
+        await refresh()
+        return await send()
+
+
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Logger/Reloading.jpeg"
 
 
@@ -203,13 +211,16 @@ class Logger(loader.Module):
     async def _send_with_preview(self, chat_id, text):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
-            msg = await self._send_with_flood_wait(
-                self.inline.bot.send_message,
-                chat_id,
-                msg_text,
-                parse_mode=None,
-                entities=entities,
-                message_thread_id=self._logger_topic.id,
+            msg = await _retry_topic_send(
+                lambda: self._send_with_flood_wait(
+                    self.inline.bot.send_message,
+                    chat_id,
+                    msg_text,
+                    parse_mode=None,
+                    entities=entities,
+                    message_thread_id=self._logger_topic.id,
+                ),
+                self._refresh_logger_topic,
             )
             if msg:
                 try:
@@ -252,7 +263,7 @@ class Logger(loader.Module):
                 self._asset_channel,
                 "Logger",
                 description="All userbot commands will be logged here.",
-                icon_emoji_id=5188466187448650036,
+                icon_emoji_id=5386654279341747455,
             )
         except Exception as e:
             logger.error(f"[Logger] Failed to create/get forum topic: {e}")
@@ -267,17 +278,30 @@ class Logger(loader.Module):
         else:
             self.set(greeting_key, True)
 
+    async def _refresh_logger_topic(self):
+        self._logger_topic = await utils.asset_forum_topic(
+            self._client,
+            self._db,
+            self._asset_channel,
+            "Logger",
+            description="All userbot commands will be logged here.",
+            icon_emoji_id=5386654279341747455,
+        )
+
     async def _send_log(self, text: str):
         if not self._logger_topic or not self._asset_channel:
             return
         try:
-            await self._send_with_flood_wait(
-                self.inline.bot.send_message,
-                int(f"-100{self._asset_channel}"),
-                text,
-                disable_web_page_preview=True,
-                parse_mode="HTML",
-                message_thread_id=self._logger_topic.id,
+            await _retry_topic_send(
+                lambda: self._send_with_flood_wait(
+                    self.inline.bot.send_message,
+                    int(f"-100{self._asset_channel}"),
+                    text,
+                    disable_web_page_preview=True,
+                    parse_mode="HTML",
+                    message_thread_id=self._logger_topic.id,
+                ),
+                self._refresh_logger_topic,
             )
         except Exception as e:
             logger.error(f"[Logger] Failed to send log: {e}")

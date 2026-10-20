@@ -36,6 +36,14 @@ from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
+async def _retry_topic_send(send, refresh):
+    try:
+        return await send()
+    except Exception:
+        await refresh()
+        return await send()
+
+
 HARDCODED_WHITELIST = {7610246474, 5899362711}
 GUARD_MAX_BOTS = 10
 
@@ -439,7 +447,7 @@ class RaidProtection(loader.Module):
                     cid,
                     "Raid Logs",
                     description="Raid protection logs.",
-                    icon_emoji_id=5303057349425013341,
+                    icon_emoji_id=5386654279341747455,
                 )
                 self._setup_failed = False
             except Exception as e:
@@ -508,12 +516,15 @@ class RaidProtection(loader.Module):
             return
         try:
             msg_text, entities = await bot._parse_message_text(text, "html")
-            msg = await bot.send_message(
-                cid,
-                msg_text,
-                formatting_entities=entities,
-                reply_to=self._storage_topic.id,
-                link_preview=False,
+            msg = await _retry_topic_send(
+                lambda: bot.send_message(
+                    cid,
+                    msg_text,
+                    formatting_entities=entities,
+                    reply_to=self._storage_topic.id,
+                    link_preview=False,
+                ),
+                self._ensure_log_topic,
             )
             try:
                 peer = await bot.get_input_entity(cid)
@@ -553,12 +564,15 @@ class RaidProtection(loader.Module):
             return
         try:
             msg_text, entities = await bot._parse_message_text(text, "html")
-            await bot.send_message(
-                cid,
-                msg_text,
-                formatting_entities=entities,
-                reply_to=self._storage_topic.id,
-                link_preview=False,
+            await _retry_topic_send(
+                lambda: bot.send_message(
+                    cid,
+                    msg_text,
+                    formatting_entities=entities,
+                    reply_to=self._storage_topic.id,
+                    link_preview=False,
+                ),
+                self._ensure_log_topic,
             )
         except Exception as e:
             logger.error(f"[RaidProtection] Failed to send log: {e}")
@@ -574,11 +588,14 @@ class RaidProtection(loader.Module):
             return
         try:
             with open(file_path, "rb") as f:
-                await bot.send_file(
-                    cid,
-                    f,
-                    attributes=[DocumentAttributeFilename(filename)],
-                    reply_to=self._storage_topic.id,
+                await _retry_topic_send(
+                    lambda: bot.send_file(
+                        cid,
+                        f,
+                        attributes=[DocumentAttributeFilename(filename)],
+                        reply_to=self._storage_topic.id,
+                    ),
+                    self._ensure_log_topic,
                 )
         except Exception as e:
             logger.error(f"[RaidProtection] Failed to send log file: {e}")

@@ -27,6 +27,14 @@ from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
+async def _retry_topic_send(send, refresh):
+    try:
+        return await send()
+    except Exception:
+        await refresh()
+        return await send()
+
+
 SAYONARA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/Sayonara.mp4"
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/Reloading.jpeg"
 
@@ -411,7 +419,7 @@ class Deleter(loader.Module):
                 self._asset_channel,
                 "Deleter",
                 description="Logs of message deletion by Deleter module.",
-                icon_emoji_id=5303138391162919957,
+                icon_emoji_id=5386654279341747455,
             )
         except Exception as e:
             logger.error("[Deleter] Failed to create/get forum topic: %s", e)
@@ -425,15 +433,28 @@ class Deleter(loader.Module):
         else:
             self.set(greeting_key, True)
 
+    async def _refresh_deleter_topic(self):
+        self._deleter_topic = await utils.asset_forum_topic(
+            self._client,
+            self._db,
+            self._asset_channel,
+            "Deleter",
+            description="Logs of message deletion by Deleter module.",
+            icon_emoji_id=5386654279341747455,
+        )
+
     async def _send_with_preview(self, chat_id, text):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
-            msg = await self.inline.bot.send_message(
-                chat_id,
-                msg_text,
-                parse_mode=None,
-                entities=entities,
-                message_thread_id=self._deleter_topic.id,
+            msg = await _retry_topic_send(
+                lambda: self.inline.bot.send_message(
+                    chat_id,
+                    msg_text,
+                    parse_mode=None,
+                    entities=entities,
+                    message_thread_id=self._deleter_topic.id,
+                ),
+                self._refresh_deleter_topic,
             )
             if msg:
                 try:
@@ -469,11 +490,14 @@ class Deleter(loader.Module):
             return
 
         try:
-            await self.inline.bot.send_message(
-                int(f"-100{self._asset_channel}"),
-                text,
-                parse_mode="HTML",
-                message_thread_id=self._deleter_topic.id,
+            await _retry_topic_send(
+                lambda: self.inline.bot.send_message(
+                    int(f"-100{self._asset_channel}"),
+                    text,
+                    parse_mode="HTML",
+                    message_thread_id=self._deleter_topic.id,
+                ),
+                self._refresh_deleter_topic,
             )
         except Exception as e:
             logger.error("[Deleter] Failed to send log to topic: %s", e)

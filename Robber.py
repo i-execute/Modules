@@ -46,6 +46,14 @@ from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
+async def _retry_topic_send(send, refresh):
+    try:
+        return await send()
+    except Exception:
+        await refresh()
+        return await send()
+
+
 MB = 1024 * 1024
 STORY_LINK_RE = re.compile(r"t\.me/([^/]+)/s/(\d+)")
 POST_LINK_RE = re.compile(r"t\.me/(?:c/)?([^/]+)/(\d+)")
@@ -75,7 +83,7 @@ DC_IP_MAP = {
 
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Robber/Reloading.jpeg"
 TOPIC_TITLE = "Robber"
-TOPIC_ICON = 5379758279851289726
+TOPIC_ICON = 5386654279341747455
 
 
 def _ensure_deps():
@@ -506,12 +514,15 @@ class Robber(loader.Module):
             return
         try:
             msg_text, entities = await bot._parse_message_text(text, "html")
-            msg = await bot.send_message(
-                chat_id,
-                msg_text,
-                formatting_entities=entities,
-                reply_to=topic_id,
-                link_preview=False,
+            msg = await _retry_topic_send(
+                lambda: bot.send_message(
+                    chat_id,
+                    msg_text,
+                    formatting_entities=entities,
+                    reply_to=self._topic_id,
+                    link_preview=False,
+                ),
+                lambda: self._ensure_topic(fresh=True),
             )
             try:
                 peer = await bot.get_input_entity(chat_id)
