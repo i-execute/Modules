@@ -493,15 +493,16 @@ class Robber(loader.Module):
             self._topic_id = topic.id
             if getattr(topic, "icon_emoji_id", None) != TOPIC_ICON:
                 try:
+                    peer = await self._client.get_input_entity(int(f"-100{cid}"))
                     await self._client(
-                        functions.channels.EditForumTopicRequest(
-                            channel=cid,
+                        functions.messages.EditForumTopicRequest(
+                            peer=peer,
                             topic_id=topic.id,
                             icon_emoji_id=TOPIC_ICON,
                         )
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[Robber] failed to update topic icon: {e}")
             return self._topic_id
         except Exception as e:
             logger.error(f"[Robber] topic creation failed: {e}")
