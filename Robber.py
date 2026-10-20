@@ -73,7 +73,7 @@ DC_IP_MAP = {
     5: "91.108.56.130",
 }
 
-BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Robber/MetaBanner.jpeg"
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Robber/Reloading.jpeg"
 TOPIC_TITLE = "Robber"
 TOPIC_ICON = 5379758279851289726
 
@@ -500,8 +500,10 @@ class Robber(loader.Module):
             return None
 
     async def _send_with_preview(self, chat_id, topic_id, text):
-        bot = getattr(self.inline, "_bot_client", None) or getattr(self.inline, "bot", None)
+        inline = getattr(self, "inline", None)
+        bot = getattr(inline, "bot", None) or getattr(inline, "_bot_client", None)
         if not bot:
+            logger.error("[Robber] Inline bot is unavailable; reload notification was not sent")
             return
         try:
             msg_text, entities = await bot._parse_message_text(text, "html")
@@ -522,7 +524,7 @@ class Robber(loader.Module):
                         id=msg.id,
                         message=msg_text,
                         media=InputMediaWebPage(
-                            url=BANNER,
+                            url=RELOADING_MEDIA_URL,
                             optional=True,
                             force_large_media=True,
                         ),
@@ -539,11 +541,20 @@ class Robber(loader.Module):
 
     async def _notify_ready(self):
         await asyncio.sleep(2)
-        cid = self._asset_channel()
-        if not cid:
-            return
-        topic_id = await self._ensure_topic()
+        cid = None
+        topic_id = None
+        for attempt in range(6):
+            cid = self._asset_channel()
+            if cid:
+                topic_id = await self._ensure_topic()
+                if topic_id:
+                    break
+            else:
+                logger.warning("[Robber] Asset forum channel_id is unavailable; retrying notification setup")
+            if attempt < 5:
+                await asyncio.sleep(min(5 * (attempt + 1), 20))
         if not topic_id:
+            logger.error("[Robber] Could not set up the log topic; reload notification was not sent")
             return
         chat_id = int(f"-100{cid}")
         greet_key = f"robber_greeted_{cid}_{topic_id}"
