@@ -117,6 +117,36 @@ def _log(tag: str, msg: str):
     logger.info(entry)
 
 
+async def _download_image_aiohttp(url: str) -> typing.Optional[bytes]:
+    if not url:
+        return None
+
+    if AIOHTTP_OK:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    timeout=aiohttp.ClientTimeout(total=20),
+                ) as response:
+                    if response.status == REQUEST_OK:
+                        data = await response.read()
+                        return data if data and len(data) >= 100 else None
+        except Exception as error:
+            _log("COVER", f"aiohttp download failed: {type(error).__name__}: {error}")
+
+    if CFFI_OK:
+        try:
+            async with cffi_requests.AsyncSession(impersonate="chrome120") as session:
+                response = await session.get(url, timeout=20)
+                if response.status_code == REQUEST_OK:
+                    data = response.content
+                    return data if data and len(data) >= 100 else None
+        except Exception as error:
+            _log("COVER", f"curl_cffi download failed: {type(error).__name__}: {error}")
+
+    return None
+
+
 def escape_html(t: str) -> str:
     return (t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 

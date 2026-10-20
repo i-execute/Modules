@@ -163,18 +163,6 @@ def _resolve_avatar(data):
         return src
 
 
-def _apply_circle_mask(src_buf):
-    img = Image.open(src_buf).convert("RGBA").resize((512, 512))
-    mask = Image.new("L", (512, 512), 0)
-    draw = ImageDraw.Draw(mask)
-    draw.ellipse((0, 0, 512, 512), fill=255)
-    img.putalpha(mask)
-    result = io.BytesIO()
-    img.save(result, format="PNG")
-    result.seek(0)
-    return result
-
-
 def _load_pet_hands():
     root = importlib.resources.files("petpetgif") / "img"
     hands = []
@@ -184,7 +172,7 @@ def _load_pet_hands():
     return hands
 
 
-def _render_petpet_frames(src_buf, folder):
+def _render_petpet_frames(src_buf, folder, circle=False):
     base = Image.open(src_buf).convert("RGBA")
     size = PETPET_SIZE
     for i, hand in enumerate(_load_pet_hands()):
@@ -195,17 +183,22 @@ def _render_petpet_frames(src_buf, folder):
         offset_y = (1 - height) - 0.08
         canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         body = base.resize((round(width * size), round(height * size)), Image.LANCZOS)
+        if circle:
+            mask = Image.new("L", body.size, 0)
+            ImageDraw.Draw(mask).ellipse(
+                (0, 0, body.width - 1, body.height - 1),
+                fill=255,
+            )
+            body.putalpha(mask)
         canvas.paste(body, (round(offset_x * size), round(offset_y * size)))
         canvas = Image.alpha_composite(canvas, hand)
         canvas.save(os.path.join(folder, f"frame{i:02d}.png"))
 
 
 def _make_petpet_webm(src_buf, circle=False):
-    if circle:
-        src_buf = _apply_circle_mask(src_buf)
     folder = tempfile.mkdtemp(prefix="petpet_")
     try:
-        _render_petpet_frames(src_buf, folder)
+        _render_petpet_frames(src_buf, folder, circle)
         with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
             w = f.name
         q = subprocess.run(
