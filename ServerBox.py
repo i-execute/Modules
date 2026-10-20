@@ -178,6 +178,7 @@ class ServerBox(loader.Module):
         self._asset_channel = None
         self._monitor_task = None
         self._last_cpu_alert = 0
+        self._cpu_high_samples = 0
         self._last_ram_system_alert = 0
         self._last_ram_process_alert = 0
         self._last_swap_alert = 0
@@ -313,7 +314,8 @@ class ServerBox(loader.Module):
 
                 cpu = self._get_cpu()
                 if cpu >= self.config["cpu_threshold"]:
-                    if now - self._last_cpu_alert >= interval:
+                    self._cpu_high_samples += 1
+                    if self._cpu_high_samples >= 3 and now - self._last_cpu_alert >= interval:
                         await self._send_log(
                             self.strings["cpu_alert"].format(
                                 cpu=round(cpu, 1),
@@ -322,6 +324,8 @@ class ServerBox(loader.Module):
                             )
                         )
                         self._last_cpu_alert = now
+                else:
+                    self._cpu_high_samples = 0
 
                 ram = self._get_ram()
                 if "error" not in ram and ram["percent"] >= self.config["ram_system_threshold"]:
