@@ -413,8 +413,10 @@ class Grabber(loader.Module):
 
     strings = {
         "name": "Grabber",
-        "reloaded": "<blockquote><b>Grabber module successfully reloaded, everything works</b></blockquote>",
-        "greeting": "<blockquote><b>Grabber is ready</b></blockquote>\n<blockquote>This topic will receive downloader status and activity messages.</blockquote>\n<blockquote>Use <code>{prefix}grab</code> to configure Grabber and manage downloads.</blockquote>",
+        "enabled": "on",
+        "disabled": "off",
+        "reloaded": "<blockquote><b>Grabber reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b> | Workers: <b>{workers}</b> | File limit: <b>{max_file} MB</b> | Delay: <b>{delay}s</b></blockquote>\n<blockquote>Autorunner: <b>{autorunner}</b> | Cookies: <b>{cookies}</b></blockquote>",
+        "greeting": "<blockquote><b>Grabber is ready</b></blockquote>\n<blockquote>Workers: <b>{workers}</b> | File limit: <b>{max_file} MB</b> | Action delay: <b>{delay}s</b></blockquote>\n<blockquote>Autorunner: <b>{autorunner}</b> | Cookies: <b>{cookies}</b> | Active groups/topics: <b>{targets}</b></blockquote>\n<blockquote>Use <code>{prefix}grab</code> to manage downloads.</blockquote>",
         "btn_video": "Video",
         "btn_audio": "Audio (MP3)",
         "btn_cancel": "Cancel",
@@ -598,8 +600,10 @@ class Grabber(loader.Module):
 
     strings_ru = {
         "name": "Grabber",
-        "reloaded": "<blockquote><b>Модуль Grabber был успешно перезагружен, все воркает</b></blockquote>",
-        "greeting": "<blockquote><b>Grabber готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить сообщения о состоянии и работе загрузчика.</blockquote>\n<blockquote>Используйте <code>{prefix}grab</code>, чтобы настроить Grabber и управлять загрузками.</blockquote>",
+        "enabled": "включён",
+        "disabled": "выключен",
+        "reloaded": "<blockquote><b>Grabber перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b> | Потоков: <b>{workers}</b> | Лимит файла: <b>{max_file} MB</b> | Задержка: <b>{delay}с</b></blockquote>\n<blockquote>Автозапуск: <b>{autorunner}</b> | Куки: <b>{cookies}</b></blockquote>",
+        "greeting": "<blockquote><b>Grabber готов к работе</b></blockquote>\n<blockquote>Потоков: <b>{workers}</b> | Лимит файла: <b>{max_file} MB</b> | Задержка: <b>{delay}с</b></blockquote>\n<blockquote>Автозапуск: <b>{autorunner}</b> | Куки: <b>{cookies}</b> | Активных групп и топиков: <b>{targets}</b></blockquote>\n<blockquote>Используйте <code>{prefix}grab</code>, чтобы управлять загрузками.</blockquote>",
         "btn_video": "Видео",
         "btn_audio": "Аудио (MP3)",
         "btn_cancel": "Отмена",
@@ -1179,13 +1183,25 @@ class Grabber(loader.Module):
                 chat_id = int(f"-100{asset_channel}")
                 greeting_key = f"grabber_greeted_{asset_channel}_{self._grabber_topic_id}"
                 already_greeted = self.get(greeting_key, False)
+                autorunner = self._get_setting("AUTORUNNER")
+                cookies = self._get_setting("COOKIES_ENABLED") and os.path.exists(self._cookie_path)
+                values = {
+                    "version": ".".join(map(str, __version__)),
+                    "workers": self._get_setting("MAX_WORKERS"),
+                    "max_file": self._get_setting("MAX_FILE_MB"),
+                    "delay": self._get_setting("ACTION_DELAY"),
+                    "autorunner": self.strings["enabled" if autorunner else "disabled"],
+                    "cookies": self.strings["enabled" if cookies else "disabled"],
+                    "targets": len(self._active_groups) + sum(len(topics) for topics in self._active_topics.values()),
+                    "prefix": self.get_prefix(),
+                }
                 if already_greeted:
-                    await self._send_with_preview(chat_id, self.strings["reloaded"])
+                    await self._send_with_preview(chat_id, self.strings["reloaded"].format(**values))
                 else:
                     self.set(greeting_key, True)
                     await self._send_with_preview(
                         chat_id,
-                        self.strings["greeting"].format(prefix=self.get_prefix()),
+                        self.strings["greeting"].format(**values),
                         is_greeting=True,
                     )
 

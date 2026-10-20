@@ -260,15 +260,17 @@ class Robber(loader.Module):
         "btn_dc_3": "DC 3",
         "btn_dc_4": "DC 4",
         "btn_dc_5": "DC 5",
+        "channel": "channel",
+        "group": "group",
         "greeting_first": (
             "<blockquote><b>Robber</b> installed successfully!</blockquote>\n"
-            "<blockquote>Version: <b>{ver}</b></blockquote>\n"
-            "<blockquote>Ready to copy channels, steal posts and download stories.</blockquote>"
+            "<blockquote>Version: <b>{ver}</b> | Connected accounts: <b>{connected}/{max_accounts}</b></blockquote>\n"
+            "<blockquote>New copies are configured as a {output_type}. Ready to copy channels, steal posts and download stories.</blockquote>"
         ),
         "reloaded": (
             "<blockquote><b>Robber</b> reloaded successfully!</blockquote>\n"
-            "<blockquote>Version: <b>{ver}</b></blockquote>\n"
-            "<blockquote>All systems active and ready.</blockquote>"
+            "<blockquote>Version: <b>{ver}</b> | Connected accounts: <b>{connected}/{max_accounts}</b></blockquote>\n"
+            "<blockquote>New copies are configured as a {output_type}. All systems are active.</blockquote>"
         ),
     }
 
@@ -395,15 +397,17 @@ class Robber(loader.Module):
         "btn_dc_3": "DC 3",
         "btn_dc_4": "DC 4",
         "btn_dc_5": "DC 5",
+        "channel": "канал",
+        "group": "группа",
         "greeting_first": (
             "<blockquote><b>Robber</b> успешно установлен!</blockquote>\n"
-            "<blockquote>Версия: <b>{ver}</b></blockquote>\n"
-            "<blockquote>Готов к копированию каналов, краже постов и историй.</blockquote>"
+            "<blockquote>Версия: <b>{ver}</b> | Подключённые аккаунты: <b>{connected}/{max_accounts}</b></blockquote>\n"
+            "<blockquote>Новые копии создаются как {output_type}. Готов к копированию каналов и скачиванию историй.</blockquote>"
         ),
         "reloaded": (
             "<blockquote><b>Robber</b> успешно перезагружен!</blockquote>\n"
-            "<blockquote>Версия: <b>{ver}</b></blockquote>\n"
-            "<blockquote>Все системы в боевой готовности.</blockquote>"
+            "<blockquote>Версия: <b>{ver}</b> | Подключённые аккаунты: <b>{connected}/{max_accounts}</b></blockquote>\n"
+            "<blockquote>Новые копии создаются как {output_type}. Все системы активны.</blockquote>"
         ),
     }
 
@@ -572,13 +576,19 @@ class Robber(loader.Module):
         greet_key = f"robber_greeted_{cid}_{topic_id}"
         already = self.get(greet_key, False)
         ver_str = ".".join(map(str, __version__))
+        values = {
+            "ver": ver_str,
+            "output_type": self.strings["channel" if self.config["CREATE_CHANNEL"] else "group"],
+            "connected": len(self._load_slots()),
+            "max_accounts": MAX_ACCOUNTS,
+        }
         if already:
-            text = self.strings["reloaded"].format(ver=ver_str)
-            await self._send_with_preview(chat_id, topic_id, text, is_greeting=True)
+            text = self.strings["reloaded"].format(**values)
+            await self._send_with_preview(chat_id, topic_id, text)
         else:
             self.set(greet_key, True)
-            text = self.strings["greeting_first"].format(ver=ver_str)
-            await self._send_with_preview(chat_id, topic_id, text)
+            text = self.strings["greeting_first"].format(**values)
+            await self._send_with_preview(chat_id, topic_id, text, is_greeting=True)
 
     def _ffmpeg_bin(self):
         if self._ffmpeg and os.path.exists(self._ffmpeg):

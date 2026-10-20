@@ -61,8 +61,10 @@ class DepInvoice(loader.Module):
     strings = {
         "name": "DepInvoice",
 
-        "reloaded": "<blockquote><b>DepInvoice module successfully reloaded, everything works</b></blockquote>",
-        "greeting": "<blockquote><b>DepInvoice is ready</b></blockquote>\n<blockquote>This topic will receive Telegram Stars payment and refund logs. Use the module's inline invoice flow and the refund command to manage payments.</blockquote>",
+        "yes": "configured",
+        "no": "not set",
+        "reloaded": "<blockquote><b>DepInvoice reloaded</b></blockquote>\n<blockquote>Invoice title: <b>{title_mode}</b> | Invoice banner: <b>{invoice_banner}</b> | Inline banner: <b>{inline_banner}</b></blockquote>",
+        "greeting": "<blockquote><b>DepInvoice is ready</b></blockquote>\n<blockquote>Invoice title: <b>{title_mode}</b> | Invoice banner: <b>{invoice_banner}</b> | Inline banner: <b>{inline_banner}</b>.</blockquote>\n<blockquote>This topic receives Telegram Stars payment and refund logs. Use the inline invoice flow and <code>{prefix}refund</code> to manage payments.</blockquote>",
         
         "no_bot": "<blockquote><b>Error:</b> Inline bot not found.</blockquote>",
         "refund_invalid_args": "<blockquote><b>Error:</b> Invalid arguments. User ID must be a number.</blockquote>",
@@ -118,8 +120,10 @@ class DepInvoice(loader.Module):
     }
 
     strings_ru = {
-        "reloaded": "<blockquote><b>Модуль DepInvoice был успешно перезагружен, все воркает</b></blockquote>",
-        "greeting": "<blockquote><b>DepInvoice готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить логи платежей и возвратов Telegram Stars. Для управления платежами используйте встроенный сценарий создания счёта и команду возврата.</blockquote>",
+        "yes": "настроен",
+        "no": "не задан",
+        "reloaded": "<blockquote><b>DepInvoice перезагружен</b></blockquote>\n<blockquote>Заголовок счёта: <b>{title_mode}</b> | Баннер счёта: <b>{invoice_banner}</b> | Инлайн-баннер: <b>{inline_banner}</b></blockquote>",
+        "greeting": "<blockquote><b>DepInvoice готов к работе</b></blockquote>\n<blockquote>Заголовок счёта: <b>{title_mode}</b> | Баннер счёта: <b>{invoice_banner}</b> | Инлайн-баннер: <b>{inline_banner}</b>.</blockquote>\n<blockquote>В этот топик будут приходить логи платежей и возвратов Telegram Stars. Используйте создание счёта в инлайне и команду <code>{prefix}refund</code>.</blockquote>",
         
         "no_bot": "<blockquote><b>Ошибка:</b> Inline бот не найден.</blockquote>",
         "refund_invalid_args": "<blockquote><b>Ошибка:</b> Неверные аргументы. ID пользователя должен быть числом.</blockquote>",
@@ -246,13 +250,20 @@ class DepInvoice(loader.Module):
             chat_id = int(f"-100{self._asset_channel}")
             greeting_key = f"depinvoice_greeted_{self._asset_channel}_{self._logger_topic.id}"
             already_greeted = self.get(greeting_key, False)
+            title_mode = self.strings["yes"] if self.config["invoice_title"] else self.strings["no"]
+            values = {
+                "title_mode": title_mode,
+                "invoice_banner": self.strings["yes"] if self.config["invoice_banner"] else self.strings["no"],
+                "inline_banner": self.strings["yes"] if self.config["inline_banner"] else self.strings["no"],
+                "prefix": self.get_prefix(),
+            }
             if already_greeted:
-                await self._send_with_preview(chat_id, self.strings["reloaded"])
+                await self._send_with_preview(chat_id, self.strings["reloaded"].format(**values))
             else:
                 self.set(greeting_key, True)
                 await self._send_with_preview(
                     chat_id,
-                    self.strings["greeting"],
+                    self.strings["greeting"].format(**values),
                     is_greeting=True,
                 )
 

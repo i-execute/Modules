@@ -287,8 +287,8 @@ class WebDeployer(loader.Module):
 
     strings = {
         "name": "WebDeployer",
-        "reloaded": "<b>WebDeployer reloaded</b>",
-        "greeting": "<blockquote><b>WebDeployer is ready</b></blockquote>\n<blockquote>This topic will receive deployment status and error notifications. Use <code>{prefix}wd</code> to open the deployment menu.</blockquote>",
+        "reloaded": "<blockquote><b>WebDeployer reloaded</b></blockquote>\n<blockquote>Saved sites: <b>{sites}</b> | Version: <b>{version}</b></blockquote>",
+        "greeting": "<blockquote><b>WebDeployer is ready</b></blockquote>\n<blockquote>Saved sites: <b>{sites}</b>. Deployments and errors will be logged here.</blockquote>\n<blockquote>Use <code>{prefix}wd</code> to manage sites and your GitHub token.</blockquote>",
         "main_menu": (
             "<b>WebDeployer</b>\n"
             "<blockquote>"
@@ -410,8 +410,8 @@ class WebDeployer(loader.Module):
     }
 
     strings_ru = {
-        "reloaded": "<b>WebDeployer перезагружен</b>",
-        "greeting": "<blockquote><b>WebDeployer готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить сообщения о состоянии деплоя и ошибках. Используйте <code>{prefix}wd</code>, чтобы открыть меню деплоя.</blockquote>",
+        "reloaded": "<blockquote><b>WebDeployer перезагружен</b></blockquote>\n<blockquote>Сохранено сайтов: <b>{sites}</b> | Версия: <b>{version}</b></blockquote>",
+        "greeting": "<blockquote><b>WebDeployer готов к работе</b></blockquote>\n<blockquote>Сохранено сайтов: <b>{sites}</b>. В этот топик будут приходить логи деплоев и ошибок.</blockquote>\n<blockquote>Используйте <code>{prefix}wd</code>, чтобы управлять сайтами и GitHub-токеном.</blockquote>",
         "main_menu": (
             "<b>WebDeployer</b>\n"
             "<blockquote>"
@@ -573,13 +573,18 @@ class WebDeployer(loader.Module):
             chat_id = int(f"-100{self._asset_channel}")
             greeting_key = f"wd_greeted_{self._asset_channel}_{self._logger_topic.id}"
             already_greeted = self.get(greeting_key, False)
+            values = {
+                "sites": len(self._get_sites()),
+                "version": ".".join(map(str, __version__)),
+                "prefix": self.get_prefix(),
+            }
             if already_greeted:
-                await self._send_with_preview(chat_id, self.strings["reloaded"])
+                await self._send_with_preview(chat_id, self.strings["reloaded"].format(**values))
             else:
                 self.set(greeting_key, True)
                 await self._send_with_preview(
                     chat_id,
-                    self.strings["greeting"].format(prefix=self.get_prefix()),
+                    self.strings["greeting"].format(**values),
                     is_greeting=True,
                 )
 

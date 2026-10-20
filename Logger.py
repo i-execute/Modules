@@ -44,8 +44,8 @@ class Logger(loader.Module):
 
     strings = {
         "name": "Logger",
-        "reloaded": "<blockquote><b>Logger module successfully reloaded, everything works</b></blockquote>",
-        "greeting": "<blockquote><b>Logger is ready</b></blockquote>\n<blockquote>This topic will receive the activity logs configured for Logger.</blockquote>",
+        "reloaded": "<blockquote><b>Logger reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b> | Registered commands: <b>{commands}</b></blockquote>",
+        "greeting": "<blockquote><b>Logger is ready</b></blockquote>\n<blockquote>This topic will receive activity logs from <b>{commands}</b> registered commands. Current prefix: <code>{prefix}</code>.</blockquote>",
         "username_row": "@{uname}",
         "owner_attention": "<blockquote><b><a href='tg://user?id={owner_id}'>{owner_name}</a>, attention please</b></blockquote>\n",
         "log_dm_user": (
@@ -81,8 +81,8 @@ class Logger(loader.Module):
     }
 
     strings_ru = {
-        "reloaded": "<blockquote><b>Модуль Logger был успешно перезагружен, все воркает</b></blockquote>",
-        "greeting": "<blockquote><b>Logger готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить настроенные логи активности.</blockquote>",
+        "reloaded": "<blockquote><b>Logger перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b> | Зарегистрировано команд: <b>{commands}</b></blockquote>",
+        "greeting": "<blockquote><b>Logger готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить логи активности для <b>{commands}</b> зарегистрированных команд. Текущий префикс: <code>{prefix}</code>.</blockquote>",
         "username_row": "@{uname}",
         "owner_attention": "<blockquote><b><a href='tg://user?id={owner_id}'>{owner_name}</a>, минуточку внимания</b></blockquote>\n",
         "log_dm_user": (
@@ -286,13 +286,18 @@ class Logger(loader.Module):
         greeting_key = f"logger_greeted_{self._asset_channel}_{self._logger_topic.id}"
         already_greeted = self.get(greeting_key, False)
 
+        values = {
+            "version": ".".join(map(str, __version__)),
+            "commands": len(self.allmodules.commands),
+            "prefix": utils.escape_html(self.get_prefix()),
+        }
         if already_greeted:
-            await self._send_with_preview(chat_id, self.strings["reloaded"])
+            await self._send_with_preview(chat_id, self.strings["reloaded"].format(**values))
         else:
             self.set(greeting_key, True)
             await self._send_with_preview(
                 chat_id,
-                self.strings["greeting"],
+                self.strings["greeting"].format(**values),
                 is_greeting=True,
             )
 

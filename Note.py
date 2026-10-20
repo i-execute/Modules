@@ -46,8 +46,10 @@ class Note(loader.Module):
 
     strings = {
         "name": "Note",
-        "reloaded": "<blockquote><b>Note module successfully reloaded, everything works</b></blockquote>",
-        "greeting": "<blockquote><b>Note is ready</b></blockquote>\n<blockquote>This topic will receive Note module status messages. Your saved notes remain available through the module commands.</blockquote>\n<blockquote>Use <code>{prefix}note</code> to manage and open notes.</blockquote>",
+        "yes": "enabled",
+        "no": "disabled",
+        "reloaded": "<blockquote><b>Note reloaded</b></blockquote>\n<blockquote>Saved notes: <b>{notes}</b> | Premium: <b>{premium}</b></blockquote>",
+        "greeting": "<blockquote><b>Note is ready</b></blockquote>\n<blockquote><b>{notes}</b> notes are saved. Premium features: <b>{premium}</b>.</blockquote>\n<blockquote>Use <code>{prefix}note</code> to manage and open notes.</blockquote>",
         "help": (
             "<b>Note module commands</b>\n"
             "<blockquote><code>{prefix}note create [name]</code> - save replied media\n"
@@ -86,8 +88,10 @@ class Note(loader.Module):
     }
 
     strings_ru = {
-        "reloaded": "<blockquote><b>Модуль Note был успешно перезагружен, все воркает</b></blockquote>",
-        "greeting": "<blockquote><b>Note готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить сообщения о состоянии модуля. Сохранённые заметки доступны через команды.</blockquote>\n<blockquote>Используйте <code>{prefix}note</code>, чтобы управлять заметками и открывать их.</blockquote>",
+        "yes": "включены",
+        "no": "выключены",
+        "reloaded": "<blockquote><b>Note перезагружен</b></blockquote>\n<blockquote>Сохранено заметок: <b>{notes}</b> | Premium: <b>{premium}</b></blockquote>",
+        "greeting": "<blockquote><b>Note готов к работе</b></blockquote>\n<blockquote>Сохранено заметок: <b>{notes}</b>. Функции Premium: <b>{premium}</b>.</blockquote>\n<blockquote>Используйте <code>{prefix}note</code>, чтобы управлять заметками и открывать их.</blockquote>",
         "help": (
             "<b>Команды модуля Note</b>\n"
             "<blockquote><code>{prefix}note create [название]</code> - сохранить медиа из реплая\n"
@@ -176,13 +180,19 @@ class Note(loader.Module):
         chat_id = int(f"-100{self._asset_channel}")
         greeting_key = f"note_greeted_{self._asset_channel}_{self._storage_topic.id}"
         already_greeted = self.get(greeting_key, False)
+        notes = self.config["NOTES"]
+        values = {
+            "notes": len(notes) if isinstance(notes, dict) else 0,
+            "premium": self.strings["yes" if self._premium else "no"],
+            "prefix": self.get_prefix(),
+        }
         if already_greeted:
-            await self._send_with_preview(chat_id, self.strings["reloaded"])
+            await self._send_with_preview(chat_id, self.strings["reloaded"].format(**values))
         else:
             self.set(greeting_key, True)
             await self._send_with_preview(
                 chat_id,
-                self.strings["greeting"].format(prefix=self.get_prefix()),
+                self.strings["greeting"].format(**values),
                 is_greeting=True,
             )
 

@@ -107,11 +107,11 @@ class RaidProtection(loader.Module):
             "Report: {report_status}\n"
             "Message: <code>{text}</code></blockquote>"
         ),
-        "reloaded": "<blockquote><b>RaidProtection module successfully reloaded, everything works</b></blockquote>",
+        "reloaded": "<blockquote><b>RaidProtection reloaded</b></blockquote>\n<blockquote>Spam reports: <b>{spam_reports}</b> | Active guard bots: <b>{guard_bots}</b> | Version: <b>{ver}</b></blockquote>",
         "greeting_first": (
             "<blockquote><b>RaidProtection installed successfully!</b></blockquote>\n"
-            "<blockquote>Version: <b>{ver}</b></blockquote>\n"
-            "<blockquote>Protection for personal messages and groups is active.</blockquote>"
+            "<blockquote>Protection for personal messages and groups is active. Spam reports: <b>{spam_reports}</b>.</blockquote>\n"
+            "<blockquote>Active guard bots: <b>{guard_bots}</b> | Version: <b>{ver}</b></blockquote>"
         ),
         "inline_create_failed": (
             "<blockquote><b>Setup Failed</b></blockquote>\n"
@@ -249,11 +249,11 @@ class RaidProtection(loader.Module):
             "Жалоба: {report_status}\n"
             "Сообщение: <code>{text}</code></blockquote>"
         ),
-        "reloaded": "<blockquote><b>Модуль RaidProtection успешно перезагружен, все системы работают</b></blockquote>",
+        "reloaded": "<blockquote><b>RaidProtection перезагружен</b></blockquote>\n<blockquote>Жалобы на спам: <b>{spam_reports}</b> | Активных guard-ботов: <b>{guard_bots}</b> | Версия: <b>{ver}</b></blockquote>",
         "greeting_first": (
             "<blockquote><b>RaidProtection успешно установлен!</b></blockquote>\n"
-            "<blockquote>Версия: <b>{ver}</b></blockquote>\n"
-            "<blockquote>Защита личных сообщений и групп активна.</blockquote>"
+            "<blockquote>Защита личных сообщений и групп активна. Отправка жалоб на спам: <b>{spam_reports}</b>.</blockquote>\n"
+            "<blockquote>Активных guard-ботов: <b>{guard_bots}</b> | Версия: <b>{ver}</b></blockquote>"
         ),
         "inline_create_failed": (
             "<blockquote><b>Ошибка настройки</b></blockquote>\n"
@@ -511,12 +511,16 @@ class RaidProtection(loader.Module):
         if cid and self._storage_topic:
             greet_key = f"rp_greeted_{cid}_{self._storage_topic.id}"
             already = self.get(greet_key, False)
-            ver_str = ".".join(map(str, __version__))
+            values = {
+                "ver": ".".join(map(str, __version__)),
+                "spam_reports": self.strings["status_enabled" if self.config["SPAM_MANAGER"] else "status_disabled"],
+                "guard_bots": sum(bool(info.get("enabled")) for info in self._guard_bots.values()),
+            }
             if already:
-                await self._send_with_preview(self.strings["reloaded"])
+                await self._send_with_preview(self.strings["reloaded"].format(**values))
             else:
                 self.set(greet_key, True)
-                await self._send_with_preview(self.strings["greeting_first"].format(ver=ver_str), is_greeting=True)
+                await self._send_with_preview(self.strings["greeting_first"].format(**values), is_greeting=True)
 
     async def _send_with_preview(self, text, is_greeting=False):
         cid = self._asset_channel_id()

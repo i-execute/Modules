@@ -112,8 +112,8 @@ class XRay(loader.Module):
 
     strings = {
         "name": "XRay",
-        "reloaded": "<blockquote><b>XRay module successfully reloaded, everything works</b></blockquote>",
-        "greeting": "<blockquote><b>XRay is ready</b></blockquote>\n<blockquote>This topic will receive VPN service, user and subscription notifications.</blockquote>\n<blockquote>Use <code>{prefix}xray</code> to open the administration menu.</blockquote>",
+        "reloaded": "<blockquote><b>XRay reloaded</b></blockquote>\n<blockquote>Users: <b>{users}</b> | Subscriptions: <b>{subscriptions}</b> | Log file limit: <b>{log_size} MB</b></blockquote>",
+        "greeting": "<blockquote><b>XRay is ready</b></blockquote>\n<blockquote>Configured users: <b>{users}</b> | Subscriptions: <b>{subscriptions}</b> | Log file limit: <b>{log_size} MB</b></blockquote>\n<blockquote>This topic receives VPN service, user and subscription notifications. Use <code>{prefix}xray</code> to manage the service.</blockquote>",
         
         "main_menu": (
             "<b>XRay Multi-User VPN</b>\n"
@@ -630,8 +630,8 @@ class XRay(loader.Module):
 
     strings_ru = {
         "name": "XRay",
-        "reloaded": "<blockquote><b>Модуль XRay был успешно перезагружен, все воркает</b></blockquote>",
-        "greeting": "<blockquote><b>XRay готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить уведомления о VPN-сервисе, пользователях и подписках.</blockquote>\n<blockquote>Для открытия меню управления используйте <code>{prefix}xray</code>.</blockquote>",
+        "reloaded": "<blockquote><b>XRay перезагружен</b></blockquote>\n<blockquote>Пользователей: <b>{users}</b> | Подписок: <b>{subscriptions}</b> | Лимит файла лога: <b>{log_size} MB</b></blockquote>",
+        "greeting": "<blockquote><b>XRay готов к работе</b></blockquote>\n<blockquote>Настроено пользователей: <b>{users}</b> | Подписок: <b>{subscriptions}</b> | Лимит файла лога: <b>{log_size} MB</b></blockquote>\n<blockquote>В этот топик будут приходить уведомления о VPN-сервисе, пользователях и подписках. Для управления используйте <code>{prefix}xray</code>.</blockquote>",
         "main_menu": (
             "<b>XRay Мультиюзерный VPN</b>\n"
             "<blockquote>Всего юзеров: {total}\n"
@@ -1204,13 +1204,19 @@ class XRay(loader.Module):
             chat_id = int(f"-100{self._asset_channel}")
             greeting_key = f"xray_greeted_{self._asset_channel}_{self._logger_topic.id}"
             already_greeted = self.get(greeting_key, False)
+            values = {
+                "users": len(self._users),
+                "subscriptions": len(self._sub),
+                "log_size": self.config["MAX_LOG_FILE_SIZE"],
+                "prefix": self.get_prefix(),
+            }
             if already_greeted:
-                await self._send_with_preview(chat_id, self.strings["reloaded"])
+                await self._send_with_preview(chat_id, self.strings["reloaded"].format(**values))
             else:
                 self.set(greeting_key, True)
                 await self._send_with_preview(
                     chat_id,
-                    self.strings["greeting"].format(prefix=self.get_prefix()),
+                    self.strings["greeting"].format(**values),
                     is_greeting=True,
                 )
         
