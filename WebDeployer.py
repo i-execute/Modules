@@ -287,6 +287,7 @@ class WebDeployer(loader.Module):
     strings = {
         "name": "WebDeployer",
         "reloaded": "<b>WebDeployer reloaded</b>",
+        "greeting": "<blockquote><b>WebDeployer is ready</b></blockquote>\n<blockquote>This topic will receive deployment status and error notifications. Use <code>{prefix}wd</code> to open the deployment menu.</blockquote>",
         "main_menu": (
             "<b>WebDeployer</b>\n"
             "<blockquote>"
@@ -409,6 +410,7 @@ class WebDeployer(loader.Module):
 
     strings_ru = {
         "reloaded": "<b>WebDeployer перезагружен</b>",
+        "greeting": "<blockquote><b>WebDeployer готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить сообщения о состоянии деплоя и ошибках. Используйте <code>{prefix}wd</code>, чтобы открыть меню деплоя.</blockquote>",
         "main_menu": (
             "<b>WebDeployer</b>\n"
             "<blockquote>"
@@ -574,6 +576,10 @@ class WebDeployer(loader.Module):
                 await self._send_with_preview(chat_id, self.strings["reloaded"])
             else:
                 self.set(greeting_key, True)
+                await self._send_with_preview(
+                    chat_id,
+                    self.strings["greeting"].format(prefix=self.get_prefix()),
+                )
 
         await self._reattach_sites()
 

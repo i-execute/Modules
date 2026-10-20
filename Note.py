@@ -47,6 +47,7 @@ class Note(loader.Module):
     strings = {
         "name": "Note",
         "reloaded": "<blockquote><b>Note module successfully reloaded, everything works</b></blockquote>",
+        "greeting": "<blockquote><b>Note is ready</b></blockquote>\n<blockquote>This topic will receive Note module status messages. Your saved notes remain available through the module commands.</blockquote>\n<blockquote>Use <code>{prefix}note</code> to manage and open notes.</blockquote>",
         "help": (
             "<b>Note module commands</b>\n"
             "<blockquote><code>{prefix}note create [name]</code> - save replied media\n"
@@ -86,6 +87,7 @@ class Note(loader.Module):
 
     strings_ru = {
         "reloaded": "<blockquote><b>Модуль Note был успешно перезагружен, все воркает</b></blockquote>",
+        "greeting": "<blockquote><b>Note готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить сообщения о состоянии модуля. Сохранённые заметки доступны через команды.</blockquote>\n<blockquote>Используйте <code>{prefix}note</code>, чтобы управлять заметками и открывать их.</blockquote>",
         "help": (
             "<b>Команды модуля Note</b>\n"
             "<blockquote><code>{prefix}note create [название]</code> - сохранить медиа из реплая\n"
@@ -178,6 +180,10 @@ class Note(loader.Module):
             await self._send_with_preview(chat_id, self.strings["reloaded"])
         else:
             self.set(greeting_key, True)
+            await self._send_with_preview(
+                chat_id,
+                self.strings["greeting"].format(prefix=self.get_prefix()),
+            )
 
     async def _refresh_storage_topic(self):
         self._storage_topic = await utils.asset_forum_topic(

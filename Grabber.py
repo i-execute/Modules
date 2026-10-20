@@ -413,6 +413,7 @@ class Grabber(loader.Module):
     strings = {
         "name": "Grabber",
         "reloaded": "<blockquote><b>Grabber module successfully reloaded, everything works</b></blockquote>",
+        "greeting": "<blockquote><b>Grabber is ready</b></blockquote>\n<blockquote>This topic will receive downloader status and activity messages.</blockquote>\n<blockquote>Use <code>{prefix}grab</code> to configure Grabber and manage downloads.</blockquote>",
         "btn_video": "Video",
         "btn_audio": "Audio (MP3)",
         "btn_cancel": "Cancel",
@@ -597,6 +598,7 @@ class Grabber(loader.Module):
     strings_ru = {
         "name": "Grabber",
         "reloaded": "<blockquote><b>Модуль Grabber был успешно перезагружен, все воркает</b></blockquote>",
+        "greeting": "<blockquote><b>Grabber готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить сообщения о состоянии и работе загрузчика.</blockquote>\n<blockquote>Используйте <code>{prefix}grab</code>, чтобы настроить Grabber и управлять загрузками.</blockquote>",
         "btn_video": "Видео",
         "btn_audio": "Аудио (MP3)",
         "btn_cancel": "Отмена",
@@ -1180,6 +1182,10 @@ class Grabber(loader.Module):
                     await self._send_with_preview(chat_id, self.strings["reloaded"])
                 else:
                     self.set(greeting_key, True)
+                    await self._send_with_preview(
+                        chat_id,
+                        self.strings["greeting"].format(prefix=self.get_prefix()),
+                    )
 
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(self._executor, _install_deps)

@@ -112,6 +112,7 @@ class Deleter(loader.Module):
     strings = {
         "name": "Deleter",
         "reloaded": "<blockquote><b>Deleter module successfully reloaded, everything works</b></blockquote>",
+        "greeting": "<blockquote><b>Deleter is ready</b></blockquote>\n<blockquote>This topic will receive Deleter status and activity messages.</blockquote>\n<blockquote>Use <code>{prefix}del</code> to manage message deletion.</blockquote>",
         "help": (
             "<b>Deleter - swift message deletion</b>\n"
             "<b>Own messages:</b>\n"
@@ -242,6 +243,7 @@ class Deleter(loader.Module):
 
     strings_ru = {
         "reloaded": "<blockquote><b>Модуль Deleter был успешно перезагружен, все воркает</b></blockquote>",
+        "greeting": "<blockquote><b>Deleter готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить сообщения о состоянии и работе модуля.</blockquote>\n<blockquote>Для управления удалением сообщений используйте <code>{prefix}del</code>.</blockquote>",
         "help": (
             "<b>Deleter - быстрое удаление сообщений</b>\n"
             "<b>Свои сообщения:</b>\n"
@@ -442,6 +444,10 @@ class Deleter(loader.Module):
             await self._send_with_preview(chat_id, self.strings["reloaded"])
         else:
             self.set(greeting_key, True)
+            await self._send_with_preview(
+                chat_id,
+                self.strings["greeting"].format(prefix=self.get_prefix()),
+            )
 
     async def _refresh_deleter_topic(self):
         self._deleter_topic = await utils.asset_forum_topic(

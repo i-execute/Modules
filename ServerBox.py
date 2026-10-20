@@ -45,6 +45,7 @@ class ServerBox(loader.Module):
     strings = {
         "name": "ServerBox",
         "reloaded": "<blockquote><b>ServerBox module successfully reloaded, everything works</b></blockquote>",
+        "greeting": "<blockquote><b>ServerBox is ready</b></blockquote>\n<blockquote>This topic will receive server resource monitoring alerts and status messages.</blockquote>",
         "cpu_alert": (
             "<pre><code class=\"language-serverbox\">"
             "<b>CPU ALERT</b>\n"
@@ -102,6 +103,7 @@ class ServerBox(loader.Module):
     strings_ru = {
         "name": "ServerBox",
         "reloaded": "<blockquote><b>Модуль ServerBox был успешно перезагружен, все воркает</b></blockquote>",
+        "greeting": "<blockquote><b>ServerBox готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить предупреждения мониторинга ресурсов сервера и сообщения о состоянии.</blockquote>",
         "cpu_alert": (
             "<pre><code class=\"language-serverbox\">"
             "<b>CPU ALERT</b>\n"
@@ -230,6 +232,10 @@ class ServerBox(loader.Module):
             await self._send_with_preview(chat_id, self.strings["reloaded"])
         else:
             self.set(greeting_key, True)
+            await self._send_with_preview(
+                chat_id,
+                self.strings["greeting"],
+            )
 
         self._start_monitor()
 

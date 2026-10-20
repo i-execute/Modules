@@ -61,6 +61,7 @@ class DepInvoice(loader.Module):
         "name": "DepInvoice",
 
         "reloaded": "<blockquote><b>DepInvoice module successfully reloaded, everything works</b></blockquote>",
+        "greeting": "<blockquote><b>DepInvoice is ready</b></blockquote>\n<blockquote>This topic will receive Telegram Stars payment and refund logs. Use the module's inline invoice flow and the refund command to manage payments.</blockquote>",
         
         "no_bot": "<blockquote><b>Error:</b> Inline bot not found.</blockquote>",
         "refund_invalid_args": "<blockquote><b>Error:</b> Invalid arguments. User ID must be a number.</blockquote>",
@@ -117,6 +118,7 @@ class DepInvoice(loader.Module):
 
     strings_ru = {
         "reloaded": "<blockquote><b>Модуль DepInvoice был успешно перезагружен, все воркает</b></blockquote>",
+        "greeting": "<blockquote><b>DepInvoice готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить логи платежей и возвратов Telegram Stars. Для управления платежами используйте встроенный сценарий создания счёта и команду возврата.</blockquote>",
         
         "no_bot": "<blockquote><b>Ошибка:</b> Inline бот не найден.</blockquote>",
         "refund_invalid_args": "<blockquote><b>Ошибка:</b> Неверные аргументы. ID пользователя должен быть числом.</blockquote>",
@@ -247,6 +249,10 @@ class DepInvoice(loader.Module):
                 await self._send_with_preview(chat_id, self.strings["reloaded"])
             else:
                 self.set(greeting_key, True)
+                await self._send_with_preview(
+                    chat_id,
+                    self.strings["greeting"],
+                )
 
     async def _refresh_invoice_topic(self):
         self._logger_topic = await utils.asset_forum_topic(

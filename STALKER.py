@@ -59,6 +59,7 @@ class STALKER(loader.Module):
     strings = {
         "name": "STALKER",
         "reloaded": "<blockquote><b>STALKER module successfully reloaded, everything works</b></blockquote>",
+        "greeting": "<blockquote><b>STALKER is ready</b></blockquote>\n<blockquote>This topic will receive notifications when someone starts typing and then stays silent.</blockquote>",
         "log_entry": (
             "<blockquote><b>Stopped typing</b>\n"
             "<b>From:</b> {from_name}\n"
@@ -71,6 +72,7 @@ class STALKER(loader.Module):
 
     strings_ru = {
         "reloaded": "<blockquote><b>Модуль STALKER был успешно перезагружен, все воркает</b></blockquote>",
+        "greeting": "<blockquote><b>STALKER готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить уведомления о пользователях, которые начали печатать, но так и не отправили сообщение.</blockquote>",
         "log_entry": (
             "<blockquote><b>Передумал писать</b>\n"
             "<b>От:</b> {from_name}\n"
@@ -184,6 +186,10 @@ class STALKER(loader.Module):
             await self._send_with_preview(chat_id, self.strings["reloaded"])
         else:
             self.set(greeting_key, True)
+            await self._send_with_preview(
+                chat_id,
+                self.strings["greeting"],
+            )
 
         self._checker_task = asyncio.ensure_future(self._checker_loop())
 

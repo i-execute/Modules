@@ -44,6 +44,7 @@ class Logger(loader.Module):
     strings = {
         "name": "Logger",
         "reloaded": "<blockquote><b>Logger module successfully reloaded, everything works</b></blockquote>",
+        "greeting": "<blockquote><b>Logger is ready</b></blockquote>\n<blockquote>This topic will receive the activity logs configured for Logger.</blockquote>",
         "username_row": "@{uname}",
         "owner_attention": "<blockquote><b><a href='tg://user?id={owner_id}'>{owner_name}</a>, attention please</b></blockquote>\n",
         "log_dm_user": (
@@ -80,6 +81,7 @@ class Logger(loader.Module):
 
     strings_ru = {
         "reloaded": "<blockquote><b>Модуль Logger был успешно перезагружен, все воркает</b></blockquote>",
+        "greeting": "<blockquote><b>Logger готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить настроенные логи активности.</blockquote>",
         "username_row": "@{uname}",
         "owner_attention": "<blockquote><b><a href='tg://user?id={owner_id}'>{owner_name}</a>, минуточку внимания</b></blockquote>\n",
         "log_dm_user": (
@@ -287,6 +289,10 @@ class Logger(loader.Module):
             await self._send_with_preview(chat_id, self.strings["reloaded"])
         else:
             self.set(greeting_key, True)
+            await self._send_with_preview(
+                chat_id,
+                self.strings["greeting"],
+            )
 
     async def _refresh_logger_topic(self):
         self._logger_topic = await utils.asset_forum_topic(

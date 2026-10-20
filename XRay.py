@@ -112,6 +112,7 @@ class XRay(loader.Module):
     strings = {
         "name": "XRay",
         "reloaded": "<blockquote><b>XRay module successfully reloaded, everything works</b></blockquote>",
+        "greeting": "<blockquote><b>XRay is ready</b></blockquote>\n<blockquote>This topic will receive VPN service, user and subscription notifications.</blockquote>\n<blockquote>Use <code>{prefix}xray</code> to open the administration menu.</blockquote>",
         
         "main_menu": (
             "<b>XRay Multi-User VPN</b>\n"
@@ -629,6 +630,7 @@ class XRay(loader.Module):
     strings_ru = {
         "name": "XRay",
         "reloaded": "<blockquote><b>Модуль XRay был успешно перезагружен, все воркает</b></blockquote>",
+        "greeting": "<blockquote><b>XRay готов к работе</b></blockquote>\n<blockquote>В этот топик будут приходить уведомления о VPN-сервисе, пользователях и подписках.</blockquote>\n<blockquote>Для открытия меню управления используйте <code>{prefix}xray</code>.</blockquote>",
         "main_menu": (
             "<b>XRay Мультиюзерный VPN</b>\n"
             "<blockquote>Всего юзеров: {total}\n"
@@ -1205,6 +1207,10 @@ class XRay(loader.Module):
                 await self._send_with_preview(chat_id, self.strings["reloaded"])
             else:
                 self.set(greeting_key, True)
+                await self._send_with_preview(
+                    chat_id,
+                    self.strings["greeting"].format(prefix=self.get_prefix()),
+                )
         
         if not self._xray_installed():
             logger.warning("[XR] XRay not installed")
@@ -1280,19 +1286,25 @@ class XRay(loader.Module):
                 icon_emoji_id=5386654279341747455,
             )
             if getattr(topic, "closed", False):
-                peer = await self._client.get_input_entity(self._asset_channel)
-                await self._client(EditForumTopicRequest(
-                    peer=peer,
-                    topic_id=topic.id,
-                    closed=False,
-                ))
+                try:
+                    peer = await self._client.get_input_entity(self._asset_channel)
+                    await self._client(EditForumTopicRequest(
+                        peer=peer,
+                        topic_id=topic.id,
+                        closed=False,
+                    ))
+                except Exception as e:
+                    logger.warning(f"[XR] Failed to reopen log topic: {e}")
             if getattr(topic, "icon_emoji_id", None) != 5386654279341747455:
-                peer = await self._client.get_input_entity(self._asset_channel)
-                await self._client(EditForumTopicRequest(
-                    peer=peer,
-                    topic_id=topic.id,
-                    icon_emoji_id=5386654279341747455,
-                ))
+                try:
+                    peer = await self._client.get_input_entity(self._asset_channel)
+                    await self._client(EditForumTopicRequest(
+                        peer=peer,
+                        topic_id=topic.id,
+                        icon_emoji_id=5386654279341747455,
+                    ))
+                except Exception as e:
+                    logger.warning(f"[XR] Failed to update log topic icon: {e}")
             self._logger_topic = topic
             return topic
         except Exception as e:
