@@ -439,6 +439,9 @@ class Rofls(loader.Module):
                 return
 
             circle = self.config["MAKE_CIRCLE_IN_PETPET"]
+            if not circle:
+                legacy_config = self._db.get("RoflsMod", "__config__", {})
+                circle = bool(legacy_config.get("MAKE_CIRCLE_IN_PETPET", False))
             loop = asyncio.get_event_loop()
             w = await loop.run_in_executor(None, _make_petpet_webm, src, circle)
             if not w:

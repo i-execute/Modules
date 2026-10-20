@@ -823,7 +823,17 @@ class SCMusic(loader.Module):
 
     async def _upload_file(self, data, filename, content_type="audio/mpeg"):
         timeout = 60 if content_type.startswith("audio") else 20
-        return await _upload_via(self.config["UPLOAD_PROVIDER"], data, filename, content_type, timeout)
+        preferred = self.config["UPLOAD_PROVIDER"]
+        providers = [preferred] + [
+            provider for provider in UPLOAD_PROVIDERS if provider != preferred
+        ]
+        for provider in providers:
+            url = await _upload_via(provider, data, filename, content_type, timeout)
+            if url:
+                if provider != preferred:
+                    _log("UPLOAD", f"Using {provider} after {preferred} failed")
+                return url
+        return ""
 
     async def _scs_get_cover(self, session_id: str, idx: int) -> typing.Optional[str]:
         sess = self._scs_sessions.get(session_id)
@@ -854,8 +864,9 @@ class SCMusic(loader.Module):
             sanitize_fn(f"{track['username']} - {track['title']}") + ".jpg",
             "image/jpeg",
         )
-        self._cover_cache[track_id] = x0_url
-        cache[idx] = x0_url
+        if x0_url:
+            self._cover_cache[track_id] = x0_url
+            cache[idx] = x0_url
         return x0_url
 
     async def _scs_prefetch_covers(self, session_id: str):
