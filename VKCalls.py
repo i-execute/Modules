@@ -4,7 +4,6 @@
 
 __version__ = (1, 3, 0)
 # meta developer: Execute_forge.t.me
-# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/VKCalls/MetaBanner.jpeg
 
 import asyncio
 import logging

@@ -4,7 +4,7 @@
 
 __version__ = (3, 0, 0)
 # meta developer: Execute_forge.t.me
-# meta banner: https://github.com/i-execute/Modules/raw/main/Storage/YNDXMusic/MetaBannerNew.jpeg
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/YNDXMusic/MetaBanner.jpeg
 
 import os
 import io

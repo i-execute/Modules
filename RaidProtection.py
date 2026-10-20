@@ -61,6 +61,7 @@ LOG_RATE_WINDOW = 1.0
 SAFE_SEND_DURATION = 30.0
 RAID_MSG_INTERVAL = 1.0
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/RaidProtection/Reloading.jpeg"
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/RaidProtection/Greetings.jpeg"
 
 
 @loader.tds
@@ -515,9 +516,9 @@ class RaidProtection(loader.Module):
                 await self._send_with_preview(self.strings["reloaded"])
             else:
                 self.set(greet_key, True)
-                await self._send_with_preview(self.strings["greeting_first"].format(ver=ver_str))
+                await self._send_with_preview(self.strings["greeting_first"].format(ver=ver_str), is_greeting=True)
 
-    async def _send_with_preview(self, text):
+    async def _send_with_preview(self, text, is_greeting=False):
         cid = self._asset_channel_id()
         if not cid or not self._storage_topic:
             return
@@ -545,7 +546,7 @@ class RaidProtection(loader.Module):
                     id=msg.id,
                     message=msg_text,
                     media=InputMediaWebPage(
-                        url=RELOADING_MEDIA_URL,
+                        url=GREETING_MEDIA_URL if is_greeting else RELOADING_MEDIA_URL,
                         optional=True,
                         force_large_media=True,
                     ),

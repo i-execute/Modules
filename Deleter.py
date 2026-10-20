@@ -46,6 +46,7 @@ async def _apply_topic_icon(client, peer, topic, icon_id):
 
 SAYONARA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/Sayonara.mp4"
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/Reloading.jpeg"
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Deleter/Greetings.jpeg"
 
 WIPE_PREFIX = "deleter_wipe_"
 WIPE_CHUNK = 10000
@@ -447,6 +448,7 @@ class Deleter(loader.Module):
             await self._send_with_preview(
                 chat_id,
                 self.strings["greeting"].format(prefix=self.get_prefix()),
+                is_greeting=True,
             )
 
     async def _refresh_deleter_topic(self):
@@ -460,7 +462,7 @@ class Deleter(loader.Module):
         )
         await _apply_topic_icon(self._client, self._asset_channel, self._deleter_topic, 5386654279341747455)
 
-    async def _send_with_preview(self, chat_id, text):
+    async def _send_with_preview(self, chat_id, text, is_greeting=False):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
             msg = await _retry_topic_send(
@@ -483,7 +485,7 @@ class Deleter(loader.Module):
                         id=msg.id,
                         message=msg_text,
                         media=InputMediaWebPage(
-                            url=RELOADING_MEDIA_URL,
+                            url=GREETING_MEDIA_URL if is_greeting else RELOADING_MEDIA_URL,
                             optional=True,
                             force_large_media=True,
                         ),

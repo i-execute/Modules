@@ -36,6 +36,7 @@ async def _retry_topic_send(send, refresh):
 
 CN_TZ = timezone(timedelta(hours=8))
 RELOAD_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/HoyoClaimer/Reloading.jpeg"
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/HoyoClaimer/Greetings.jpeg"
 TOPIC_TITLE = "HoyoClaimer"
 TOPIC_ICON = 5386654279341747455
 HOYO_DOMAINS = ("hoyolab.com", "hoyoverse.com", "mihoyo.com", "miyoushe.com")
@@ -678,7 +679,11 @@ class HoyoClaimer(loader.Module):
             return
         key = f"hoyoclaimer_greeted_{str(channel)[4:]}_{topic_id}"
         auto = self.strings["auto_on" if self.config["AUTO_CLAIM"] else "auto_off"]
-        if self.get(key, False):
+        is_greeting = not self.get(key, False)
+        if is_greeting:
+            self.set(key, True)
+            text = self._s("greeting", auto=auto, time=self.config["CLAIM_TIME"], tz=self._tz_name())
+        else:
             text = self._s(
                 "reloaded",
                 version=".".join(map(str, __version__)),
@@ -686,12 +691,9 @@ class HoyoClaimer(loader.Module):
                 auto=auto,
                 next=self._next_text(),
             )
-        else:
-            self.set(key, True)
-            text = self._s("greeting", auto=auto, time=self.config["CLAIM_TIME"], tz=self._tz_name())
-        await self._send_with_preview(channel, topic_id, text)
+        await self._send_with_preview(channel, topic_id, text, is_greeting=is_greeting)
 
-    async def _send_with_preview(self, channel, topic_id, text):
+    async def _send_with_preview(self, channel, topic_id, text, is_greeting=False):
         bot = self._bot()
         try:
             msg_text, entities = await bot._parse_message_text(text, "html")
@@ -714,7 +716,7 @@ class HoyoClaimer(loader.Module):
                     id=msg.id,
                     message=msg_text,
                     media=InputMediaWebPage(
-                        url=RELOAD_BANNER,
+                        url=GREETING_MEDIA_URL if is_greeting else RELOAD_BANNER,
                         optional=True,
                         force_large_media=True,
                     ),

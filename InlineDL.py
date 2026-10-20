@@ -4,7 +4,7 @@
 
 __version__ = (3, 3, 0)
 # meta developer: Execute_forge.t.me
-# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/MetaBannerNew.jpeg
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/MetaBanner.jpeg
 
 import asyncio
 import copy
@@ -100,6 +100,7 @@ THUMB_IG = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Inl
 THUMB_TT = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/TikTok.png"
 THUMB_PT = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/Pinterest.png"
 RELOAD_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/Reloading.jpeg"
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/InlineDL/Greetings.jpeg"
 TOPIC_TITLE = "InlineDL"
 TOPIC_ICON = 5386654279341747455
 
@@ -812,14 +813,15 @@ class InlineDL(loader.Module):
             premium=self.strings["yes"] if premium else self.strings["no"],
             bot=utils.escape_html(getattr(self.inline, "bot_username", None) or "bot"),
         )
-        if self.get(key, False):
-            text = self.strings["reloaded"].format(**values)
-        else:
+        is_greeting = not self.get(key, False)
+        if is_greeting:
             self.set(key, True)
             text = self.strings["greeting"].format(**values)
-        await self._send_with_preview(channel, topic_id, text)
+        else:
+            text = self.strings["reloaded"].format(**values)
+        await self._send_with_preview(channel, topic_id, text, is_greeting=is_greeting)
 
-    async def _send_with_preview(self, channel, topic_id, text):
+    async def _send_with_preview(self, channel, topic_id, text, is_greeting=False):
         bot = self._bot()
         try:
             msg_text, entities = await bot._parse_message_text(text, "html")
@@ -842,7 +844,7 @@ class InlineDL(loader.Module):
                     id=msg.id,
                     message=msg_text,
                     media=InputMediaWebPage(
-                        url=RELOAD_BANNER,
+                        url=GREETING_MEDIA_URL if is_greeting else RELOAD_BANNER,
                         optional=True,
                         force_large_media=True,
                     ),

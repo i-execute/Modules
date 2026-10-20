@@ -50,7 +50,8 @@ async def _apply_topic_icon(client, peer, topic, icon_id):
 
 
 STARS_PATTERN = re.compile(r'^\s*(\d+)\s*$')
-RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DepInvoce/Reloading.jpeg"
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DepInvoice/Reloading.jpeg"
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DepInvoice/Greetings.jpeg"
 
 
 @loader.tds
@@ -252,6 +253,7 @@ class DepInvoice(loader.Module):
                 await self._send_with_preview(
                     chat_id,
                     self.strings["greeting"],
+                    is_greeting=True,
                 )
 
     async def _refresh_invoice_topic(self):
@@ -265,7 +267,7 @@ class DepInvoice(loader.Module):
         )
         await _apply_topic_icon(self._client, self._asset_channel, self._logger_topic, 5386654279341747455)
 
-    async def _send_with_preview(self, chat_id, text):
+    async def _send_with_preview(self, chat_id, text, is_greeting=False):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
             msg = await _retry_topic_send(
@@ -288,7 +290,7 @@ class DepInvoice(loader.Module):
                         id=msg.id,
                         message=msg_text,
                         media=InputMediaWebPage(
-                            url=RELOADING_MEDIA_URL,
+                            url=GREETING_MEDIA_URL if is_greeting else RELOADING_MEDIA_URL,
                             optional=True,
                             force_large_media=True,
                         ),

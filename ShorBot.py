@@ -4,7 +4,6 @@
 
 __version__ = (1, 0, 0)
 # meta developer: Execute_forge.t.me
-# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/ShorBot/MetaBanner.jpeg
 
 import time
 import math

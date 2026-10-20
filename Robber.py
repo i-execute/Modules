@@ -82,6 +82,7 @@ DC_IP_MAP = {
 }
 
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Robber/Reloading.jpeg"
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Robber/Greetings.jpeg"
 TOPIC_TITLE = "Robber"
 TOPIC_ICON = 5386654279341747455
 
@@ -508,7 +509,7 @@ class Robber(loader.Module):
             logger.error(f"[Robber] topic creation failed: {e}")
             return None
 
-    async def _send_with_preview(self, chat_id, topic_id, text):
+    async def _send_with_preview(self, chat_id, topic_id, text, is_greeting=False):
         bot = getattr(self.inline, "_bot_client", None) or self.inline.bot.client
         if not bot:
             logger.error("[Robber] Inline bot is unavailable; reload notification was not sent")
@@ -535,7 +536,7 @@ class Robber(loader.Module):
                         id=msg.id,
                         message=msg_text,
                         media=InputMediaWebPage(
-                            url=RELOADING_MEDIA_URL,
+                            url=GREETING_MEDIA_URL if is_greeting else RELOADING_MEDIA_URL,
                             optional=True,
                             force_large_media=True,
                         ),
@@ -573,7 +574,7 @@ class Robber(loader.Module):
         ver_str = ".".join(map(str, __version__))
         if already:
             text = self.strings["reloaded"].format(ver=ver_str)
-            await self._send_with_preview(chat_id, topic_id, text)
+            await self._send_with_preview(chat_id, topic_id, text, is_greeting=True)
         else:
             self.set(greet_key, True)
             text = self.strings["greeting_first"].format(ver=ver_str)

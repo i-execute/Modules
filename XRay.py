@@ -39,6 +39,7 @@ from .. import loader, utils
 from ..inline.types import InlineCall
 
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/Reloading.jpeg"
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/Greetings.jpeg"
 
 logger = logging.getLogger(__name__)
 
@@ -1210,6 +1211,7 @@ class XRay(loader.Module):
                 await self._send_with_preview(
                     chat_id,
                     self.strings["greeting"].format(prefix=self.get_prefix()),
+                    is_greeting=True,
                 )
         
         if not self._xray_installed():
@@ -1236,7 +1238,7 @@ class XRay(loader.Module):
         await self._sub_autostart()
         self._sub_start_task()
 
-    async def _send_with_preview(self, chat_id, text):
+    async def _send_with_preview(self, chat_id, text, is_greeting=False):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
             msg = await _retry_topic_send(
@@ -1259,7 +1261,7 @@ class XRay(loader.Module):
                         id=msg.id,
                         message=msg_text,
                         media=InputMediaWebPage(
-                            url=RELOADING_MEDIA_URL,
+                            url=GREETING_MEDIA_URL if is_greeting else RELOADING_MEDIA_URL,
                             optional=True,
                             force_large_media=True,
                         ),

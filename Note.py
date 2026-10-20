@@ -4,7 +4,6 @@
 
 __version__ = (3, 0, 1)
 # meta developer: Execute_forge.t.me
-# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Note/MetaBannerNew.jpeg
 
 import logging
 import asyncio
@@ -38,6 +37,7 @@ E_CAT = '<tg-emoji emoji-id=5255715243476164998>😸</tg-emoji>'
 E_ANGRY = '<tg-emoji emoji-id=5258084738278658226>😠</tg-emoji>'
 E_STORAGE = 5386654279341747455
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Note/Reloading.jpeg"
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Note/Greetings.jpeg"
 
 
 @loader.tds
@@ -183,6 +183,7 @@ class Note(loader.Module):
             await self._send_with_preview(
                 chat_id,
                 self.strings["greeting"].format(prefix=self.get_prefix()),
+                is_greeting=True,
             )
 
     async def _refresh_storage_topic(self):
@@ -196,7 +197,7 @@ class Note(loader.Module):
         )
         await _apply_topic_icon(self._client, self._asset_channel, self._storage_topic, E_STORAGE)
 
-    async def _send_with_preview(self, chat_id, text):
+    async def _send_with_preview(self, chat_id, text, is_greeting=False):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
             msg = await _retry_topic_send(
@@ -219,7 +220,7 @@ class Note(loader.Module):
                         id=msg.id,
                         message=msg_text,
                         media=InputMediaWebPage(
-                            url=RELOADING_MEDIA_URL,
+                            url=GREETING_MEDIA_URL if is_greeting else RELOADING_MEDIA_URL,
                             optional=True,
                             force_large_media=True,
                         ),

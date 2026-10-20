@@ -65,6 +65,7 @@ ARCHIVE_SUFFIXES = (
 PREFERRED_ROOT_NAMES = ("dist", "build", "public", "out", "www", ".output/public")
 SKIP_DIR_NAMES = {"node_modules", "__pycache__", ".git", ".svn", ".hg", ".next", ".cache"}
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/WebDeployer/Reloading.jpeg"
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/WebDeployer/Greetings.jpeg"
 TOPIC_ICON_EMOJI_ID = 5386654279341747455
 
 
@@ -579,6 +580,7 @@ class WebDeployer(loader.Module):
                 await self._send_with_preview(
                     chat_id,
                     self.strings["greeting"].format(prefix=self.get_prefix()),
+                    is_greeting=True,
                 )
 
         await self._reattach_sites()
@@ -594,7 +596,7 @@ class WebDeployer(loader.Module):
         )
         await _apply_topic_icon(self._client, self._asset_channel, self._logger_topic, TOPIC_ICON_EMOJI_ID)
 
-    async def _send_with_preview(self, chat_id, text):
+    async def _send_with_preview(self, chat_id, text, is_greeting=False):
         try:
             msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
             msg = await _retry_topic_send(
@@ -617,7 +619,7 @@ class WebDeployer(loader.Module):
                         id=msg.id,
                         message=msg_text,
                         media=InputMediaWebPage(
-                            url=RELOADING_MEDIA_URL,
+                            url=GREETING_MEDIA_URL if is_greeting else RELOADING_MEDIA_URL,
                             optional=True,
                             force_large_media=True,
                         ),
