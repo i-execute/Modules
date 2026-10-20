@@ -30,8 +30,8 @@ Pic2Emoji
 ProxyScanner
 QRAuthDumper
 RaidProtection
-Rofls
 Robber
+Rofls
 SCMusic
 ServerBox
 Session
