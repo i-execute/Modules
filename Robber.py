@@ -509,9 +509,7 @@ class Robber(loader.Module):
             msg_text, entities = await bot._parse_message_text(text, "html")
             msg = await bot.send_message(
                 chat_id,
-                msg_text,
-                parse_mode=None,
-                entities=entities,
+                text,
                 message_thread_id=topic_id,
             )
             try:

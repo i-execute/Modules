@@ -422,6 +422,10 @@ class RaidProtection(loader.Module):
         cid = self._get_asset_channel()
         return int(f"-100{cid}") if cid else None
 
+    def _inline_bot(self):
+        inline = getattr(self, "inline", None)
+        return getattr(inline, "bot", None) or getattr(inline, "_bot_client", None)
+
     async def _ensure_log_topic(self):
         async with self._flood_lock:
             try:
@@ -443,7 +447,7 @@ class RaidProtection(loader.Module):
                 logger.error(f"[RaidProtection] Failed to create/get log topic: {e}")
                 self._setup_failed = True
                 try:
-                    bot = getattr(getattr(self, "inline", None), "_bot_client", None) or getattr(getattr(self, "inline", None), "bot", None)
+                    bot = self._inline_bot()
                     if bot and self._owner:
                         await bot.send_message(
                             self._owner.id,
@@ -500,16 +504,14 @@ class RaidProtection(loader.Module):
         cid = self._asset_channel_id()
         if not cid or not self._storage_topic:
             return
-        bot = getattr(getattr(self, "inline", None), "_bot_client", None) or getattr(getattr(self, "inline", None), "bot", None)
+        bot = self._inline_bot()
         if not bot:
             return
         try:
             msg_text, entities = await bot._parse_message_text(text, "html")
             msg = await bot.send_message(
                 cid,
-                msg_text,
-                parse_mode=None,
-                entities=entities,
+                text,
                 message_thread_id=self._storage_topic.id,
             )
             try:
@@ -545,16 +547,13 @@ class RaidProtection(loader.Module):
             if not self._setup_failed:
                 await self._ensure_log_topic()
             return
-        bot = getattr(getattr(self, "inline", None), "_bot_client", None) or getattr(getattr(self, "inline", None), "bot", None)
+        bot = self._inline_bot()
         if not bot:
             return
         try:
-            msg_text, entities = await bot._parse_message_text(text, "html")
             await bot.send_message(
                 cid,
-                msg_text,
-                parse_mode=None,
-                entities=entities,
+                text,
                 disable_web_page_preview=True,
                 message_thread_id=self._storage_topic.id,
             )
@@ -567,7 +566,7 @@ class RaidProtection(loader.Module):
         cid = self._asset_channel_id()
         if not self._storage_topic or not cid:
             return
-        bot = getattr(getattr(self, "inline", None), "_bot_client", None) or getattr(getattr(self, "inline", None), "bot", None)
+        bot = self._inline_bot()
         if not bot:
             return
         try:
@@ -576,7 +575,7 @@ class RaidProtection(loader.Module):
                     cid,
                     f,
                     attributes=[DocumentAttributeFilename(filename)],
-                    message_thread_id=self._storage_topic.id,
+                    reply_to=self._storage_topic.id,
                 )
         except Exception as e:
             logger.error(f"[RaidProtection] Failed to send log file: {e}")
