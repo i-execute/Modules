@@ -1279,15 +1279,18 @@ class XRay(loader.Module):
                 description="XRay users and device limit logs",
                 icon_emoji_id=5386654279341747455,
             )
-            if (
-                getattr(topic, "closed", False)
-                or getattr(topic, "icon_emoji_id", None) != 5386654279341747455
-            ):
+            if getattr(topic, "closed", False):
                 peer = await self._client.get_input_entity(self._asset_channel)
                 await self._client(EditForumTopicRequest(
                     peer=peer,
                     topic_id=topic.id,
                     closed=False,
+                ))
+            if getattr(topic, "icon_emoji_id", None) != 5386654279341747455:
+                peer = await self._client.get_input_entity(self._asset_channel)
+                await self._client(EditForumTopicRequest(
+                    peer=peer,
+                    topic_id=topic.id,
                     icon_emoji_id=5386654279341747455,
                 ))
             self._logger_topic = topic
