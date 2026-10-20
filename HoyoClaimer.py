@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 CN_TZ = timezone(timedelta(hours=8))
 RELOAD_BANNER = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/HoyoClaimer/Reloading.jpeg"
 TOPIC_TITLE = "HoyoClaimer"
-TOPIC_ICON = 5379673776369742437
+TOPIC_ICON = 5384166020103578735
 HOYO_DOMAINS = ("hoyolab.com", "hoyoverse.com", "mihoyo.com", "miyoushe.com")
 CN_DOMAINS = ("mihoyo.com", "miyoushe.com")
 AUTH_UID = ("ltuid_v2", "ltuid", "account_id_v2", "account_id", "stuid", "login_uid")
