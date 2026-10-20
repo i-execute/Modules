@@ -500,8 +500,7 @@ class Robber(loader.Module):
             return None
 
     async def _send_with_preview(self, chat_id, topic_id, text):
-        inline = getattr(self, "inline", None)
-        bot = getattr(inline, "bot", None) or getattr(inline, "_bot_client", None)
+        bot = getattr(self.inline, "_bot_client", None) or self.inline.bot.client
         if not bot:
             logger.error("[Robber] Inline bot is unavailable; reload notification was not sent")
             return
@@ -509,8 +508,10 @@ class Robber(loader.Module):
             msg_text, entities = await bot._parse_message_text(text, "html")
             msg = await bot.send_message(
                 chat_id,
-                text,
-                message_thread_id=topic_id,
+                msg_text,
+                formatting_entities=entities,
+                reply_to=topic_id,
+                link_preview=False,
             )
             try:
                 peer = await bot.get_input_entity(chat_id)

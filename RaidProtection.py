@@ -422,9 +422,8 @@ class RaidProtection(loader.Module):
         cid = self._get_asset_channel()
         return int(f"-100{cid}") if cid else None
 
-    def _inline_bot(self):
-        inline = getattr(self, "inline", None)
-        return getattr(inline, "bot", None) or getattr(inline, "_bot_client", None)
+    def _bot(self):
+        return getattr(self.inline, "_bot_client", None) or self.inline.bot.client
 
     async def _ensure_log_topic(self):
         async with self._flood_lock:
@@ -447,12 +446,12 @@ class RaidProtection(loader.Module):
                 logger.error(f"[RaidProtection] Failed to create/get log topic: {e}")
                 self._setup_failed = True
                 try:
-                    bot = self._inline_bot()
+                    bot = self._bot()
                     if bot and self._owner:
                         await bot.send_message(
                             self._owner.id,
                             self.strings["inline_create_failed"],
-                            parse_mode="HTML",
+                            parse_mode="html",
                         )
                 except Exception:
                     pass
@@ -504,15 +503,17 @@ class RaidProtection(loader.Module):
         cid = self._asset_channel_id()
         if not cid or not self._storage_topic:
             return
-        bot = self._inline_bot()
+        bot = self._bot()
         if not bot:
             return
         try:
             msg_text, entities = await bot._parse_message_text(text, "html")
             msg = await bot.send_message(
                 cid,
-                text,
-                message_thread_id=self._storage_topic.id,
+                msg_text,
+                formatting_entities=entities,
+                reply_to=self._storage_topic.id,
+                link_preview=False,
             )
             try:
                 peer = await bot.get_input_entity(cid)
@@ -547,15 +548,17 @@ class RaidProtection(loader.Module):
             if not self._setup_failed:
                 await self._ensure_log_topic()
             return
-        bot = self._inline_bot()
+        bot = self._bot()
         if not bot:
             return
         try:
+            msg_text, entities = await bot._parse_message_text(text, "html")
             await bot.send_message(
                 cid,
-                text,
-                disable_web_page_preview=True,
-                message_thread_id=self._storage_topic.id,
+                msg_text,
+                formatting_entities=entities,
+                reply_to=self._storage_topic.id,
+                link_preview=False,
             )
         except Exception as e:
             logger.error(f"[RaidProtection] Failed to send log: {e}")
@@ -566,7 +569,7 @@ class RaidProtection(loader.Module):
         cid = self._asset_channel_id()
         if not self._storage_topic or not cid:
             return
-        bot = self._inline_bot()
+        bot = self._bot()
         if not bot:
             return
         try:
