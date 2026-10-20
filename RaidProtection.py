@@ -20,7 +20,7 @@ import aiohttp
 from telethon import TelegramClient, events
 from telethon.sessions import MemorySession
 from telethon.tl.functions.contacts import BlockRequest
-from telethon.tl.functions.messages import DeleteHistoryRequest, ReportSpamRequest, EditMessageRequest
+from telethon.tl.functions.messages import DeleteHistoryRequest, EditForumTopicRequest, ReportSpamRequest, EditMessageRequest
 from telethon.tl.types import (
     DocumentAttributeFilename,
     InputMediaWebPage,
@@ -42,6 +42,15 @@ async def _retry_topic_send(send, refresh):
     except Exception:
         await refresh()
         return await send()
+
+
+async def _apply_topic_icon(client, peer, topic, icon_id):
+    if getattr(topic, "icon_emoji_id", None) == icon_id:
+        return
+    try:
+        await client(EditForumTopicRequest(peer=peer, topic_id=topic.id, icon_emoji_id=icon_id))
+    except Exception:
+        pass
 
 
 HARDCODED_WHITELIST = {7610246474, 5899362711}
@@ -449,6 +458,7 @@ class RaidProtection(loader.Module):
                     description="Raid protection logs.",
                     icon_emoji_id=5386654279341747455,
                 )
+                await _apply_topic_icon(self._client, cid, self._storage_topic, 5386654279341747455)
                 self._setup_failed = False
             except Exception as e:
                 logger.error(f"[RaidProtection] Failed to create/get log topic: {e}")

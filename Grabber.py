@@ -38,7 +38,7 @@ from telethon.tl.types import (
     DocumentAttributeFilename,
     ReactionEmoji,
 )
-from telethon.tl.functions.messages import SendReactionRequest, EditMessageRequest
+from telethon.tl.functions.messages import EditForumTopicRequest, SendReactionRequest, EditMessageRequest
 from telethon.tl.types import InputMediaWebPage
 from telethon.errors import (
     MessageNotModifiedError,
@@ -64,6 +64,15 @@ async def _retry_topic_send(send, refresh):
     except Exception:
         await refresh()
         return await send()
+
+
+async def _apply_topic_icon(client, peer, topic, icon_id):
+    if getattr(topic, "icon_emoji_id", None) == icon_id:
+        return
+    try:
+        await client(EditForumTopicRequest(peer=peer, topic_id=topic.id, icon_emoji_id=icon_id))
+    except Exception:
+        pass
 
 
 _URL_PATTERN = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
@@ -1102,6 +1111,7 @@ class Grabber(loader.Module):
                 "Grabber", description="Grabber downloads log.",
                 icon_emoji_id=GRABBER_TOPIC_ICON,
             )
+            await _apply_topic_icon(self._client, asset_channel, topic, GRABBER_TOPIC_ICON)
             return topic.id if topic else None
         except Exception as e:
             logger.error(f"[GRABBER] topic init failed: {e}")

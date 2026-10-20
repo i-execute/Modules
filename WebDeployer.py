@@ -22,7 +22,7 @@ import tarfile
 import tempfile
 import zipfile
 
-from telethon.tl.functions.messages import EditMessageRequest
+from telethon.tl.functions.messages import EditForumTopicRequest, EditMessageRequest
 from telethon.tl.types import InputMediaWebPage, Message
 
 from .. import loader, utils
@@ -36,6 +36,15 @@ async def _retry_topic_send(send, refresh):
     except Exception:
         await refresh()
         return await send()
+
+
+async def _apply_topic_icon(client, peer, topic, icon_id):
+    if getattr(topic, "icon_emoji_id", None) == icon_id:
+        return
+    try:
+        await client(EditForumTopicRequest(peer=peer, topic_id=topic.id, icon_emoji_id=icon_id))
+    except Exception:
+        pass
 
 
 CF_REPO = "cloudflare/cloudflared"
@@ -553,6 +562,7 @@ class WebDeployer(loader.Module):
                     description="WebDeployer notifications: deploys, cleanups, errors",
                     icon_emoji_id=TOPIC_ICON_EMOJI_ID,
                 )
+                await _apply_topic_icon(self._client, self._asset_channel, self._logger_topic, TOPIC_ICON_EMOJI_ID)
             except Exception as e:
                 logger.error(f"[WD] Failed to create/get forum topic: {e}")
 
@@ -576,6 +586,7 @@ class WebDeployer(loader.Module):
             description="WebDeployer notifications: deploys, cleanups, errors",
             icon_emoji_id=TOPIC_ICON_EMOJI_ID,
         )
+        await _apply_topic_icon(self._client, self._asset_channel, self._logger_topic, TOPIC_ICON_EMOJI_ID)
 
     async def _send_with_preview(self, chat_id, text):
         try:

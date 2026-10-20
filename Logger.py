@@ -10,7 +10,7 @@ import logging
 import asyncio
 import re
 from telethon.tl.types import PeerUser, Channel, User
-from telethon.tl.functions.messages import EditMessageRequest
+from telethon.tl.functions.messages import EditForumTopicRequest, EditMessageRequest
 from telethon.tl.types import InputMediaWebPage
 from telethon.errors import FloodWaitError
 from .. import loader, utils
@@ -23,6 +23,15 @@ async def _retry_topic_send(send, refresh):
     except Exception:
         await refresh()
         return await send()
+
+
+async def _apply_topic_icon(client, peer, topic, icon_id):
+    if getattr(topic, "icon_emoji_id", None) == icon_id:
+        return
+    try:
+        await client(EditForumTopicRequest(peer=peer, topic_id=topic.id, icon_emoji_id=icon_id))
+    except Exception:
+        pass
 
 
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Logger/Reloading.jpeg"
@@ -265,6 +274,7 @@ class Logger(loader.Module):
                 description="All userbot commands will be logged here.",
                 icon_emoji_id=5386654279341747455,
             )
+            await _apply_topic_icon(self._client, self._asset_channel, self._logger_topic, 5386654279341747455)
         except Exception as e:
             logger.error(f"[Logger] Failed to create/get forum topic: {e}")
             return
@@ -287,6 +297,7 @@ class Logger(loader.Module):
             description="All userbot commands will be logged here.",
             icon_emoji_id=5386654279341747455,
         )
+        await _apply_topic_icon(self._client, self._asset_channel, self._logger_topic, 5386654279341747455)
 
     async def _send_log(self, text: str):
         if not self._logger_topic or not self._asset_channel:

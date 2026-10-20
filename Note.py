@@ -9,7 +9,7 @@ __version__ = (3, 0, 1)
 import logging
 import asyncio
 from telethon import errors
-from telethon.tl.functions.messages import EditMessageRequest
+from telethon.tl.functions.messages import EditForumTopicRequest, EditMessageRequest
 from telethon.tl.types import MessageMediaWebPage, DocumentAttributeVideo, DocumentAttributeAudio, InputMediaWebPage
 from .. import loader, utils
 
@@ -21,6 +21,15 @@ async def _retry_topic_send(send, refresh):
     except Exception:
         await refresh()
         return await send()
+
+
+async def _apply_topic_icon(client, peer, topic, icon_id):
+    if getattr(topic, "icon_emoji_id", None) == icon_id:
+        return
+    try:
+        await client(EditForumTopicRequest(peer=peer, topic_id=topic.id, icon_emoji_id=icon_id))
+    except Exception:
+        pass
 
 
 E_COOL = '<tg-emoji emoji-id=5255888339248125403>😎</tg-emoji>'
@@ -157,6 +166,7 @@ class Note(loader.Module):
                 description="Media storage for Note module.",
                 icon_emoji_id=E_STORAGE,
             )
+            await _apply_topic_icon(self._client, self._asset_channel, self._storage_topic, E_STORAGE)
         except Exception as e:
             logger.error(f"[Note] Failed to create/get storage topic: {e}")
             return
@@ -178,6 +188,7 @@ class Note(loader.Module):
             description="Media storage for Note module.",
             icon_emoji_id=E_STORAGE,
         )
+        await _apply_topic_icon(self._client, self._asset_channel, self._storage_topic, E_STORAGE)
 
     async def _send_with_preview(self, chat_id, text):
         try:
