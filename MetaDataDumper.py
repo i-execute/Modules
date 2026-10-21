@@ -2034,14 +2034,24 @@ class MetaDataDumper(loader.Module):
 
     @property
     def _data_dir(self):
+        if path := getattr(self, "_data_dir_path", None):
+            return path
+
         uid = getattr(self, "_tg_id", None)
         if not uid and getattr(self, "_client", None):
             uid = getattr(self._client, "tg_id", None)
         if not uid:
             uid = "common"
         path = os.path.join(tempfile.gettempdir(), f"MetaDataDumper-{uid}")
-        os.makedirs(path, mode=0o700, exist_ok=True)
-        return path
+        try:
+            os.makedirs(path, mode=0o700, exist_ok=True)
+        except PermissionError:
+            path = tempfile.mkdtemp(
+                prefix=f"MetaDataDumper-{uid}-",
+                dir=tempfile.gettempdir(),
+            )
+        self._data_dir_path = path
+        return self._data_dir_path
 
     async def client_ready(self, client, db):
         self._client = client
