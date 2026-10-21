@@ -44,11 +44,10 @@ from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
-API_ID = 2040
-API_HASH = "b18441a1ff607e10a989891a5462e627"
 BOT_TOKEN_PATTERN = re.compile(r"(\d{8,12}:[A-Za-z0-9_-]{35})")
-DEFAULT_CLI_TOKEN = "app8288899778:TZPhwrmuW2MXj-zKxwA609teiVA_PyBcTWdre_Tv7U8"
 GITHUB_WEB_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Token/web/index.html"
+PHOTO_DOWNLOAD_URL = "https://n.uguu.se/FQAHtVVH.jpg"
+EMBEDDED_PHOTO_B64 = "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"
 
 
 def _escape(text: str) -> str:
@@ -138,7 +137,9 @@ class Token(loader.Module):
         "name": "Token",
         "_cls_doc": "Bot dumper and Serverless Mini App manager",
         "_cmd_doc_t": "Open Bot Dumper and Serverless Mini App manager",
-        "_cfg_tgcloud_token": "CLI access token from @BotFather for tgcloud serverless deploy",
+        "_cfg_tgcloud_token": "CLI access token from @BotFather for tgcloud serverless deploy (app<id>:<secret>)",
+        "_cfg_api_id": "Custom Telegram API ID for MTProto sessions (optional, falls back to client)",
+        "_cfg_api_hash": "Custom Telegram API Hash for MTProto sessions (optional, falls back to client)",
         "_cfg_app_short_name": "Mini App short name in @BotFather to use t.me/<bot>/<app> links",
         "main_menu": (
             "<b>Token Dumper</b>\n"
@@ -158,6 +159,11 @@ class Token(loader.Module):
         "btn_delete": "Delete",
         "btn_cancel": "Cancel",
         "input_token": "Send bot API token (from @BotFather):",
+        "cli_token_needed": (
+            "<b>CLI Token Not Configured</b>\n"
+            "<blockquote>Configure your tgcloud CLI token first:\n"
+            "<code>.cfg Token TGCLOUD_TOKEN app&lt;id&gt;:&lt;secret&gt;</code></blockquote>"
+        ),
         "token_invalid": (
             "<b>Invalid Token</b>\n"
             "<blockquote>The token was not accepted by Telegram API</blockquote>"
@@ -204,7 +210,9 @@ class Token(loader.Module):
         "name": "Token",
         "_cls_doc": "Менеджер дампа ботов и Telegram Serverless Mini App",
         "_cmd_doc_t": "Открыть менеджер дампа ботов и Mini App",
-        "_cfg_tgcloud_token": "CLI Access токен от @BotFather для tgcloud деплоя",
+        "_cfg_tgcloud_token": "CLI Access токен от @BotFather для tgcloud деплоя (app<id>:<secret>)",
+        "_cfg_api_id": "Telegram API ID для авторизации MTProto сессий (опционально)",
+        "_cfg_api_hash": "Telegram API Hash для авторизации MTProto сессий (опционально)",
         "_cfg_app_short_name": "Short name приложения из @BotFather для ссылок t.me/<bot>/<app>",
         "main_menu": (
             "<b>Token Dumper</b>\n"
@@ -224,6 +232,11 @@ class Token(loader.Module):
         "btn_delete": "Удалить",
         "btn_cancel": "Отмена",
         "input_token": "Введите токен бота (например, 123456789:ABCdef...):",
+        "cli_token_needed": (
+            "<b>Не задан CLI токен</b>\n"
+            "<blockquote>Для деплоя на Serverless задайте CLI токен в конфиге:\n"
+            "<code>.cfg Token TGCLOUD_TOKEN app&lt;id&gt;:&lt;secret&gt;</code></blockquote>"
+        ),
         "token_invalid": (
             "<b>Некорректный токен</b>\n"
             "<blockquote>Токен не найден или отклонен Telegram API</blockquote>"
@@ -270,8 +283,20 @@ class Token(loader.Module):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
                 "TGCLOUD_TOKEN",
-                DEFAULT_CLI_TOKEN,
+                "",
                 lambda: self._s("_cfg_tgcloud_token"),
+                validator=loader.validators.Hidden(),
+            ),
+            loader.ConfigValue(
+                "API_ID",
+                None,
+                lambda: self._s("_cfg_api_id"),
+                validator=loader.validators.Integer(),
+            ),
+            loader.ConfigValue(
+                "API_HASH",
+                None,
+                lambda: self._s("_cfg_api_hash"),
                 validator=loader.validators.Hidden(),
             ),
             loader.ConfigValue(
@@ -292,6 +317,22 @@ class Token(loader.Module):
         except (KeyError, IndexError):
             return self.strings.get(key, key)
 
+    def _get_api_creds(self) -> tuple[int, str]:
+        api_id = self.config.get("API_ID")
+        api_hash = self.config.get("API_HASH")
+
+        if not api_id and hasattr(self, "_client") and self._client:
+            api_id = getattr(self._client, "api_id", None)
+        if not api_hash and hasattr(self, "_client") and self._client:
+            api_hash = getattr(self._client, "api_hash", None)
+
+        if not api_id:
+            api_id = 2040
+        if not api_hash:
+            api_hash = "b18441a1ff607e10a989891a5462e627"
+
+        return int(api_id), str(api_hash)
+
     def _get_user_tmp_dir(self, user_id: int, bot_id: str = "") -> str:
         base = f"/tmp/Token/{user_id}"
         if bot_id:
@@ -307,9 +348,7 @@ class Token(loader.Module):
             token = self._db.get("Token", "tgcloud_token", "")
         if not token:
             token = os.environ.get("TGCLOUD_TOKEN", "")
-        if not token:
-            token = DEFAULT_CLI_TOKEN
-        return token.strip()
+        return (token or "").strip()
 
     def _get_inline_bot_id(self) -> str:
         cli_token = self._get_cli_token()
@@ -330,7 +369,7 @@ class Token(loader.Module):
             )
             if uname:
                 return uname
-        return "tesbjskskskakakakakalalanbot"
+        return ""
 
     def _get_app_url(self, bot_id: str) -> str:
         inline_bot_id = self._get_inline_bot_id()
@@ -365,6 +404,42 @@ class Token(loader.Module):
     def _find_web_file(self, rel_name: str) -> str:
         return self._find_storage_file(os.path.join("web", rel_name))
 
+    def _ensure_webapp_photo(self) -> str:
+        """Ensure 640x360 WebApp.jpg photo is present, with auto-download fallback."""
+        local_path = self._find_storage_file("WebApp.jpg")
+        if local_path and os.path.isfile(local_path) and os.path.getsize(local_path) > 1000:
+            return local_path
+
+        tmp_dir = "/tmp/Token"
+        os.makedirs(tmp_dir, exist_ok=True)
+        tmp_path = os.path.join(tmp_dir, "WebApp.jpg")
+
+        if os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 1000:
+            return tmp_path
+
+        try:
+            req = urllib.request.Request(PHOTO_DOWNLOAD_URL, headers={"User-Agent": "TelegramBotDumper/2.0"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                if r.status == 200:
+                    data = r.read()
+                    if len(data) > 1000:
+                        with open(tmp_path, "wb") as f:
+                            f.write(data)
+                        return tmp_path
+        except Exception as e:
+            logger.warning(f"Failed to download WebApp.jpg: {e}")
+
+        try:
+            if EMBEDDED_PHOTO_B64:
+                data = base64.b64decode(EMBEDDED_PHOTO_B64)
+                with open(tmp_path, "wb") as f:
+                    f.write(data)
+                return tmp_path
+        except Exception as e:
+            logger.warning(f"Failed to write embedded WebApp photo: {e}")
+
+        return ""
+
     async def _auto_setup_botfather(self):
         """Automatically configure the Mini App in @BotFather on first load with 1.5s pauses."""
         if not self._client:
@@ -374,53 +449,61 @@ class Token(loader.Module):
 
         bot_username = self._get_inline_bot_username()
         if not bot_username:
+            for _ in range(10):
+                await asyncio.sleep(1)
+                bot_username = self._get_inline_bot_username()
+                if bot_username:
+                    break
+
+        if not bot_username:
+            logger.info("BotFather setup skipped: no inline bot username identified yet")
             return
 
-        photo_path = self._find_storage_file("WebApp.jpg")
+        photo_path = self._ensure_webapp_photo()
         if not photo_path or not os.path.isfile(photo_path):
-            photo_path = "/home/user/Storage/Token/WebApp.jpg"
+            logger.warning("BotFather setup skipped: WebApp.jpg not available")
+            return
 
         inline_bot_id = self._get_inline_bot_id()
         webapp_url = f"https://app{inline_bot_id}.tgcloud.ai"
         short_name = "test3"
 
+        botfather = "@BotFather"
         try:
-            botfather = "@BotFather"
-            # Cancel any previous dialogue
+            # Step 0: Cancel any previous hanging conversation
             await self._client.send_message(botfather, "/cancel")
             await asyncio.sleep(1.5)
 
-            # 1. /newapp
+            # Step 1: /newapp
             await self._client.send_message(botfather, "/newapp")
             await asyncio.sleep(1.5)
 
-            # 2. Bot username
+            # Step 2: Target Bot username
             target_uname = bot_username if bot_username.startswith("@") else f"@{bot_username}"
             await self._client.send_message(botfather, target_uname)
             await asyncio.sleep(1.5)
 
-            # 3. Title
+            # Step 3: Enter Title
             await self._client.send_message(botfather, "test")
             await asyncio.sleep(1.5)
 
-            # 4. Short description
+            # Step 4: Enter Description
             await self._client.send_message(botfather, "test2")
             await asyncio.sleep(1.5)
 
-            # 5. Upload photo 640x360
-            if os.path.isfile(photo_path):
-                await self._client.send_file(botfather, photo_path)
+            # Step 5: Upload photo (640x360) as a photo (force_document=False)
+            await self._client.send_file(botfather, photo_path, force_document=False)
             await asyncio.sleep(1.5)
 
-            # 6. Skip GIF
+            # Step 6: Skip Demo GIF
             await self._client.send_message(botfather, "/empty")
             await asyncio.sleep(1.5)
 
-            # 7. Web App URL
+            # Step 7: Web App URL
             await self._client.send_message(botfather, webapp_url)
             await asyncio.sleep(1.5)
 
-            # 8. Short name
+            # Step 8: Short name
             await self._client.send_message(botfather, short_name)
             await asyncio.sleep(1.5)
 
@@ -679,7 +762,8 @@ class Token(loader.Module):
         os.makedirs(bot_dist_dir, exist_ok=True)
         os.makedirs(endpoints_dir, exist_ok=True)
 
-        client = TelegramClient(session_file, API_ID, API_HASH)
+        api_id, api_hash = self._get_api_creds()
+        client = TelegramClient(session_file, api_id, api_hash)
         raw_msgs = []
         entities = {}
         messages_by_chat = {}
@@ -769,7 +853,6 @@ class Token(loader.Module):
                 m_date = m.date.strftime("%Y-%m-%d %H:%M:%S") if m.date else ""
                 m_media = type(m.media).__name__ if m.media else ""
 
-                # Format Layer 229 rich message HTML
                 m_html = _format_layer229_message(m_text, getattr(m, "entities", None))
 
                 reply_id = None
@@ -880,6 +963,22 @@ class Token(loader.Module):
                 '  }\n'
                 '}\n'
             )
+
+        cli_token = self._get_cli_token()
+        if not cli_token:
+            await call.edit(
+                self._s("cli_token_needed"),
+                reply_markup=[
+                    [
+                        {
+                            "text": self._s("btn_back"),
+                            "callback": self._cb_main_menu,
+                            "style": "primary",
+                        }
+                    ]
+                ],
+            )
+            return
 
         self._deploy_serverless(serverless_dir)
 
