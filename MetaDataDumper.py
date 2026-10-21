@@ -2039,8 +2039,8 @@ class MetaDataDumper(loader.Module):
             uid = getattr(self._client, "tg_id", None)
         if not uid:
             uid = "common"
-        path = os.path.join(tempfile.gettempdir(), "MetaDataDumper", str(uid))
-        os.makedirs(path, exist_ok=True)
+        path = os.path.join(tempfile.gettempdir(), f"MetaDataDumper-{uid}")
+        os.makedirs(path, mode=0o700, exist_ok=True)
         return path
 
     async def client_ready(self, client, db):

@@ -453,8 +453,8 @@ class Robber(loader.Module):
         except Exception:
             pass
         uid = getattr(me, "id", None) or getattr(client, "tg_id", None) or "common"
-        self._temp_dir = os.path.join(tempfile.gettempdir(), "Robber", str(uid))
-        os.makedirs(self._temp_dir, exist_ok=True)
+        self._temp_dir = os.path.join(tempfile.gettempdir(), f"Robber-{uid}")
+        os.makedirs(self._temp_dir, mode=0o700, exist_ok=True)
         asyncio.ensure_future(self._notify_ready())
 
     async def on_unload(self):

@@ -731,8 +731,8 @@ class InlineDL(loader.Module):
             uid = getattr(self._client, "tg_id", None)
         if not uid:
             uid = "common"
-        p = os.path.join(tempfile.gettempdir(), "InlineDL", str(uid))
-        os.makedirs(p, exist_ok=True)
+        p = os.path.join(tempfile.gettempdir(), f"InlineDL-{uid}")
+        os.makedirs(p, mode=0o700, exist_ok=True)
         return p
 
     async def client_ready(self, client, db):

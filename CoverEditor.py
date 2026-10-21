@@ -483,8 +483,8 @@ class CoverEditor(loader.Module):
 
     def _data_dir(self):
         uid = getattr(self, "_tg_id", None) or (getattr(self, "_owner", None).id if getattr(self, "_owner", None) else "common")
-        p = os.path.join(tempfile.gettempdir(), "CoverEditor", str(uid))
-        os.makedirs(p, exist_ok=True)
+        p = os.path.join(tempfile.gettempdir(), f"CoverEditor-{uid}")
+        os.makedirs(p, mode=0o700, exist_ok=True)
         return p
 
     def _covers_dir(self):

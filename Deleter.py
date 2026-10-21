@@ -403,8 +403,8 @@ class Deleter(loader.Module):
         self._tg_id = self._owner.id if self._owner else getattr(client, "tg_id", None)
 
         uid = getattr(self, "_tg_id", None) or "common"
-        user_dir = os.path.join(tempfile.gettempdir(), "Deleter", str(uid))
-        os.makedirs(user_dir, exist_ok=True)
+        user_dir = os.path.join(tempfile.gettempdir(), f"Deleter-{uid}")
+        os.makedirs(user_dir, mode=0o700, exist_ok=True)
         try:
             for name in os.listdir(user_dir):
                 if name.startswith(WIPE_PREFIX):
@@ -957,8 +957,8 @@ class Deleter(loader.Module):
             state["chat_title"] = title
 
             uid = getattr(self, "_tg_id", None) or (self._owner.id if getattr(self, "_owner", None) else "common")
-            user_dir = os.path.join(tempfile.gettempdir(), "Deleter", str(uid))
-            os.makedirs(user_dir, exist_ok=True)
+            user_dir = os.path.join(tempfile.gettempdir(), f"Deleter-{uid}")
+            os.makedirs(user_dir, mode=0o700, exist_ok=True)
             spool = _IdSpool(int(self.config["WIPE_RAM_LIMIT_MB"]) * 1024 * 1024, base_dir=user_dir)
             ticker = asyncio.ensure_future(self._wipe_progress(call, chat_id, spool, state))
 
