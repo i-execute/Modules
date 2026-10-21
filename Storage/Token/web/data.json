@@ -1,0 +1,51 @@
+{
+  "visibility": "public",
+  "owner_id": 0,
+  "payload": {
+    "bot": {
+      "id": "1",
+      "name": "Demo Bot",
+      "username": "demo_bot",
+      "avatar": ""
+    },
+    "owner_id": 0,
+    "private": false,
+    "total_messages": 2,
+    "total_chats": 1,
+    "chats": [
+      {
+        "id": "2",
+        "name": "Demo User",
+        "first_name": "Demo",
+        "last_name": "User",
+        "username": "demo_user",
+        "avatar": "",
+        "count": 2,
+        "last": "Привет!",
+        "date": "2026-01-01 12:00:00"
+      }
+    ],
+    "messages": {
+      "2": [
+        {
+          "id": 1,
+          "out": false,
+          "text": "Привет!",
+          "html": "Привет!",
+          "date": "2026-01-01 12:00:00",
+          "media": "",
+          "reply_to": null
+        },
+        {
+          "id": 2,
+          "out": true,
+          "text": "Добро пожаловать в демо-дамп.",
+          "html": "Добро пожаловать в <b>демо-дамп</b>.",
+          "date": "2026-01-01 12:00:05",
+          "media": "",
+          "reply_to": 1
+        }
+      ]
+    }
+  }
+}
