@@ -726,7 +726,7 @@ class KeyKeeper(loader.Module):
                 "key": pending["api_key"],
                 "status": "valid",
                 "comment": "Initial key",
-                "last_check": _now_str(self.config["timezone_offset"]),
+                "last_check": _now_str(self.config["timezone"]),
             })
         self._providers.append({
             "id": pid,
