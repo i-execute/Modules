@@ -1460,13 +1460,16 @@ class YNDXMusic(loader.Module):
                     await utils.answer(msg, self.strings["download_fail"] if err == "download_fail" else self.strings["error"].format(msg=err))
                     return
                 await utils.answer(msg, self.strings["uploading"])
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
                 is_forum = await self._is_forum_chat(message)
                 topic_id = self._get_topic_id(message) if is_forum else None
-                await self._send_audio(message.chat_id, info, reply_to=topic_id if is_forum and topic_id else None)
+                sent_ok = await self._send_audio(message.chat_id, info, reply_to=topic_id if is_forum and topic_id else None)
+                if sent_ok:
+                    try:
+                        await msg.delete()
+                    except Exception:
+                        pass
+                else:
+                    await utils.answer(msg, self.strings["download_fail"])
             finally:
                 if os.path.exists(ddir):
                     shutil.rmtree(ddir, ignore_errors=True)
@@ -1673,11 +1676,14 @@ class YNDXMusic(loader.Module):
                 await utils.answer(msg, self.strings["download_fail"] if err == "download_fail" else self.strings["error"].format(msg=err))
                 return
             await utils.answer(msg, self.strings["uploading"])
-            try:
-                await msg.delete()
-            except Exception:
-                pass
-            await self._send_audio(message.chat_id, info, reply_to=topic_id if is_forum and topic_id else None)
+            sent_ok = await self._send_audio(message.chat_id, info, reply_to=topic_id if is_forum and topic_id else None)
+            if sent_ok:
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+            else:
+                await utils.answer(msg, self.strings["download_fail"])
         finally:
             if os.path.exists(ddir):
                 shutil.rmtree(ddir, ignore_errors=True)
