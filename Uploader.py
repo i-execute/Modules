@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 3, 1)
+__version__ = (1, 4, 0)
 # meta developer: I_execute.t.me
 
 import os
@@ -11,6 +11,10 @@ import asyncio
 import logging
 import time
 import tempfile
+import tarfile
+import shutil
+
+from telethon.tl.types import MessageMediaWebPage
 
 from .. import loader, utils
 from ..inline.types import InlineCall
@@ -178,7 +182,7 @@ class Uploader(loader.Module):
         "help": (
             "<b>Uploader</b>\n"
             "<blockquote>"
-            "<code>{prefix}upl</code> - reply to photo/video/file to upload"
+            "<code>{prefix}upl</code> - reply to photo/video/file/album to upload"
             "</blockquote>\n"
             "<b>Supported formats:</b>\n"
             "<blockquote>"
@@ -250,6 +254,13 @@ class Uploader(loader.Module):
             "<blockquote><code>{error}</code></blockquote>"
         ),
         "killed": "<b>Upload cancelled</b>",
+        "album_choose": (
+            "<b>Album detected</b>\n"
+            "<blockquote>Files in album: <code>{count}</code></blockquote>\n"
+            "<b>What to upload?</b>"
+        ),
+        "btn_album_all": "Whole album (.tar.gz)",
+        "btn_album_one": "Only replied",
         "btn_close": "Close",
         "btn_back": "Back",
         "btn_tempsh": "temp.sh (3d)",
@@ -264,7 +275,7 @@ class Uploader(loader.Module):
         "help": (
             "<b>Uploader</b>\n"
             "<blockquote>"
-            "<code>{prefix}upl</code> - реплай на фото/видео/файл для загрузки"
+            "<code>{prefix}upl</code> - реплай на фото/видео/файл/альбом для загрузки"
             "</blockquote>\n"
             "<b>Поддерживаемые форматы:</b>\n"
             "<blockquote>"
@@ -336,6 +347,13 @@ class Uploader(loader.Module):
             "<blockquote><code>{error}</code></blockquote>"
         ),
         "killed": "<b>Загрузка отменена</b>",
+        "album_choose": (
+            "<b>Обнаружен альбом</b>\n"
+            "<blockquote>Файлов в альбоме: <code>{count}</code></blockquote>\n"
+            "<b>Что загрузить?</b>"
+        ),
+        "btn_album_all": "Весь альбом (.tar.gz)",
+        "btn_album_one": "Только реплай",
         "btn_close": "Закрыть",
         "btn_back": "Назад",
         "btn_tempsh": "temp.sh (3d)",
@@ -349,6 +367,7 @@ class Uploader(loader.Module):
     def __init__(self):
         self._upload_procs = {}
         self._pending_files = {}
+        self._albums = {}
 
     def _s(self, key, **kwargs):
         prefix = self.get_prefix()
@@ -480,6 +499,7 @@ class Uploader(loader.Module):
 
     async def _cb_close(self, call: InlineCall, uid=None):
         if uid is not None:
+            self._albums.pop(uid, None)
             data = self._pending_files.pop(uid, None)
             self._upload_procs.pop(uid, None)
             if data:
@@ -670,60 +690,51 @@ class Uploader(loader.Module):
                 pass
             await self._fail(form, uid, _escape(str(e)[:300]))
 
-    @loader.command(
-        ru_doc="Реплай на фото/видео/файл - загрузить на temp.sh, uguu, tmpfiles, x0.at или litterbox",
-        en_doc="Reply to photo/video/file - upload to temp.sh, uguu, tmpfiles, x0.at or litterbox",
-    )
-    async def upl(self, message):
-        """Reply to photo/video/file - upload to temp.sh, uguu, tmpfiles, x0.at or litterbox"""
-        reply = await message.get_reply_message()
+    async def _get_album_messages(self, chat_id, message_id, grouped_id):
+        album_messages = []
+        async for msg in self._client.iter_messages(chat_id, max_id=message_id + 15, limit=30):
+            if msg.grouped_id == grouped_id and msg.media and not isinstance(msg.media, MessageMediaWebPage):
+                album_messages.append(msg)
+        return sorted(album_messages, key=lambda m: m.id)
 
-        if not reply or not reply.media:
-            await self.inline.form(
-                text=self._s("no_reply"),
-                message=message,
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-                silent=True,
-            )
+    def _close_rows(self):
+        return [[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]]
+
+    async def _reject(self, text, message=None, call=None):
+        if call is not None:
+            await call.edit(text, reply_markup=self._close_rows())
             return
-
-        media = reply.media
-        doc = getattr(media, "document", None) or media
-        filename = self._get_filename(doc)
-        ext = self._get_extension(filename)
-
-        if hasattr(media, "photo") or type(media).__name__ == "MessageMediaPhoto":
-            ext = "jpg"
-            filename = "photo.jpg"
-
-        if ext not in ALLOWED_EXTENSIONS:
-            await self.inline.form(
-                text=self._s("unsupported"),
-                message=message,
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-                silent=True,
-            )
-            return
-
-        file_size_meta = self._get_file_size(media)
-        if file_size_meta is not None and file_size_meta > MAX_FILE_SIZE:
-            await self.inline.form(
-                text=self._s("too_large", size=_format_bytes(file_size_meta)),
-                message=message,
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
-                silent=True,
-            )
-            return
-
-        file_type = _detect_type(filename)
-
-        form = await self.inline.form(
-            text=self._s("downloading", time="0.00s"),
+        await self.inline.form(
+            text=text,
             message=message,
-            reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+            reply_markup=self._close_rows(),
             silent=True,
         )
 
+    async def _build_archive(self, album, tmp_path):
+        work = tempfile.mkdtemp()
+        try:
+            names = []
+            for i, m in enumerate(album, 1):
+                if m.photo:
+                    name = "photo.jpg"
+                else:
+                    media = m.media
+                    name = self._get_filename(getattr(media, "document", None) or media)
+                name = f"{i:02d}_{os.path.basename(name)}"
+                await m.download_media(file=os.path.join(work, name))
+                names.append(name)
+
+            def _pack():
+                with tarfile.open(tmp_path, "w:gz") as tar:
+                    for n in names:
+                        tar.add(os.path.join(work, n), arcname=n)
+
+            await asyncio.get_event_loop().run_in_executor(None, _pack)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    async def _download_flow(self, form, suffix, filename, file_type, fetch):
         stop_event = asyncio.Event()
         dl_start = time.time()
 
@@ -744,18 +755,25 @@ class Uploader(loader.Module):
         tmp_path = None
 
         try:
-            tmp_fd = tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False)
+            tmp_fd = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
             tmp_path = tmp_fd.name
             tmp_fd.close()
 
-            await reply.download_media(file=tmp_path)
+            await fetch(tmp_path)
             dl_elapsed = time.time() - dl_start
             stop_event.set()
             await timer_task
 
             file_size = os.path.getsize(tmp_path)
-            uid = str(id(form))
+            if file_size > MAX_FILE_SIZE:
+                os.remove(tmp_path)
+                await form.edit(
+                    self._s("too_large", size=_format_bytes(file_size)),
+                    reply_markup=self._close_rows(),
+                )
+                return
 
+            uid = str(id(form))
             self._pending_files[uid] = (tmp_path, filename, file_type, file_size, dl_elapsed)
 
             await form.edit(
@@ -771,10 +789,130 @@ class Uploader(loader.Module):
                 pass
             await form.edit(
                 self._s("download_fail", error=_escape(str(e)[:300])),
-                reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+                reply_markup=self._close_rows(),
             )
             if tmp_path:
                 try:
                     os.remove(tmp_path)
                 except Exception:
                     pass
+
+    async def _process_single(self, reply, message=None, call=None):
+        media = reply.media
+        doc = getattr(media, "document", None) or media
+        filename = self._get_filename(doc)
+        ext = self._get_extension(filename)
+
+        if hasattr(media, "photo") or type(media).__name__ == "MessageMediaPhoto":
+            ext = "jpg"
+            filename = "photo.jpg"
+
+        if ext not in ALLOWED_EXTENSIONS:
+            await self._reject(self._s("unsupported"), message, call)
+            return
+
+        file_size_meta = self._get_file_size(media)
+        if file_size_meta is not None and file_size_meta > MAX_FILE_SIZE:
+            await self._reject(self._s("too_large", size=_format_bytes(file_size_meta)), message, call)
+            return
+
+        file_type = _detect_type(filename)
+
+        if call is not None:
+            form = call
+            await form.edit(
+                self._s("downloading", time="0.00s"),
+                reply_markup=self._close_rows(),
+            )
+        else:
+            form = await self.inline.form(
+                text=self._s("downloading", time="0.00s"),
+                message=message,
+                reply_markup=self._close_rows(),
+                silent=True,
+            )
+
+        async def _fetch(path):
+            await reply.download_media(file=path)
+
+        await self._download_flow(form, f".{ext}", filename, file_type, _fetch)
+
+    async def _process_album(self, album, call):
+        total = 0
+        for m in album:
+            size = self._get_file_size(m.media)
+            if size:
+                total += size
+        if total > MAX_FILE_SIZE:
+            await self._reject(self._s("too_large", size=_format_bytes(total)), call=call)
+            return
+
+        await call.edit(
+            self._s("downloading", time="0.00s"),
+            reply_markup=self._close_rows(),
+        )
+
+        async def _fetch(path):
+            await self._build_archive(album, path)
+
+        await self._download_flow(call, ".tar.gz", "album.tar.gz", _detect_type("album.tar.gz"), _fetch)
+
+    async def _cb_album_all(self, call: InlineCall, uid):
+        data = self._albums.pop(uid, None)
+        if not data:
+            await self._reject(self._s("upload_fail", error="album not found"), call=call)
+            return
+        await self._process_album(data[1], call)
+
+    async def _cb_album_one(self, call: InlineCall, uid):
+        data = self._albums.pop(uid, None)
+        if not data:
+            await self._reject(self._s("upload_fail", error="album not found"), call=call)
+            return
+        await self._process_single(data[0], call=call)
+
+    @loader.command(
+        ru_doc="Реплай на фото/видео/файл/альбом - загрузить на temp.sh, uguu, tmpfiles, x0.at или litterbox",
+        en_doc="Reply to photo/video/file/album - upload to temp.sh, uguu, tmpfiles, x0.at or litterbox",
+    )
+    async def upl(self, message):
+        """Reply to photo/video/file/album - upload to temp.sh, uguu, tmpfiles, x0.at or litterbox"""
+        reply = await message.get_reply_message()
+
+        if not reply or not reply.media:
+            await self._reject(self._s("no_reply"), message)
+            return
+
+        if reply.grouped_id:
+            try:
+                album = await self._get_album_messages(reply.chat_id, reply.id, reply.grouped_id)
+            except Exception:
+                album = []
+            if len(album) > 1:
+                uid = f"{reply.chat_id}_{reply.id}_{message.id}"
+                self._albums[uid] = (reply, album)
+                await self.inline.form(
+                    text=self._s("album_choose", count=len(album)),
+                    message=message,
+                    reply_markup=[
+                        [
+                            {
+                                "text": self.strings["btn_album_all"],
+                                "callback": self._cb_album_all,
+                                "args": (uid,),
+                                "style": "primary",
+                            },
+                            {
+                                "text": self.strings["btn_album_one"],
+                                "callback": self._cb_album_one,
+                                "args": (uid,),
+                                "style": "primary",
+                            },
+                        ],
+                        [{"text": self.strings["btn_close"], "callback": self._cb_close, "args": (uid,), "style": "danger"}],
+                    ],
+                    silent=True,
+                )
+                return
+
+        await self._process_single(reply, message=message)
