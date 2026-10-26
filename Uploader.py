@@ -172,6 +172,7 @@ def _detect_type(name):
         "yml": "text/yaml",
         "toml": "application/toml",
         "zip": "application/zip",
+        "skill": "application/zip",
         "rar": "application/x-rar",
         "7z": "application/x-7z-compressed",
         "tar": "application/x-tar",
@@ -200,7 +201,7 @@ ALLOWED_EXTENSIONS = {
     "sql", "r", "scala", "pl",
     "txt", "json", "xml", "html", "css", "js", "md", "csv",
     "log", "cfg", "ini", "yaml", "yml", "toml",
-    "zip", "rar", "7z", "tar", "gz",
+    "zip", "rar", "7z", "tar", "gz", "skill",
     "apk", "ipa", "pdf", "doc", "docx", "xls", "xlsx", "pptx",
     "tgs", "gia", "gil",
 }
@@ -223,7 +224,7 @@ class Uploader(loader.Module):
             "Video: mp4, mov, avi, mkv, webm\n"
             "Audio: mp3, wav, ogg, flac, aac\n"
             "Text: py, sh, go, swift, ts, tsx, jsx, java, kt, c, h, cpp, hpp, cs, rb, php, rs, lua, dart, sql, r, scala, pl, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
-            "Archives: zip, rar, 7z, tar, gz\n"
+            "Archives: zip, rar, 7z, tar, gz, skill\n"
             "Docs: pdf, doc, docx, xls, xlsx, pptx\n"
             "Other: apk, ipa, tgs, gia, gil"
             "</blockquote>"
@@ -316,7 +317,7 @@ class Uploader(loader.Module):
             "Видео: mp4, mov, avi, mkv, webm\n"
             "Аудио: mp3, wav, ogg, flac, aac\n"
             "Текст: py, sh, go, swift, ts, tsx, jsx, java, kt, c, h, cpp, hpp, cs, rb, php, rs, lua, dart, sql, r, scala, pl, txt, json, xml, html, css, js, md, csv, log, cfg, ini, yaml, yml, toml\n"
-            "Архивы: zip, rar, 7z, tar, gz\n"
+            "Архивы: zip, rar, 7z, tar, gz, skill\n"
             "Документы: pdf, doc, docx, xls, xlsx, pptx\n"
             "Другое: apk, ipa, tgs, gia, gil"
             "</blockquote>"
