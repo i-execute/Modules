@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 1, 0)
+__version__ = (1, 2, 0)
 # meta developer: Execute_forge.t.me
 
 import json
@@ -136,6 +136,45 @@ class PackDumper(loader.Module):
 
     async def client_ready(self, client, db):
         self._client = client
+        self._topics = {}
+
+    async def _is_forum_chat(self, message) -> bool:
+        if message.is_private:
+            return False
+        try:
+            chat = await message.get_chat()
+            return bool(getattr(chat, "forum", False))
+        except Exception:
+            return False
+
+    def _get_topic_id(self, message):
+        reply_to = getattr(message, "reply_to", None)
+        if reply_to:
+            top_id = getattr(reply_to, "reply_to_top_id", None)
+            if top_id:
+                return top_id
+            msg_id = getattr(reply_to, "reply_to_msg_id", None)
+            if msg_id and getattr(reply_to, "forum_topic", False):
+                return msg_id
+        return None
+
+    def _remember_topic(self, message, form, topic_id):
+        chat_id = message.chat_id
+        self._topics[("chat", chat_id)] = topic_id
+        uid = getattr(form, "unit_id", None) or getattr(form, "uid", None)
+        if uid:
+            self._topics[("uid", uid)] = topic_id
+
+    def _recall_topic(self, call, chat_id):
+        form = getattr(call, "form", None)
+        uid = None
+        try:
+            uid = form.get("uid") if form else None
+        except Exception:
+            pass
+        if uid and ("uid", uid) in self._topics:
+            return self._topics[("uid", uid)]
+        return self._topics.get(("chat", chat_id))
 
     def _parse_url(self, url: str):
         url = url.strip()
@@ -404,12 +443,16 @@ class PackDumper(loader.Module):
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(dump, f, indent=2, ensure_ascii=False)
 
+            chat_id = call.form["chat"]
+            topic_id = self._recall_topic(call, chat_id)
+
             try:
                 await self._client.send_file(
-                    call.form["chat"],
+                    chat_id,
                     json_path,
                     force_document=True,
                     file_name=f"{short_name}.json",
+                    reply_to=topic_id,
                 )
             finally:
                 try:
@@ -442,7 +485,10 @@ class PackDumper(loader.Module):
     )
     async def pd(self, message):
         """Open pack dumper menu"""
-        await self.inline.form(
+        is_forum = await self._is_forum_chat(message)
+        topic_id = self._get_topic_id(message) if is_forum else None
+
+        form = await self.inline.form(
             text=self.strings["main_menu"],
             message=message,
             reply_markup=[
@@ -451,6 +497,7 @@ class PackDumper(loader.Module):
             ],
             silent=True,
         )
+        self._remember_topic(message, form, topic_id)
 
     @loader.command(
         ru_doc="в реплай - дамп сообщения в инлайн форму",
