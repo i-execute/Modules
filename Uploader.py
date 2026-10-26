@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 4, 0)
+__version__ = (1, 4, 1)
 # meta developer: I_execute.t.me
 
 import os
@@ -13,6 +13,9 @@ import time
 import tempfile
 import tarfile
 import shutil
+import re
+import random
+import string
 
 from telethon.tl.types import MessageMediaWebPage
 
@@ -51,6 +54,36 @@ def _parse_url(host, text):
     if first.startswith("http") and " " not in first:
         return first
     return None
+
+
+def _remove_file(path):
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except Exception:
+        pass
+    parent = os.path.dirname(path)
+    if os.path.basename(parent).startswith("upl_"):
+        try:
+            os.rmdir(parent)
+        except Exception:
+            pass
+
+
+def _hashed_name(filename):
+    filename = os.path.basename(filename or "") or "file"
+    tag = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
+    if filename.lower().endswith(".tar.gz"):
+        stem, ext = filename[:-7], filename[-7:]
+    else:
+        stem, ext = os.path.splitext(filename)
+    return f"{stem or 'file'}_{tag}{ext}"
+
+
+def _safe_name(filename):
+    safe = re.sub(r"[^\w.\-]", "_", filename, flags=re.UNICODE)
+    return safe[-120:] or "file"
 
 
 def _escape(text):
@@ -451,10 +484,7 @@ class Uploader(loader.Module):
     def _cleanup(self, uid, tmp_path):
         self._upload_procs.pop(uid, None)
         self._pending_files.pop(uid, None)
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
+        _remove_file(tmp_path)
 
     def _make_curl_args(self, host, tmp_path):
         ua = UA
@@ -503,10 +533,7 @@ class Uploader(loader.Module):
             data = self._pending_files.pop(uid, None)
             self._upload_procs.pop(uid, None)
             if data:
-                try:
-                    os.remove(data[0])
-                except Exception:
-                    pass
+                _remove_file(data[0])
         await call.delete()
 
     async def _cb_kill(self, call: InlineCall, uid):
@@ -519,10 +546,7 @@ class Uploader(loader.Module):
         data = self._pending_files.pop(uid, None)
         self._upload_procs.pop(uid, None)
         if data:
-            try:
-                os.remove(data[0])
-            except Exception:
-                pass
+            _remove_file(data[0])
         await call.edit(
             self._s("killed"),
             reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
@@ -734,7 +758,8 @@ class Uploader(loader.Module):
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
-    async def _download_flow(self, form, suffix, filename, file_type, fetch):
+    async def _download_flow(self, form, filename, file_type, fetch):
+        filename = _hashed_name(filename)
         stop_event = asyncio.Event()
         dl_start = time.time()
 
@@ -755,9 +780,7 @@ class Uploader(loader.Module):
         tmp_path = None
 
         try:
-            tmp_fd = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-            tmp_path = tmp_fd.name
-            tmp_fd.close()
+            tmp_path = os.path.join(tempfile.mkdtemp(prefix="upl_"), _safe_name(filename))
 
             await fetch(tmp_path)
             dl_elapsed = time.time() - dl_start
@@ -766,7 +789,7 @@ class Uploader(loader.Module):
 
             file_size = os.path.getsize(tmp_path)
             if file_size > MAX_FILE_SIZE:
-                os.remove(tmp_path)
+                _remove_file(tmp_path)
                 await form.edit(
                     self._s("too_large", size=_format_bytes(file_size)),
                     reply_markup=self._close_rows(),
@@ -791,11 +814,7 @@ class Uploader(loader.Module):
                 self._s("download_fail", error=_escape(str(e)[:300])),
                 reply_markup=self._close_rows(),
             )
-            if tmp_path:
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
+            _remove_file(tmp_path)
 
     async def _process_single(self, reply, message=None, call=None):
         media = reply.media
@@ -835,7 +854,7 @@ class Uploader(loader.Module):
         async def _fetch(path):
             await reply.download_media(file=path)
 
-        await self._download_flow(form, f".{ext}", filename, file_type, _fetch)
+        await self._download_flow(form, filename, file_type, _fetch)
 
     async def _process_album(self, album, call):
         total = 0
@@ -855,7 +874,7 @@ class Uploader(loader.Module):
         async def _fetch(path):
             await self._build_archive(album, path)
 
-        await self._download_flow(call, ".tar.gz", "album.tar.gz", _detect_type("album.tar.gz"), _fetch)
+        await self._download_flow(call, "album.tar.gz", _detect_type("album.tar.gz"), _fetch)
 
     async def _cb_album_all(self, call: InlineCall, uid):
         data = self._albums.pop(uid, None)
