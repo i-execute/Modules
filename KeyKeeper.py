@@ -9,6 +9,8 @@ import contextlib
 import json
 import logging
 import os
+import re
+import shutil
 import asyncio
 import tempfile
 from datetime import datetime, timezone, timedelta
@@ -29,7 +31,8 @@ def _escape(text) -> str:
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _mask(key: str) -> str:
+def _mask(key) -> str:
+    key = str(key or "")
     if len(key) > 12:
         return key[:8] + "..." + key[-4:]
     return key
@@ -146,8 +149,25 @@ async def _fetch_models(base_url: str, api_key: str, timeout: int) -> tuple[bool
         return False, [], str(err)[:200]
     if "data" not in data:
         return False, [], str(data)[:200]
-    ids = sorted(m.get("id", "") for m in data["data"] if m.get("id"))
+    items = data["data"] if isinstance(data["data"], list) else []
+    ids = sorted({str(m.get("id")) for m in items if isinstance(m, dict) and m.get("id")})
     return True, ids, ""
+
+
+VALIDATE_CONCURRENCY = 6
+
+
+async def _validate_many(tasks_args: list, timeout: int) -> list:
+    sem = asyncio.Semaphore(VALIDATE_CONCURRENCY)
+
+    async def run(args):
+        async with sem:
+            try:
+                return await _validate_key(*args, timeout)
+            except Exception as e:
+                return {"status": "rate-limited", "message": str(e)[:200], "raw": {}}
+
+    return await asyncio.gather(*(run(a) for a in tasks_args))
 
 
 async def _validate_key(base_url: str, api_key: str, model: str, timeout: int) -> dict:
@@ -558,6 +578,36 @@ class KeyKeeper(loader.Module):
         self._owner = await client.get_me()
         self._tg_id = self._owner.id if self._owner else getattr(client, "tg_id", None)
         self._providers = self.get("providers", [])
+        if self._migrate_keys():
+            self._save()
+
+    def _migrate_keys(self) -> bool:
+        changed = False
+        for p in self._providers:
+            keys = p.get("keys", [])
+            valid = []
+            for k in keys:
+                if "value" not in k:
+                    if k.get("key"):
+                        k["value"] = k.pop("key")
+                        changed = True
+                    else:
+                        changed = True
+                        continue
+                else:
+                    if "key" in k:
+                        k.pop("key")
+                        changed = True
+                if "date" not in k:
+                    k["date"] = k.pop("last_check", "-")
+                    changed = True
+                elif "last_check" in k:
+                    k.pop("last_check")
+                    changed = True
+                valid.append(k)
+            if len(valid) != len(keys):
+                p["keys"] = valid
+        return changed
 
     def _save(self):
         self.set("providers", self._providers)
@@ -587,23 +637,28 @@ class KeyKeeper(loader.Module):
 
     async def _send_json(self, chat_id, data: dict | list, filename: str):
         uid = getattr(self, "_tg_id", None) or (self._owner.id if getattr(self, "_owner", None) else "common")
-        tmp_dir = os.path.join(tempfile.gettempdir(), "KeyKeeper", str(uid))
-        os.makedirs(tmp_dir, exist_ok=True)
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", dir=tmp_dir, delete=False, encoding="utf-8"
-        )
-        json.dump(data, tmp, indent=2, ensure_ascii=False)
-        tmp.close()
+        base_dir = os.path.join(tempfile.gettempdir(), "KeyKeeper", str(uid))
+        os.makedirs(base_dir, exist_ok=True)
+        work_dir = tempfile.mkdtemp(dir=base_dir)
+        safe = re.sub(r"[^\w.\-]+", "_", filename).strip("._") or "export.json"
+        if not safe.endswith(".json"):
+            safe += ".json"
+        path = os.path.join(work_dir, safe)
         try:
-            await self._client.send_file(
-                chat_id,
-                tmp.name,
-                force_document=True,
-                file_name=filename,
-            )
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            await self._client.send_file(chat_id, path, force_document=True)
         finally:
-            with contextlib.suppress(Exception):
-                os.unlink(tmp.name)
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+    def _provider_key(self, provider: dict) -> str:
+        for k in provider.get("keys", []):
+            if k.get("value") and k.get("status") != "invalid":
+                return k["value"]
+        for k in provider.get("keys", []):
+            if k.get("value"):
+                return k["value"]
+        return provider.get("api_key") or ""
 
     def _fmt_main(self) -> str:
         return self.strings["main_menu"].format(
@@ -641,6 +696,9 @@ class KeyKeeper(loader.Module):
 
     async def _ih_add_url(self, call: InlineCall, url: str):
         url = url.strip().rstrip("/")
+        if not url:
+            await call.answer()
+            return
         if not (url.startswith("http://") or url.startswith("https://")):
             url = f"https://{url}"
         await call.edit(
@@ -653,6 +711,9 @@ class KeyKeeper(loader.Module):
 
     async def _ih_add_api_key(self, call: InlineCall, api_key: str, url: str):
         api_key = api_key.strip()
+        if not api_key:
+            await call.answer()
+            return
         await call.edit(self.strings["fetching_models"].format(url=_escape(url)), reply_markup=[])
         ok, models, err = await _fetch_models(url, api_key, self.config["timeout"])
         if not ok:
@@ -665,6 +726,8 @@ class KeyKeeper(loader.Module):
             return
         name = _domain_from_url(url)
         pending_id = utils.rand(12)
+        while len(self._pending) >= 50:
+            self._pending.pop(next(iter(self._pending)))
         self._pending[pending_id] = {"url": url, "api_key": api_key, "name": name, "models": models}
         await self._show_model_select(call, pending_id, 0, mode="add_provider")
 
@@ -723,10 +786,10 @@ class KeyKeeper(loader.Module):
         if pending.get("api_key"):
             initial_keys.append({
                 "num": 1,
-                "key": pending["api_key"],
+                "value": pending["api_key"],
                 "status": "valid",
                 "comment": "Initial key",
-                "last_check": _now_str(self.config["timezone"]),
+                "date": _now_str(self.config["timezone"]),
             })
         self._providers.append({
             "id": pid,
@@ -837,7 +900,7 @@ class KeyKeeper(loader.Module):
             await call.answer()
             return
         await call.edit(self.strings["fetching_models"].format(url=_escape(provider["url"])), reply_markup=[])
-        ok, models, err = await _fetch_models(provider["url"], provider["api_key"], self.config["timeout"])
+        ok, models, err = await _fetch_models(provider["url"], self._provider_key(provider), self.config["timeout"])
         if not ok:
             await call.edit(
                 self.strings["fetch_models_error"].format(error=_escape(err)),
@@ -845,6 +908,8 @@ class KeyKeeper(loader.Module):
             )
             return
         pending_id = utils.rand(12)
+        while len(self._pending) >= 50:
+            self._pending.pop(next(iter(self._pending)))
         self._pending[pending_id] = {"pid": pid, "name": provider["name"], "models": models}
         await self._show_model_select(call, pending_id, 0, mode="change_model")
 
@@ -874,7 +939,7 @@ class KeyKeeper(loader.Module):
     async def _ih_validate_new_key(self, call: InlineCall, key: str, pid: int):
         key = key.strip()
         provider = self._find_provider(pid)
-        if not provider:
+        if not provider or not key:
             await call.answer()
             return
 
@@ -910,6 +975,13 @@ class KeyKeeper(loader.Module):
         provider = self._find_provider(pid)
         if not provider:
             await call.answer()
+            return
+        existing = next((k for k in provider.get("keys", []) if k.get("value") == key), None)
+        if existing:
+            await call.edit(
+                self.strings["key_duplicate"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_provider_menu, "args": (pid,), "style": "danger"}]],
+            )
             return
         num = self._next_key_num(provider)
         provider.setdefault("keys", []).append({
@@ -1034,7 +1106,7 @@ class KeyKeeper(loader.Module):
             await call.answer()
             return
         await call.edit(self.strings["validating"], reply_markup=[])
-        result = await _validate_key(provider["url"], key_entry["value"], provider["model"], self.config["timeout"])
+        result = await _validate_key(provider["url"], key_entry.get("value", ""), provider["model"], self.config["timeout"])
         key_entry["status"] = result["status"]
         key_entry["date"] = _now_str(self.config["timezone"])
         self._save()
@@ -1050,7 +1122,7 @@ class KeyKeeper(loader.Module):
             await call.answer()
             return
         await call.edit(self.strings["fetching_models"].format(url=_escape(provider["url"])), reply_markup=[])
-        ok, models, err = await _fetch_models(provider["url"], key_entry["value"], self.config["timeout"])
+        ok, models, err = await _fetch_models(provider["url"], key_entry.get("value", ""), self.config["timeout"])
         if not ok:
             await call.edit(
                 self.strings["models_error"].format(error=_escape(err)),
@@ -1096,8 +1168,10 @@ class KeyKeeper(loader.Module):
             )
             return
         await call.edit(self.strings["validate_provider_running"].format(name=_escape(provider["name"])), reply_markup=[])
-        tasks = [_validate_key(provider["url"], k["value"], provider["model"], self.config["timeout"]) for k in keys]
-        results = await asyncio.gather(*tasks)
+        results = await _validate_many(
+            [(provider["url"], k.get("value", ""), provider["model"]) for k in keys],
+            self.config["timeout"],
+        )
         valid = rate_limited = invalid = 0
         now = _now_str(self.config["timezone"])
         for k, r in zip(keys, results):
@@ -1127,12 +1201,12 @@ class KeyKeeper(loader.Module):
         key_refs = []
         for p in self._providers:
             for k in p.get("keys", []):
-                all_tasks.append(_validate_key(p["url"], k["value"], p["model"], self.config["timeout"]))
+                all_tasks.append((p["url"], k.get("value", ""), p["model"]))
                 key_refs.append((p, k))
         if not all_tasks:
             await call.edit(self._fmt_main(), reply_markup=self._markup_main())
             return
-        results = await asyncio.gather(*all_tasks)
+        results = await _validate_many(all_tasks, self.config["timeout"])
         valid = rate_limited = invalid = 0
         now = _now_str(self.config["timezone"])
         export_rows = []
@@ -1148,7 +1222,7 @@ class KeyKeeper(loader.Module):
             export_rows.append({
                 "provider": p["name"],
                 "base_url": p["url"],
-                "key_num": k["num"],
+                "key_num": k.get("num"),
                 "masked": _mask(k.get("value", "")),
                 "status": r["status"],
                 "date": now,
