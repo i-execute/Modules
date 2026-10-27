@@ -2,10 +2,11 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 1, 0)
+__version__ = (1, 2, 0)
 # meta developer: Execute_forge.t.me
 
 import asyncio
+import glob
 import gzip
 import json
 import logging
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import zipfile
 
 from telethon.tl.functions.messages import EditForumTopicRequest, EditMessageRequest
@@ -67,6 +69,115 @@ SKIP_DIR_NAMES = {"node_modules", "__pycache__", ".git", ".svn", ".hg", ".next",
 RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/WebDeployer/Reloading.jpeg"
 GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/WebDeployer/Greetings.jpeg"
 TOPIC_ICON_EMOJI_ID = 5386654279341747455
+
+
+EXTRA_PATH_DIRS = (
+    "~/.local/bin",
+    "~/bin",
+    "~/.npm-global/bin",
+    "~/.volta/bin",
+    "~/.fnm/aliases/default/bin",
+    "~/.asdf/shims",
+    "~/.local/share/pnpm",
+    "~/.yarn/bin",
+    "~/.bun/bin",
+    "~/n/bin",
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
+    "/usr/games",
+    "/usr/local/games",
+    "/snap/bin",
+    "/opt/node/bin",
+    "/usr/local/node/bin",
+    "/usr/lib/node_modules/.bin",
+    "/home/linuxbrew/.linuxbrew/bin",
+)
+NVM_GLOBS = (
+    "~/.nvm/versions/node/*/bin",
+    "~/.local/share/fnm/node-versions/*/installation/bin",
+    "~/.fnm/node-versions/*/installation/bin",
+    "~/.asdf/installs/nodejs/*/bin",
+    "~/.local/share/nvm/*/bin",
+    "~/.nodenv/versions/*/bin",
+)
+
+
+def _version_key(path):
+    nums = re.findall(r"\d+", path)
+    return [int(n) for n in nums]
+
+
+def _split_path(value):
+    return [x for x in (value or "").split(os.pathsep) if x]
+
+
+def _merge_paths(*groups):
+    seen = set()
+    result = []
+    for group in groups:
+        for item in group:
+            item = os.path.expanduser(item)
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+def _discover_node_dirs():
+    found = []
+    for pattern in NVM_GLOBS:
+        matches = sorted(glob.glob(os.path.expanduser(pattern)), key=_version_key, reverse=True)
+        found.extend(matches)
+    return found
+
+
+def _login_shell_path():
+    shells = []
+    env_shell = os.environ.get("SHELL")
+    if env_shell:
+        shells.append(env_shell)
+    shells += ["/bin/bash", "/bin/sh"]
+    seen = set()
+    for sh in shells:
+        if sh in seen or not os.path.exists(sh):
+            continue
+        seen.add(sh)
+        for flags in ("-lic", "-lc", "-ic"):
+            try:
+                out = subprocess.run(
+                    [sh, flags, 'printf "%s" "$PATH"'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    timeout=8,
+                ).stdout.decode(errors="replace").strip()
+            except Exception:
+                continue
+            if out and "/" in out:
+                lines = [ln for ln in out.splitlines() if ln.strip()]
+                if lines:
+                    return _split_path(lines[-1])
+    return []
+
+
+def _build_full_path():
+    return os.pathsep.join(
+        _merge_paths(
+            _split_path(os.environ.get("PATH", "")),
+            _login_shell_path(),
+            _discover_node_dirs(),
+            EXTRA_PATH_DIRS,
+        )
+    )
+
+
+def _which(name, path_value):
+    return shutil.which(name, path=path_value)
 
 
 def _escape(text):
@@ -184,18 +295,29 @@ const MIME_TYPES = {
   '.ttf': 'font/ttf',
   '.webp': 'image/webp',
   '.wasm': 'application/wasm',
+  '.map': 'application/json',
+  '.txt': 'text/plain; charset=utf-8',
+  '.xml': 'application/xml',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.otf': 'font/otf',
+  '.avif': 'image/avif',
+  '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json',
 };
 
 let backendProcess = null;
 if (BACKEND_DIR && BACKEND_CMD) {
-  const parts = BACKEND_CMD.split(' ');
-  const cmd = parts[0];
-  const args = parts.slice(1);
-  console.log(`Starting backend in ${BACKEND_DIR}: ${cmd} ${args.join(' ')}`);
-  backendProcess = spawn(cmd, args, {
+  const cmd = process.env.NODE_BIN || process.execPath;
+  console.log(`Starting backend in ${BACKEND_DIR}: ${cmd} ${BACKEND_CMD}`);
+  backendProcess = spawn(cmd, [BACKEND_CMD], {
     cwd: BACKEND_DIR,
     env: { ...process.env, PORT: String(BACKEND_PORT) },
     stdio: 'inherit',
+  });
+  backendProcess.on('error', (err) => {
+    console.error(`Backend spawn error: ${err.message}`);
   });
   backendProcess.on('exit', (code) => {
     console.log(`Backend process exited with code ${code}`);
@@ -208,8 +330,17 @@ function serveStatic(req, res, pathname) {
     res.end('Not Found');
     return;
   }
-  let safePath = path.normalize(pathname).replace(/^[\\/]+/, '');
+  let decoded = pathname;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch (e) {}
+  let safePath = path.normalize(decoded).replace(/^([\\/]|\.\.(?=[\\/]|$))+/, '');
   let filePath = path.join(STATIC_DIR, safePath);
+  if (!path.resolve(filePath).startsWith(path.resolve(STATIC_DIR))) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('Forbidden');
+    return;
+  }
 
   if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
     filePath = path.join(filePath, 'index.html');
@@ -247,7 +378,7 @@ const server = http.createServer((req, res) => {
           ...req.headers,
           host: `127.0.0.1:${BACKEND_PORT}`,
           'x-forwarded-for': req.socket.remoteAddress,
-          'x-forwarded-proto': 'http',
+          'x-forwarded-proto': 'https',
         },
       },
       (proxyRes) => {
@@ -255,9 +386,10 @@ const server = http.createServer((req, res) => {
         proxyRes.pipe(res);
       }
     );
+    proxyReq.setTimeout(60000, () => proxyReq.destroy(new Error('timeout')));
     proxyReq.on('error', (err) => {
       console.error('Proxy error:', err.message);
-      res.writeHead(502, { 'Content-Type': 'application/json' });
+      if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Backend unreachable', details: err.message }));
     });
     req.pipe(proxyReq);
@@ -541,6 +673,31 @@ class WebDeployer(loader.Module):
         self._releases_cache = None
         self._logger_topic = None
         self._asset_channel = None
+        self._full_path = None
+
+    def _get_full_path(self, refresh=False):
+        if self._full_path is None or refresh:
+            self._full_path = _build_full_path()
+        return self._full_path
+
+    def _proc_env(self, extra=None):
+        env = dict(os.environ)
+        env["PATH"] = self._get_full_path()
+        env.pop("NODE_ENV", None)
+        env["CI"] = "1"
+        env["npm_config_fund"] = "false"
+        env["npm_config_audit"] = "false"
+        env["npm_config_update_notifier"] = "false"
+        env["npm_config_loglevel"] = "error"
+        if extra:
+            env.update(extra)
+        return env
+
+    def _resolve_bin(self, name):
+        found = _which(name, self._get_full_path())
+        if not found:
+            found = _which(name, _build_full_path())
+        return found
 
     def _ensure_root(self):
         os.makedirs(self._root, mode=0o700, exist_ok=True)
@@ -553,6 +710,7 @@ class WebDeployer(loader.Module):
         self._root = os.path.join(os.path.expanduser("~"), ".cloudflared_on_userbot", str(tg_user_id))
         self._cf_bin = os.path.join(self._root, "cloudflared")
         self._ensure_root()
+        await asyncio.get_event_loop().run_in_executor(None, self._get_full_path, True)
 
         self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
         if self._asset_channel:
@@ -665,12 +823,22 @@ class WebDeployer(loader.Module):
             return "/etc/systemd/system"
         return os.path.join(os.path.expanduser("~"), ".config", "systemd", "user")
 
+    def _systemctl_env(self):
+        env = dict(os.environ)
+        if not self._is_root and os.name == "posix":
+            uid = os.geteuid()
+            runtime = env.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}"
+            env["XDG_RUNTIME_DIR"] = runtime
+            env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path={runtime}/bus")
+        return env
+
     async def _systemctl(self, *args: str):
         try:
             cmd = ["systemctl"] if self._is_root else ["systemctl", "--user"]
             proc = await asyncio.create_subprocess_exec(
                 *cmd, *args,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                env=self._systemctl_env(),
             )
             out, err = await proc.communicate()
             return proc.returncode == 0, (out + err).decode(errors="replace").strip()
@@ -691,16 +859,24 @@ class WebDeployer(loader.Module):
         env_vars: dict = None,
     ):
         os.makedirs(self._systemd_dir, mode=0o700, exist_ok=True)
-        quoted = " ".join(subprocess.list2cmdline([part]) for part in command)
-        env_lines = ""
+        command = list(command)
+        if command and not os.path.isabs(command[0]):
+            resolved = self._resolve_bin(command[0])
+            if resolved:
+                command[0] = resolved
+        quoted = " ".join(self._systemd_quote(part) for part in command)
+        merged_env = {"PATH": self._get_full_path(), "HOME": os.path.expanduser("~")}
         if env_vars:
-            for k, v in env_vars.items():
-                env_lines += f'Environment="{k}={v}"\n'
+            merged_env.update({k: str(v) for k, v in env_vars.items()})
+        env_lines = ""
+        for k, v in merged_env.items():
+            safe = str(v).replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$")
+            env_lines += f'Environment="{k}={safe}"\n'
 
         content = (
             "[Unit]\n"
             f"Description={description}\n"
-            "After=network-online.target\nWants=network-online.target\n\n"
+            "After=network-online.target\nWants=network-online.target\nStartLimitIntervalSec=0\n\n"
             "[Service]\nType=simple\n"
             f"WorkingDirectory={work_dir}\n"
             f"{env_lines}"
@@ -711,6 +887,11 @@ class WebDeployer(loader.Module):
         )
         with open(os.path.join(self._systemd_dir, unit), "w", encoding="utf-8") as f:
             f.write(content)
+
+    @staticmethod
+    def _systemd_quote(part: str) -> str:
+        part = str(part).replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$")
+        return f'"{part}"'
 
     def _remove_unit_file(self, unit: str):
         path = os.path.join(self._systemd_dir, unit)
@@ -733,7 +914,8 @@ class WebDeployer(loader.Module):
     async def _stop_unit(self, unit: str):
         await self._systemctl("disable", "--now", unit)
 
-    async def _wait_for_tunnel_url(self, log_path: str, timeout: int = 30):
+    async def _wait_for_tunnel_url(self, log_path: str, timeout: int = 60):
+        pattern = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
         for _ in range(timeout):
             await asyncio.sleep(1)
             try:
@@ -741,12 +923,40 @@ class WebDeployer(loader.Module):
                     content = f.read()
             except OSError:
                 continue
-            for line in content.splitlines():
-                if "trycloudflare.com" in line:
-                    for part in line.split():
-                        if part.startswith("https://") and "trycloudflare.com" in part:
-                            return part.strip()
+            for match in pattern.finditer(content):
+                url = match.group(0)
+                if url != "https://api.trycloudflare.com":
+                    return url
         return None
+
+    async def _wait_for_port(self, port: int, unit: str = None, timeout: int = 60):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), timeout=2)
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+                return True
+            except Exception:
+                pass
+            if unit:
+                ok, out = await self._systemctl("is-failed", unit)
+                if ok and out.strip() == "failed":
+                    return False
+            await asyncio.sleep(1)
+        return False
+
+    @staticmethod
+    def _tail_log(path: str, limit: int = 600) -> str:
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                data = f.read()
+        except OSError:
+            return ""
+        return data[-limit:].strip()
 
     async def _reattach_sites(self):
         for site_id, site in list(self._get_sites().items()):
@@ -833,8 +1043,9 @@ class WebDeployer(loader.Module):
             n += 1
         return f"{base}-{n}{ext}"
 
-    def _next_port(self) -> int:
+    def _next_port(self, exclude=()) -> int:
         used = {site.get("port") for site in self._get_sites().values() if site.get("port")}
+        used.update(exclude)
         for _ in range(20):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
@@ -846,18 +1057,31 @@ class WebDeployer(loader.Module):
                 return port
         raise RuntimeError("could not find a free port")
 
-    async def _run_command(self, cmd: list, cwd: str, timeout: int = 180):
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+    async def _run_command(self, cmd: list, cwd: str, timeout: int = 900):
+        cmd = list(cmd)
+        resolved = self._resolve_bin(cmd[0]) if not os.path.isabs(cmd[0]) else cmd[0]
+        if not resolved:
+            return 127, f"{cmd[0]}: not found in PATH\nPATH={self._get_full_path()}"
+        cmd[0] = resolved
         try:
-            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            return proc.returncode, (out + err).decode(errors="replace")
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=cwd,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=self._proc_env(),
+            )
+        except Exception as e:
+            return 127, f"{cmd[0]}: {e}"
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            return proc.returncode, (out or b"").decode(errors="replace")
         except asyncio.TimeoutError:
-            proc.kill()
+            try:
+                proc.kill()
+            except Exception:
+                pass
             return -1, "Command timed out"
 
     async def _curl(self, *args, timeout=15):
@@ -967,6 +1191,21 @@ if (typeof App !== 'undefined') {{
 </body>
 </html>"""
 
+    @staticmethod
+    def _npm_install_args(p_dir: str):
+        if os.path.exists(os.path.join(p_dir, "package-lock.json")) or os.path.exists(os.path.join(p_dir, "npm-shrinkwrap.json")):
+            return ["npm", "ci", "--no-audit", "--no-fund", "--include=dev"]
+        return ["npm", "install", "--no-audit", "--no-fund", "--include=dev"]
+
+    async def _npm_install(self, p_dir: str, label: str):
+        rc, out = await self._run_command(self._npm_install_args(p_dir), p_dir)
+        if rc != 0:
+            rc, out = await self._run_command(
+                ["npm", "install", "--no-audit", "--no-fund", "--include=dev", "--legacy-peer-deps"], p_dir
+            )
+        if rc != 0:
+            raise RuntimeError(f"npm install ({label}) failed:\n{out[-400:]}")
+
     async def _setup_project(self, site_dir: str, extract_dir: str, port: int, m: Message, filename: str):
         pkg_dirs = []
         for dirpath, dirnames, filenames_in_dir in os.walk(extract_dir):
@@ -983,7 +1222,13 @@ if (typeof App !== 'undefined') {{
             elif base in ("frontend", "client", "web", "app", "ui"):
                 frontend_dir = p
 
-        has_node = shutil.which("node") and shutil.which("npm")
+        node_bin = self._resolve_bin("node")
+        npm_bin = self._resolve_bin("npm")
+        has_node = bool(node_bin and npm_bin)
+        if pkg_dirs and not has_node:
+            raise RuntimeError(
+                "node/npm not found.\nPATH=" + self._get_full_path()[:300]
+            )
 
         if backend_dir and frontend_dir and has_node:
             await m.edit(
@@ -1006,13 +1251,8 @@ if (typeof App !== 'undefined') {{
                 with open(env_file, "w", encoding="utf-8") as f:
                     f.write(env_content)
 
-            rc, out = await self._run_command(["npm", "install", "--no-audit", "--no-fund"], backend_dir)
-            if rc != 0:
-                raise RuntimeError(f"npm install (backend) failed:\n{out[-400:]}")
-
-            rc, out = await self._run_command(["npm", "install", "--no-audit", "--no-fund"], frontend_dir)
-            if rc != 0:
-                raise RuntimeError(f"npm install (frontend) failed:\n{out[-400:]}")
+            await self._npm_install(backend_dir, "backend")
+            await self._npm_install(frontend_dir, "frontend")
 
             with open(os.path.join(frontend_dir, "package.json"), "r", encoding="utf-8", errors="replace") as f:
                 fe_pkg = json.load(f)
@@ -1031,7 +1271,7 @@ if (typeof App !== 'undefined') {{
                         static_dir = cd
                         break
 
-            backend_port = self._next_port()
+            backend_port = self._next_port(exclude={port})
             runner_file = os.path.join(site_dir, "_runner.mjs")
             with open(runner_file, "w", encoding="utf-8") as f:
                 f.write(_generate_node_runner())
@@ -1041,9 +1281,11 @@ if (typeof App !== 'undefined') {{
                 "BACKEND_PORT": str(backend_port),
                 "STATIC_DIR": static_dir,
                 "BACKEND_DIR": backend_dir,
-                "BACKEND_CMD": "node server.js",
+                "BACKEND_CMD": f"{self._backend_entry(backend_dir)}",
+                "NODE_BIN": node_bin,
+                "NPM_BIN": npm_bin,
             }
-            return ["node", runner_file], site_dir, env_vars
+            return [node_bin, runner_file], site_dir, env_vars
 
         if len(pkg_dirs) == 1 and has_node:
             p_dir = pkg_dirs[0]
@@ -1054,9 +1296,7 @@ if (typeof App !== 'undefined') {{
                 self.strings["building"].format(name=_escape(filename), step="npm install..."),
                 parse_mode="html",
             )
-            rc, out = await self._run_command(["npm", "install", "--no-audit", "--no-fund"], p_dir)
-            if rc != 0:
-                raise RuntimeError(f"npm install failed:\n{out[-400:]}")
+            await self._npm_install(p_dir, "project")
 
             scripts = pkg_data.get("scripts", {})
             if "build" in scripts:
@@ -1074,10 +1314,13 @@ if (typeof App !== 'undefined') {{
                         return [sys.executable, "-m", "http.server", str(port), "--directory", cd], cd, {}
 
             if "start" in scripts:
-                return ["npm", "start"], p_dir, {"PORT": str(port)}
-            for entry in ("server.js", "index.js", "app.js", "main.js"):
-                if os.path.exists(os.path.join(p_dir, entry)):
-                    return ["node", entry], p_dir, {"PORT": str(port)}
+                return [npm_bin, "start"], p_dir, {"PORT": str(port)}
+            main_entry = pkg_data.get("main")
+            entries = [main_entry] if main_entry else []
+            entries += ["server.js", "index.js", "app.js", "main.js"]
+            for entry in entries:
+                if entry and os.path.exists(os.path.join(p_dir, entry)):
+                    return [node_bin, entry], p_dir, {"PORT": str(port)}
 
         index_path = _find_site_index(extract_dir)
         if not index_path:
@@ -1085,6 +1328,33 @@ if (typeof App !== 'undefined') {{
 
         serve_dir = os.path.dirname(index_path)
         return [sys.executable, "-m", "http.server", str(port), "--directory", serve_dir], serve_dir, {}
+
+    @staticmethod
+    def _backend_entry(backend_dir: str) -> str:
+        try:
+            with open(os.path.join(backend_dir, "package.json"), "r", encoding="utf-8", errors="replace") as f:
+                pkg = json.load(f)
+        except Exception:
+            pkg = {}
+        main_entry = pkg.get("main")
+        for entry in ([main_entry] if main_entry else []) + ["server.js", "index.js", "app.js", "main.js"]:
+            if entry and os.path.exists(os.path.join(backend_dir, entry)):
+                return entry
+        return "server.js"
+
+    async def _fail_deploy(self, m, filename, error, site_dir, log_path=None):
+        logger.error(f"[WD] Deploy failed for {filename}: {error}")
+        await self._notify(
+            f"<b>Deploy failed</b>\n<blockquote>{_escape(filename)}\n<code>{_escape(error[-500:])}</code></blockquote>"
+        )
+        shutil.rmtree(site_dir, ignore_errors=True)
+        try:
+            await m.edit(
+                self.strings["deploy_fail"].format(error=_escape(error[-400:])),
+                parse_mode="html",
+            )
+        except Exception:
+            pass
 
     async def _cb_close(self, call: InlineCall):
         await call.delete()
@@ -1349,11 +1619,7 @@ if (typeof App !== 'undefined') {{
         try:
             await reply.download_media(file=file_path)
         except Exception as e:
-            shutil.rmtree(site_dir, ignore_errors=True)
-            await m.edit(
-                self.strings["deploy_fail"].format(error=_escape(str(e)[:400])),
-                parse_mode="html",
-            )
+            await self._fail_deploy(m, filename, str(e)[:400], site_dir)
             return
 
         port = self._next_port()
@@ -1397,11 +1663,8 @@ if (typeof App !== 'undefined') {{
                 parse_mode="html",
             )
         except Exception as e:
-            shutil.rmtree(site_dir, ignore_errors=True)
-            await m.edit(
-                self.strings["deploy_fail"].format(error=_escape(str(e)[:400])),
-                parse_mode="html",
-            )
+            logger.exception("[WD] deploy failed")
+            await self._fail_deploy(m, filename, str(e)[:400], site_dir)
             return
 
         site_id = utils.rand(12)
@@ -1421,11 +1684,15 @@ if (typeof App !== 'undefined') {{
         ok, out = await self._start_unit(http_unit)
         if not ok:
             self._remove_unit_file(http_unit)
-            shutil.rmtree(site_dir, ignore_errors=True)
-            await m.edit(
-                self.strings["deploy_fail"].format(error=_escape(out[:400])),
-                parse_mode="html",
-            )
+            await self._fail_deploy(m, filename, out[:400], site_dir, http_log)
+            return
+
+        if not await self._wait_for_port(port, http_unit):
+            tail = self._tail_log(http_log) or "app did not open port"
+            await self._stop_unit(http_unit)
+            self._remove_unit_file(http_unit)
+            await self._systemctl("daemon-reload")
+            await self._fail_deploy(m, filename, tail, site_dir, http_log)
             return
 
         self._write_unit(
@@ -1440,11 +1707,8 @@ if (typeof App !== 'undefined') {{
             await self._stop_unit(http_unit)
             self._remove_unit_file(http_unit)
             self._remove_unit_file(cf_unit)
-            shutil.rmtree(site_dir, ignore_errors=True)
-            await m.edit(
-                self.strings["deploy_fail"].format(error=_escape(out[:400])),
-                parse_mode="html",
-            )
+            await self._systemctl("daemon-reload")
+            await self._fail_deploy(m, filename, out[:400], site_dir, cf_log)
             return
 
         url = await self._wait_for_tunnel_url(cf_log)
@@ -1454,6 +1718,10 @@ if (typeof App !== 'undefined') {{
             self._remove_unit_file(http_unit)
             self._remove_unit_file(cf_unit)
             await self._systemctl("daemon-reload")
+            tail = self._tail_log(cf_log)
+            await self._notify(
+                f"<b>Tunnel failed</b>\n<blockquote>{_escape(display_name)}\n<code>{_escape(tail[-500:])}</code></blockquote>"
+            )
             shutil.rmtree(site_dir, ignore_errors=True)
             await m.edit(self.strings["cf_fail"], parse_mode="html")
             return
