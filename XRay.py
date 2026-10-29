@@ -44,8 +44,18 @@ ASSET_HOSTS = {"raw.githubusercontent.com", "github.com", "objects.githubusercon
 ASSET_BASE = os.environ.get("XRAY_ASSET_BASE", "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay")
 RELOADING_MEDIA_URL = ASSET_BASE.rstrip("/") + "/Reloading.jpeg"
 GREETING_MEDIA_URL = ASSET_BASE.rstrip("/") + "/Greetings.jpeg"
+HOLE_BASE = ASSET_BASE.rstrip("/") + "/WEB/hole"
+HOLE_FILES = {
+    "index.html": "895134c4fe5b25cf73ce6c12b778f9c27d08340dbee9d3cb0ada9e4c07926203",
+    "assets/index-CwNTv7CE.js": "d855e2e471488439237763d5198644cbbf9c4a5c4b7a65675758e47fb80c42c3",
+    "assets/index-KqaZQrrj.css": "b84a4219c8354281b395a9b9231c083b47644d04e2178326684f1bf35cb54043",
+}
+GATE_FILES = {
+    "gate": "0a6da4aca63c23df57c159e3a46199e6ce2438a5fc226cbb7dfa9ded8d582162",
+}
 
 SITE_TEMPLATE = r"""import asyncio
+import hashlib
 import os
 import re
 import urllib.parse
@@ -57,6 +67,7 @@ BACKEND = "ws://127.0.0.1:__BACKEND_PORT__" + PATH
 MASK_KIND = "__MASK_KIND__"
 MASK_URL = "__MASK_URL__"
 LOADING_HTML = "__LOADING_URL__"
+MASK_FILES = __MASK_FILES__
 ASSET_HOSTS = {"raw.githubusercontent.com", "github.com", "objects.githubusercontent.com"}
 EXTRA_HOSTS = {item.strip().lower() for item in os.environ.get("XRAY_MASK_HOSTS", "").split(",") if item.strip()}
 HTML_LIMIT = 256 * 1024
@@ -65,6 +76,7 @@ CACHE_TTL = 300.0
 CACHE_BYTES = 24 * 1024 * 1024
 CACHE_ENTRIES = 32
 ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+DIGEST = re.compile(r"^[0-9a-f]{64}$")
 TYPES = {
     ".js": "text/javascript; charset=utf-8",
     ".mjs": "text/javascript; charset=utf-8",
@@ -86,10 +98,10 @@ TYPES = {
 FALLBACK = (
     "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-    "<title>Speedtest</title><style>html,body{margin:0;height:100%;background:#0b0d10;color:#e7e7e8;"
+    "<title>Downloads</title><style>html,body{margin:0;height:100%;background:#0b0d10;color:#e7e7e8;"
     "font:16px system-ui,sans-serif}main{height:100%;display:grid;place-items:center}"
     "b{font-weight:600;font-size:22px;letter-spacing:.4px}</style></head>"
-    "<body><main><b>Speedtest</b></main></body></html>"
+    "<body><main><b>Downloads</b></main></body></html>"
 )
 CACHE = {}
 CACHE_LOCK = asyncio.Lock()
@@ -97,10 +109,17 @@ CACHE_LOCK = asyncio.Lock()
 
 def allowed(url):
     parsed = urllib.parse.urlsplit(str(url or ""))
-    if parsed.scheme != "https" and parsed.hostname not in EXTRA_HOSTS:
-        return False
     host = (parsed.hostname or "").lower()
-    return host in ASSET_HOSTS or host in EXTRA_HOSTS
+    if host not in ASSET_HOSTS and host not in EXTRA_HOSTS:
+        return False
+    if parsed.scheme == "https":
+        return True
+    return host in EXTRA_HOSTS
+
+
+def expected_digest(key):
+    value = str(MASK_FILES.get(key) or "").strip().lower()
+    return value if DIGEST.match(value) else ""
 
 
 def download(url, limit):
@@ -114,8 +133,12 @@ def download(url, limit):
     return body
 
 
-async def fetch(url, limit):
-    return await asyncio.to_thread(download, url, limit)
+async def fetch(url, limit, key):
+    body = await asyncio.to_thread(download, url, limit)
+    want = expected_digest(key)
+    if want and hashlib.sha256(body).hexdigest() != want:
+        raise ValueError("the digest does not match for " + key)
+    return body
 
 
 async def cached(key, url, limit):
@@ -126,7 +149,7 @@ async def cached(key, url, limit):
             return hit[1]
         if hit:
             CACHE.pop(key, None)
-    body = await fetch(url, limit)
+    body = await fetch(url, limit, key)
     total = sum(len(item[1]) for item in CACHE.values()) + len(body)
     async with CACHE_LOCK:
         while CACHE and (total > CACHE_BYTES or len(CACHE) >= CACHE_ENTRIES):
@@ -144,7 +167,7 @@ def html_response(body):
 async def index(request):
     if MASK_KIND == "hole":
         try:
-            body = await cached("index", MASK_URL.rstrip("/") + "/index.html", HTML_LIMIT)
+            body = await cached("index.html", MASK_URL.rstrip("/") + "/index.html", HTML_LIMIT)
             return html_response(body.decode("utf-8", "replace"))
         except Exception:
             return html_response(FALLBACK)
@@ -173,8 +196,11 @@ async def asset(request):
     content_type = TYPES.get(extension)
     if not content_type:
         raise web.HTTPNotFound()
+    key = "assets/" + name
+    if key not in MASK_FILES:
+        raise web.HTTPNotFound()
     try:
-        body = await cached("asset:" + name, MASK_URL.rstrip("/") + "/assets/" + name, ASSET_LIMIT)
+        body = await cached(key, MASK_URL.rstrip("/") + "/" + key, ASSET_LIMIT)
     except Exception:
         raise web.HTTPNotFound()
     return web.Response(body=body, headers={"Content-Type": content_type, "Cache-Control": "public, max-age=300"})
@@ -222,6 +248,7 @@ app.router.add_get("/favicon.ico", favicon)
 app.router.add_get("/health", health)
 web.run_app(app, host="127.0.0.1", port=__SITE_PORT__)
 """
+
 
 logger = logging.getLogger(__name__)
 
@@ -1524,7 +1551,7 @@ class XRay(loader.Module):
         self._site_processes: Dict[str, str] = {}
         self._mask_sites = {
             "Evil Cat": ("jsx", ASSET_BASE.rstrip("/") + "/WEB/Evil_Cat.jsx"),
-            "Black Hole": ("hole", ASSET_BASE.rstrip("/") + "/WEB/hole"),
+            "Black Hole": ("hole", HOLE_BASE),
         }
         self._logger_topic = None
         self._asset_channel = None
@@ -1830,7 +1857,7 @@ class XRay(loader.Module):
         return text
 
     def _websocket_site_script(
-        self, path: str, backend_port: int, site_port: int, mask_kind: str, mask_url: str
+        self, path: str, backend_port: int, site_port: int, mask_kind: str, mask_url: str, mask_files: Dict[str, str]
     ) -> str:
         try:
             template = self._fetch_site_script()
@@ -1844,6 +1871,7 @@ class XRay(loader.Module):
             .replace("__SITE_PORT__", str(site_port))
             .replace("__MASK_KIND__", mask_kind or "jsx")
             .replace("__MASK_URL__", mask_url)
+            .replace("__MASK_FILES__", repr(dict(mask_files or {})))
             .replace("__LOADING_URL__", ASSET_BASE.rstrip("/") + "/WEB/Loading.html")
         )
 
@@ -1864,6 +1892,7 @@ class XRay(loader.Module):
             mask_name = "Evil Cat"
         mask_kind, mask_url = self._mask_sites[mask_name]
         user["mask_site"] = mask_name
+        mask_files = GATE_FILES if mask_kind == "jsx" else HOLE_FILES
         script_path = os.path.join(user_dir, "websocket_site.py")
         try:
             p = await asyncio.create_subprocess_exec(
@@ -1882,7 +1911,7 @@ class XRay(loader.Module):
         except Exception:
             pass
         try:
-            script_content = self._websocket_site_script(path, user["port"], site_port, mask_kind, mask_url)
+            script_content = self._websocket_site_script(path, user["port"], site_port, mask_kind, mask_url, mask_files)
         except Exception as e:
             return False, f"site_script_fetch_failed: {e}"
         with open(script_path, "w", encoding="utf-8") as f:
