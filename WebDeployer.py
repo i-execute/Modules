@@ -181,6 +181,7 @@ def _which(name, path_value):
 
 
 SITE_HEAL_INTERVAL = 120
+SITE_HEAL_COOLDOWN = 600
 REFRESH_BUTTON = "Refresh link"
 
 GUARD_ROOT = "root"
@@ -786,6 +787,8 @@ class WebDeployer(loader.Module):
         await asyncio.get_event_loop().run_in_executor(None, self._get_full_path, True)
 
         self._site_task = None
+        self._site_heal_attempts = {}
+        self._site_down_notified = set()
         self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
         if self._asset_channel:
             try:
@@ -1108,9 +1111,21 @@ class WebDeployer(loader.Module):
             if not http_unit or not cf_unit:
                 continue
             if await self._unit_active(http_unit) and await self._unit_active(cf_unit):
+                self._site_heal_attempts.pop(site_id, None)
+                self._site_down_notified.discard(site_id)
                 await self._refresh_site_url(site_id)
                 continue
-            if not await self._restart_site(site_id):
+            now = time.time()
+            last = self._site_heal_attempts.get(site_id, 0.0)
+            if now - last < SITE_HEAL_COOLDOWN:
+                continue
+            self._site_heal_attempts[site_id] = now
+            if await self._restart_site(site_id):
+                self._site_heal_attempts.pop(site_id, None)
+                self._site_down_notified.discard(site_id)
+                continue
+            if site_id not in self._site_down_notified:
+                self._site_down_notified.add(site_id)
                 await self._notify(
                     self.strings["site_down"].format(name=_escape(site.get("name", site_id)))
                 )

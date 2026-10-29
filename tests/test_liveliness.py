@@ -50,7 +50,11 @@ def _namespace(path: Path, *names: str, **extra: object) -> dict[str, object]:
         "re": re,
         "json": json,
         "asyncio": asyncio,
+        "time": __import__("time"),
         "logger": _Logger(),
+        "HEAL_COOLDOWN": 300,
+        "SITE_HEAL_COOLDOWN": 600,
+        "_escape": lambda value: value,
         "Tuple": Tuple,
         "Dict": Dict,
         "List": List,
@@ -228,6 +232,7 @@ def test_the_websocket_stack_is_restarted_after_a_reboot() -> None:
     owner = type("Owner", (), {})()
     owner._root = "/home/u/.xray_on_userbot/1"
     owner._users = {"bob": {"transport": "websocket", "websocket_mode": "tls-fallback"}}
+    owner._heal_attempts = {}
     owner.calls = []
 
     async def inactive(unit: str) -> bool:
@@ -302,6 +307,119 @@ def test_a_moved_link_never_leaves_a_stale_button_behind() -> None:
         body = text[text.index(menu):]
         body = body[:body.index("async def ", 10)]
         assert "_refresh_site_url" in body or "site.get(\"url\"" in body, menu
+
+
+def test_a_broken_stack_is_not_retried_every_cycle() -> None:
+    owner = type("Owner", (), {})()
+    owner._root = "/home/u/.xray_on_userbot/1"
+    owner._users = {"bob": {"transport": "websocket", "websocket_mode": "tls-fallback"}}
+    owner._heal_attempts = {}
+    owner.calls = []
+
+    async def inactive(unit: str) -> bool:
+        return False
+
+    async def failing_site(name: str, user_dir: str):
+        owner.calls.append("site")
+        return False, "nope"
+
+    async def failing_tunnel(name: str, user_dir: str):
+        owner.calls.append("tunnel")
+        return False, "nope"
+
+    async def refresh(name: str) -> str:
+        owner.calls.append("refresh")
+        return ""
+
+    namespace = _namespace(VPN, "_heal_websocket_stack")
+    owner._heal_websocket_stack = namespace["_heal_websocket_stack"].__get__(owner, type(owner))
+    owner._unit_active = inactive
+    owner._unit_name = lambda name, kind="xray": f"{name}-{kind}.service"
+    owner._start_websocket_site = failing_site
+    owner._start_websocket_tunnel = failing_tunnel
+    owner._refresh_tunnel_host = refresh
+
+    asyncio.run(owner._heal_websocket_stack("bob"))
+    first = list(owner.calls)
+    assert first == ["site"], first
+    for _ in range(5):
+        asyncio.run(owner._heal_websocket_stack("bob"))
+    assert owner.calls == first, owner.calls
+    assert "bob" in owner._heal_attempts
+
+
+def test_a_healthy_stack_only_refreshes_the_link() -> None:
+    owner = type("Owner", (), {})()
+    owner._root = "/home/u/.xray_on_userbot/1"
+    owner._users = {"bob": {"transport": "websocket", "websocket_mode": "tls-fallback"}}
+    owner._heal_attempts = {"bob": 1.0}
+    owner.calls = []
+
+    async def active(unit: str) -> bool:
+        return True
+
+    async def refresh(name: str) -> str:
+        owner.calls.append("refresh")
+        return ""
+
+    namespace = _namespace(VPN, "_heal_websocket_stack")
+    owner._heal_websocket_stack = namespace["_heal_websocket_stack"].__get__(owner, type(owner))
+    owner._unit_active = active
+    owner._unit_name = lambda name, kind="xray": f"{name}-{kind}.service"
+    owner._refresh_tunnel_host = refresh
+
+    asyncio.run(owner._heal_websocket_stack("bob"))
+    assert owner.calls == ["refresh"]
+    assert owner._heal_attempts == {}
+
+
+def test_a_permanently_dead_site_is_announced_once_per_cooldown() -> None:
+    owner = type("Owner", (), {})()
+    owner._sites = {"abc123": {"name": "index.html", "http_unit": "a.service", "cf_unit": "b.service"}}
+    owner._site_heal_attempts = {}
+    owner._site_down_notified = set()
+    owner.strings = {"site_down": "down {name}"}
+    owner.notes = []
+    owner.restarts = 0
+
+    async def inactive(unit: str) -> bool:
+        return False
+
+    async def failing_restart(site_id: str) -> bool:
+        owner.restarts += 1
+        return False
+
+    async def notify(text: str) -> None:
+        owner.notes.append(text)
+
+    namespace = _namespace(WEB, "_heal_sites")
+    owner._heal_sites = namespace["_heal_sites"].__get__(owner, type(owner))
+    owner._get_sites = lambda: owner._sites
+    owner._unit_active = inactive
+    owner._restart_site = failing_restart
+    owner._notify = notify
+
+    asyncio.run(owner._heal_sites())
+    assert owner.restarts == 1 and owner.notes == ["down index.html"]
+    for _ in range(4):
+        asyncio.run(owner._heal_sites())
+    assert owner.restarts == 1, owner.restarts
+    assert owner.notes == ["down index.html"], owner.notes
+
+    owner._site_heal_attempts = {"abc123": 0.0}
+    asyncio.run(owner._heal_sites())
+    assert owner.restarts == 2
+    assert owner.notes == ["down index.html"], "a second window must not repeat the notice"
+
+
+def test_the_cooldowns_are_long_enough_for_a_ten_second_loop() -> None:
+    vpn = VPN.read_text(encoding="utf-8")
+    web = WEB.read_text(encoding="utf-8")
+    assert "HEAL_COOLDOWN = 300" in vpn
+    assert "AUTOSTART_INTERVAL = 10" in vpn
+    assert "SITE_HEAL_COOLDOWN = 600" in web
+    assert "_heal_attempts = {}" in vpn
+    assert "_site_heal_attempts = {}" in web
 
 
 def test_the_new_strings_exist_in_both_languages() -> None:

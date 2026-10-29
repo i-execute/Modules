@@ -157,6 +157,7 @@ class _SubServer(ThreadingHTTPServer):
 LOG_TRIM_SIZE = 10 * 1024 * 1024
 BASE_PORT = 8443
 AUTOSTART_INTERVAL = 10
+HEAL_COOLDOWN = 300
 SUB_POLL_INTERVAL = 30
 SUB_TOKEN_LEN = 43
 SUB_RATE_LIMIT = 10
@@ -1492,6 +1493,7 @@ class XRay(loader.Module):
         self._users: Dict[str, Dict] = {}
         self._processes: Dict[str, str] = {}
         self._monitor_task = None
+        self._heal_attempts = {}
         self._external_ip = ""
         self._link_cache: Dict[str, str] = {}
         self._tunnels: Dict[str, str] = {}
@@ -2008,6 +2010,17 @@ class XRay(loader.Module):
         user_dir = os.path.join(self._root, "users", name)
         site_unit = self._unit_name(name, "site")
         cf_unit = self._unit_name(name, "cf")
+        site_up = await self._unit_active(site_unit)
+        cf_up = await self._unit_active(cf_unit)
+        if site_up and cf_up:
+            self._heal_attempts.pop(name, None)
+            await self._refresh_tunnel_host(name)
+            return
+        now = time.time()
+        last = self._heal_attempts.get(name, 0.0)
+        if now - last < HEAL_COOLDOWN:
+            return
+        self._heal_attempts[name] = now
         if not await self._unit_active(site_unit):
             ok, error = await self._start_websocket_site(name, user_dir)
             if not ok:
@@ -2018,6 +2031,7 @@ class XRay(loader.Module):
             if not ok:
                 logger.warning("[XR] the tunnel of %s did not come back: %s", name, error)
                 return
+        self._heal_attempts.pop(name, None)
         await self._refresh_tunnel_host(name)
 
     async def _stop_websocket_tunnel(self, name: str):
