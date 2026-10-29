@@ -428,6 +428,7 @@ class XRay(loader.Module):
 
     strings = {
         "name": "XRay",
+        "tunnel_moved": "<b>The tunnel link changed</b>\n<blockquote>User: {name}\nBefore: <code>{previous}</code>\nNow: <code>{host}</code>\nThe subscription and the config were rebuilt with the new host.</blockquote>",
         "guard_title": "<b>XRay is disabled on this server</b>",
         "guard_root": "The userbot is running as root (uid 0). XRay refuses to start in this mode.",
         "guard_docker": "The userbot is running inside a container (Docker, Podman, LXC or Kubernetes). XRay refuses to start in this mode.",
@@ -951,6 +952,7 @@ class XRay(loader.Module):
 
     strings_ru = {
         "name": "XRay",
+        "tunnel_moved": "<b>Ссылка туннеля изменилась</b>\n<blockquote>Юзер: {name}\nБыло: <code>{previous}</code>\nСтало: <code>{host}</code>\nПодписка и конфиг пересобраны с новым хостом.</blockquote>",
         "guard_title": "<b>XRay отключён на этом сервере</b>",
         "guard_root": "Юзербот запущен от root (uid 0). XRay в таком режиме работать отказывается.",
         "guard_docker": "Юзербот запущен внутри контейнера (Docker, Podman, LXC или Kubernetes). XRay в таком режиме работать отказывается.",
@@ -1680,6 +1682,21 @@ class XRay(loader.Module):
             await self._stop_websocket_site(name)
         self._save_users()
 
+    def _guard_message(self) -> str:
+        reason = _guard_reason()
+        if not reason:
+            return ""
+        head = self.strings["guard_title"] + "\n"
+        body = self.strings["guard_root"] if reason == GUARD_ROOT else self.strings["guard_docker"]
+        return head + body + "\n\n" + self.strings["guard_why"] + "\n\n" + self.strings["guard_how"]
+
+    async def _guard_deny(self, message) -> bool:
+        text = self._guard_message()
+        if not text:
+            return False
+        await utils.answer(message, text)
+        return True
+
     def _transport_label(self, transport: str) -> str:
         labels = {
             "tcp": "RAW",
@@ -1948,6 +1965,61 @@ class XRay(loader.Module):
         except Exception as e:
             return False, str(e)
 
+    def _read_tunnel_host(self, log_path: str, start_size: int = 0) -> str:
+        try:
+            with open(log_path, "r", errors="replace") as f:
+                if start_size:
+                    f.seek(start_size)
+                text = f.read()
+        except OSError:
+            return ""
+        matches = re.findall(r"https://([a-z0-9-]+\.trycloudflare\.com)", text, re.I)
+        return matches[-1] if matches else ""
+
+    async def _refresh_tunnel_host(self, name: str) -> str:
+        user = self._users.get(name)
+        if not user or user.get("transport") != "websocket":
+            return ""
+        user_dir = os.path.join(self._root, "users", name)
+        host = self._read_tunnel_host(os.path.join(user_dir, "daemon.log"))
+        if not host or host == user.get("tunnel_host"):
+            return ""
+        previous = user.get("tunnel_host") or ""
+        user["tunnel_host"] = host
+        self._save_users()
+        logger.info("[XR] the tunnel of %s moved from %s to %s", name, previous or "none", host)
+        await self._send_log(
+            self.strings["tunnel_moved"].format(
+                name=_escape(name),
+                previous=_escape(previous or "none"),
+                host=_escape(host),
+            ),
+            name=name,
+        )
+        await self._send_ws_link_to_log_topic(user)
+        return host
+
+    async def _heal_websocket_stack(self, name: str) -> None:
+        user = self._users.get(name)
+        if not user or user.get("transport") != "websocket":
+            return
+        if user.get("websocket_mode") != "tls-fallback":
+            return
+        user_dir = os.path.join(self._root, "users", name)
+        site_unit = self._unit_name(name, "site")
+        cf_unit = self._unit_name(name, "cf")
+        if not await self._unit_active(site_unit):
+            ok, error = await self._start_websocket_site(name, user_dir)
+            if not ok:
+                logger.warning("[XR] the mask site of %s did not come back: %s", name, error)
+                return
+        if not await self._unit_active(cf_unit):
+            ok, error = await self._start_websocket_tunnel(name, user_dir)
+            if not ok:
+                logger.warning("[XR] the tunnel of %s did not come back: %s", name, error)
+                return
+        await self._refresh_tunnel_host(name)
+
     async def _stop_websocket_tunnel(self, name: str):
         self._tunnels.pop(name, None)
         await self._stop_unit(self._unit_name(name, "cf"))
@@ -2040,6 +2112,7 @@ class XRay(loader.Module):
                     self._site_processes[name] = self._unit_name(name, "site")
                 if await self._unit_active(self._unit_name(name, "cf")):
                     self._tunnels[name] = self._unit_name(name, "cf")
+                    await self._refresh_tunnel_host(name)
 
     async def _is_user_running(self, name: str) -> bool:
         if name in self._processes:
@@ -2902,7 +2975,11 @@ class XRay(loader.Module):
                         
                 if not self._xray_installed():
                     continue
-                
+
+                for name, user in list(self._users.items()):
+                    if user.get("transport") == "websocket":
+                        await self._heal_websocket_stack(name)
+
                 for name, user in list(self._users.items()):
                     if not user.get("autostart"):
                         continue
@@ -5150,22 +5227,6 @@ class XRay(loader.Module):
         ru_doc="- XRay многопользовательский VPN менеджер",
         en_doc="- XRay multi-user VPN manager",
     )
-
-    def _guard_message(self) -> str:
-        reason = _guard_reason()
-        if not reason:
-            return ""
-        head = self.strings["guard_title"] + "\n"
-        body = self.strings["guard_root"] if reason == GUARD_ROOT else self.strings["guard_docker"]
-        return head + body + "\n\n" + self.strings["guard_why"] + "\n\n" + self.strings["guard_how"]
-
-    async def _guard_deny(self, message) -> bool:
-        text = self._guard_message()
-        if not text:
-            return False
-        await utils.answer(message, text)
-        return True
-
     async def xr(self, message):
         """- XRay multi-user VPN manager"""
         if await self._guard_deny(message):

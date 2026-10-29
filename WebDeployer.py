@@ -180,6 +180,9 @@ def _which(name, path_value):
     return shutil.which(name, path=path_value)
 
 
+SITE_HEAL_INTERVAL = 120
+REFRESH_BUTTON = "Refresh link"
+
 GUARD_ROOT = "root"
 GUARD_DOCKER = "docker"
 
@@ -473,6 +476,9 @@ class WebDeployer(loader.Module):
 
     strings = {
         "name": "WebDeployer",
+        "url_moved": "<b>The site link changed</b>\n<blockquote>Site: {name}\nBefore: <code>{previous}</code>\nNow: {url}</blockquote>",
+        "site_down": "<b>The site did not come back by itself</b>\n<blockquote>Site: {name}\nOpen the sites menu and deploy it again, the log is in its directory.</blockquote>",
+        "btn_refresh": "Refresh link",
         "guard_title": "<b>WebDeployer is disabled on this server</b>",
         "guard_root": "The userbot is running as root (uid 0). WebDeployer refuses to start in this mode.",
         "guard_docker": "The userbot is running inside a container (Docker, Podman, LXC or Kubernetes). WebDeployer refuses to start in this mode.",
@@ -601,6 +607,9 @@ class WebDeployer(loader.Module):
     }
 
     strings_ru = {
+        "url_moved": "<b>Ссылка сайта изменилась</b>\n<blockquote>Сайт: {name}\nБыло: <code>{previous}</code>\nСтало: {url}</blockquote>",
+        "site_down": "<b>Сайт сам не поднялся</b>\n<blockquote>Сайт: {name}\nОткройте меню сайтов и задеплойте заново, лог лежит в его каталоге.</blockquote>",
+        "btn_refresh": "Обновить ссылку",
         "guard_title": "<b>WebDeployer отключён на этом сервере</b>",
         "guard_root": "Юзербот запущен от root (uid 0). WebDeployer в таком режиме работать отказывается.",
         "guard_docker": "Юзербот запущен внутри контейнера (Docker, Podman, LXC или Kubernetes). WebDeployer в таком режиме работать отказывается.",
@@ -776,6 +785,7 @@ class WebDeployer(loader.Module):
         self._ensure_root()
         await asyncio.get_event_loop().run_in_executor(None, self._get_full_path, True)
 
+        self._site_task = None
         self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
         if self._asset_channel:
             try:
@@ -811,6 +821,7 @@ class WebDeployer(loader.Module):
                 )
 
         await self._reattach_sites()
+        self._start_site_monitor()
 
     async def _refresh_webdeployer_topic(self):
         self._logger_topic = await utils.asset_forum_topic(
@@ -876,6 +887,30 @@ class WebDeployer(loader.Module):
             )
         except Exception as e:
             logger.error(f"[WD] Failed to send topic notification: {e}")
+
+    def _guard_message(self) -> str:
+        reason = _guard_reason()
+        if not reason:
+            return ""
+        head = self.strings["guard_title"] + "\n"
+        body = self.strings["guard_root"] if reason == GUARD_ROOT else self.strings["guard_docker"]
+        return head + body + "\n\n" + self.strings["guard_why"] + "\n\n" + self.strings["guard_how"]
+
+    async def _guard_deny(self, message) -> bool:
+        text = self._guard_message()
+        if not text:
+            return False
+        await utils.answer(message, text)
+        return True
+
+    async def on_unload(self):
+        if self._site_task:
+            self._site_task.cancel()
+            try:
+                await self._site_task
+            except asyncio.CancelledError:
+                pass
+            self._site_task = None
 
     @property
     def _systemd_dir(self) -> str:
@@ -1015,6 +1050,84 @@ class WebDeployer(loader.Module):
             return ""
         return data[-limit:].strip()
 
+    def _read_site_host(self, cf_log: str) -> str:
+        if not cf_log:
+            return ""
+        text = self._tail_log(cf_log, 20000)
+        matches = re.findall(r"https://([a-z0-9-]+\.trycloudflare\.com)", text, re.I)
+        return "https://" + matches[-1] if matches else ""
+
+    async def _refresh_site_url(self, site_id: str) -> str:
+        sites = self._get_sites()
+        site = sites.get(site_id)
+        if not site:
+            return ""
+        fresh = self._read_site_host(site.get("cf_log") or "")
+        if not fresh or fresh == site.get("url"):
+            return ""
+        previous = site.get("url") or ""
+        site["url"] = fresh
+        sites[site_id] = site
+        self._set_sites(sites)
+        logger.info("[WD] the tunnel of %s moved from %s to %s", site_id, previous or "none", fresh)
+        await self._notify(
+            self.strings["url_moved"].format(
+                name=_escape(site.get("name", site_id)),
+                previous=_escape(previous or "none"),
+                url=fresh,
+            )
+        )
+        return fresh
+
+    async def _restart_site(self, site_id: str) -> bool:
+        site = self._get_sites().get(site_id, {})
+        http_unit = site.get("http_unit")
+        cf_unit = site.get("cf_unit")
+        port = site.get("port")
+        if not http_unit or not cf_unit or not port:
+            return False
+        ok, _ = await self._start_unit(http_unit)
+        if not ok and not await self._unit_active(http_unit):
+            logger.warning("[WD] the app unit of %s refused to start", site_id)
+            return False
+        if not await self._wait_for_port(port, http_unit):
+            logger.warning("[WD] the app of %s does not answer on port %s", site_id, port)
+            return False
+        ok, _ = await self._start_unit(cf_unit)
+        if not ok and not await self._unit_active(cf_unit):
+            logger.warning("[WD] the tunnel unit of %s refused to start", site_id)
+            return False
+        await self._wait_for_tunnel_url(site.get("cf_log") or "", timeout=40)
+        await self._refresh_site_url(site_id)
+        return True
+
+    async def _heal_sites(self) -> None:
+        for site_id, site in list(self._get_sites().items()):
+            http_unit = site.get("http_unit")
+            cf_unit = site.get("cf_unit")
+            if not http_unit or not cf_unit:
+                continue
+            if await self._unit_active(http_unit) and await self._unit_active(cf_unit):
+                await self._refresh_site_url(site_id)
+                continue
+            if not await self._restart_site(site_id):
+                await self._notify(
+                    self.strings["site_down"].format(name=_escape(site.get("name", site_id)))
+                )
+
+    def _start_site_monitor(self):
+        async def site_loop():
+            while True:
+                await asyncio.sleep(SITE_HEAL_INTERVAL)
+                try:
+                    await self._heal_sites()
+                except Exception as e:
+                    logger.warning(f"[WD] the site monitor failed: {e}")
+
+        if self._site_task:
+            self._site_task.cancel()
+        self._site_task = asyncio.create_task(site_loop())
+
     async def _reattach_sites(self):
         for site_id, site in list(self._get_sites().items()):
             http_unit = site.get("http_unit")
@@ -1023,6 +1136,9 @@ class WebDeployer(loader.Module):
                 self._remove_site(site_id)
                 continue
             if await self._unit_active(http_unit):
+                await self._refresh_site_url(site_id)
+                continue
+            if await self._restart_site(site_id):
                 continue
             await self._stop_unit(cf_unit)
             self._remove_unit_file(http_unit)
@@ -1557,6 +1673,8 @@ if (typeof App !== 'undefined') {{
         )
 
     async def _cb_sites_menu(self, call: InlineCall):
+        for site_id in list(self._get_sites()):
+            await self._refresh_site_url(site_id)
         sites = self._get_sites()
         if not sites:
             await call.edit(
@@ -1582,6 +1700,7 @@ if (typeof App !== 'undefined') {{
         )
 
     async def _cb_site_detail(self, call: InlineCall, site_id: str):
+        await self._refresh_site_url(site_id)
         site = self._get_sites().get(site_id)
         if not site:
             await call.edit(
@@ -1598,10 +1717,25 @@ if (typeof App !== 'undefined') {{
             ),
             reply_markup=[
                 [{"text": self.strings["btn_open_site"], "url": site.get("url", ""), "style": "success"}],
+                [{"text": self.strings["btn_refresh"], "callback": self._cb_refresh_site, "args": (site_id,), "style": "primary"}],
                 [{"text": self.strings["btn_stop"], "callback": self._cb_stop_site, "args": (site_id,), "style": "danger"}],
                 [{"text": self.strings["btn_back"], "callback": self._cb_sites_menu, "style": "primary"}],
             ],
         )
+
+    async def _cb_refresh_site(self, call: InlineCall, site_id: str):
+        site = self._get_sites().get(site_id)
+        if not site:
+            await call.edit(
+                self.strings["site_not_found"],
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sites_menu, "style": "primary"}]],
+            )
+            return
+        fresh = await self._refresh_site_url(site_id)
+        if not fresh and not await self._unit_active(site.get("cf_unit") or ""):
+            if await self._restart_site(site_id):
+                fresh = self._get_sites().get(site_id, {}).get("url", "")
+        await self._cb_site_detail(call, site_id)
 
     async def _cb_stop_site(self, call: InlineCall, site_id: str):
         site = self._get_sites().get(site_id, {})
@@ -1619,21 +1753,6 @@ if (typeof App !== 'undefined') {{
         ru_doc="Реплай на .js/.jsx/.ts/.tsx/.html или архив для деплоя | без реплая открывает меню",
         en_doc="Reply to .js/.jsx/.ts/.tsx/.html or archive to deploy | without reply opens the menu",
     )
-    def _guard_message(self) -> str:
-        reason = _guard_reason()
-        if not reason:
-            return ""
-        head = self.strings["guard_title"] + "\n"
-        body = self.strings["guard_root"] if reason == GUARD_ROOT else self.strings["guard_docker"]
-        return head + body + "\n\n" + self.strings["guard_why"] + "\n\n" + self.strings["guard_how"]
-
-    async def _guard_deny(self, message) -> bool:
-        text = self._guard_message()
-        if not text:
-            return False
-        await utils.answer(message, text)
-        return True
-
     async def wd(self, message: Message):
         """Reply to .js/.jsx/.ts/.tsx/.html or archive to deploy | without reply opens the menu"""
         if await self._guard_deny(message):
@@ -1813,6 +1932,8 @@ if (typeof App !== 'undefined') {{
             "dir": site_dir,
             "http_unit": http_unit,
             "cf_unit": cf_unit,
+            "http_log": http_log,
+            "cf_log": cf_log,
         })
 
         await m.delete()
