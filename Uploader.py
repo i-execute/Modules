@@ -288,6 +288,7 @@ class Uploader(loader.Module):
             "<blockquote><code>{error}</code></blockquote>"
         ),
         "killed": "<b>Upload cancelled</b>",
+        "kill_stale": "Download is already finished or cancelled",
         "album_choose": (
             "<b>Album detected</b>\n"
             "<blockquote>Files in album: <code>{count}</code></blockquote>\n"
@@ -381,6 +382,7 @@ class Uploader(loader.Module):
             "<blockquote><code>{error}</code></blockquote>"
         ),
         "killed": "<b>Загрузка отменена</b>",
+        "kill_stale": "Загрузка уже завершена или отменена",
         "album_choose": (
             "<b>Обнаружен альбом</b>\n"
             "<blockquote>Файлов в альбоме: <code>{count}</code></blockquote>\n"
@@ -402,6 +404,7 @@ class Uploader(loader.Module):
         self._upload_procs = {}
         self._pending_files = {}
         self._albums = {}
+        self._dl_tasks = {}
 
     def _s(self, key, **kwargs):
         prefix = self.get_prefix()
@@ -536,6 +539,34 @@ class Uploader(loader.Module):
             if data:
                 _remove_file(data[0])
         await call.delete()
+
+    def _dl_kill_rows(self, uid):
+        return [[{
+            "text": self.strings["btn_kill"],
+            "callback": self._cb_dl_kill,
+            "args": (uid,),
+            "style": "danger",
+        }]]
+
+    async def _cb_dl_kill(self, call: InlineCall, uid):
+        rec = self._dl_tasks.get(uid)
+        if not rec:
+            try:
+                await call.answer(self._s("kill_stale"))
+            except Exception:
+                pass
+            return
+        rec["killed"] = True
+        rec["stop"].set()
+        task = rec.get("task")
+        if task is not None and not task.done():
+            task.cancel()
+        if rec.get("path"):
+            _remove_file(rec["path"])
+        await call.edit(
+            self._s("killed"),
+            reply_markup=[[{"text": self.strings["btn_close"], "callback": self._cb_close, "style": "danger"}]],
+        )
 
     async def _cb_kill(self, call: InlineCall, uid):
         proc = self._upload_procs.get(uid)
@@ -759,16 +790,18 @@ class Uploader(loader.Module):
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
-    async def _download_flow(self, form, filename, file_type, fetch):
+    async def _download_flow(self, form, filename, file_type, fetch, uid):
         filename = _hashed_name(filename)
         stop_event = asyncio.Event()
         dl_start = time.time()
+        self._dl_tasks[uid] = {"task": None, "path": None, "stop": stop_event, "killed": False}
+        kill_rows = self._dl_kill_rows(uid)
 
         async def _dl_timer():
             while not stop_event.is_set():
                 elapsed = time.time() - dl_start
                 try:
-                    await form.edit(self._s("downloading", time=_format_time(elapsed)))
+                    await form.edit(self._s("downloading", time=_format_time(elapsed)), reply_markup=kill_rows)
                 except Exception:
                     pass
                 try:
@@ -782,8 +815,22 @@ class Uploader(loader.Module):
 
         try:
             tmp_path = os.path.join(tempfile.mkdtemp(prefix="upl_"), _safe_name(filename))
+            self._dl_tasks[uid]["path"] = tmp_path
 
-            await fetch(tmp_path)
+            try:
+                task = asyncio.ensure_future(fetch(tmp_path))
+                self._dl_tasks[uid]["task"] = task
+                await task
+            except asyncio.CancelledError:
+                stop_event.set()
+                try:
+                    await timer_task
+                except Exception:
+                    pass
+                _remove_file(tmp_path)
+                self._dl_tasks.pop(uid, None)
+                return
+            self._dl_tasks.pop(uid, None)
             dl_elapsed = time.time() - dl_start
             stop_event.set()
             await timer_task
@@ -797,7 +844,6 @@ class Uploader(loader.Module):
                 )
                 return
 
-            uid = str(id(form))
             self._pending_files[uid] = (tmp_path, filename, file_type, file_size, dl_elapsed)
 
             await form.edit(
@@ -840,9 +886,10 @@ class Uploader(loader.Module):
 
         if call is not None:
             form = call
+            uid = str(id(form))
             await form.edit(
                 self._s("downloading", time="0.00s"),
-                reply_markup=self._close_rows(),
+                reply_markup=self._dl_kill_rows(uid),
             )
         else:
             form = await self.inline.form(
@@ -851,11 +898,12 @@ class Uploader(loader.Module):
                 reply_markup=self._close_rows(),
                 silent=True,
             )
+            uid = str(id(form))
 
         async def _fetch(path):
             await reply.download_media(file=path)
 
-        await self._download_flow(form, filename, file_type, _fetch)
+        await self._download_flow(form, filename, file_type, _fetch, uid)
 
     async def _process_album(self, album, call):
         total = 0
@@ -867,15 +915,16 @@ class Uploader(loader.Module):
             await self._reject(self._s("too_large", size=_format_bytes(total)), call=call)
             return
 
+        uid = str(id(call))
         await call.edit(
             self._s("downloading", time="0.00s"),
-            reply_markup=self._close_rows(),
+            reply_markup=self._dl_kill_rows(uid),
         )
 
         async def _fetch(path):
             await self._build_archive(album, path)
 
-        await self._download_flow(call, "album.tar.gz", _detect_type("album.tar.gz"), _fetch)
+        await self._download_flow(call, "album.tar.gz", _detect_type("album.tar.gz"), _fetch, uid)
 
     async def _cb_album_all(self, call: InlineCall, uid):
         data = self._albums.pop(uid, None)

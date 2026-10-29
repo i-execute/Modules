@@ -7,6 +7,7 @@ __version__ = (5, 0, 0)
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
 import os
+import hashlib
 import asyncio
 import base64
 import io
@@ -28,6 +29,7 @@ import random
 import secrets
 import string
 import urllib.request
+import urllib.parse
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional, Dict, List, Tuple
@@ -38,8 +40,188 @@ from telethon.tl.types import InputMediaWebPage
 from .. import loader, utils
 from ..inline.types import InlineCall
 
-RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/Reloading.jpeg"
-GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/Greetings.jpeg"
+ASSET_HOSTS = {"raw.githubusercontent.com", "github.com", "objects.githubusercontent.com"}
+ASSET_BASE = os.environ.get("XRAY_ASSET_BASE", "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay")
+RELOADING_MEDIA_URL = ASSET_BASE.rstrip("/") + "/Reloading.jpeg"
+GREETING_MEDIA_URL = ASSET_BASE.rstrip("/") + "/Greetings.jpeg"
+
+SITE_TEMPLATE = r"""import asyncio
+import os
+import re
+import urllib.parse
+import urllib.request
+from aiohttp import web, ClientSession, WSMsgType
+
+PATH = "__PATH__"
+BACKEND = "ws://127.0.0.1:__BACKEND_PORT__" + PATH
+MASK_KIND = "__MASK_KIND__"
+MASK_URL = "__MASK_URL__"
+LOADING_HTML = "__LOADING_URL__"
+ASSET_HOSTS = {"raw.githubusercontent.com", "github.com", "objects.githubusercontent.com"}
+EXTRA_HOSTS = {item.strip().lower() for item in os.environ.get("XRAY_MASK_HOSTS", "").split(",") if item.strip()}
+HTML_LIMIT = 256 * 1024
+ASSET_LIMIT = 8 * 1024 * 1024
+CACHE_TTL = 300.0
+CACHE_BYTES = 24 * 1024 * 1024
+CACHE_ENTRIES = 32
+ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+TYPES = {
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json",
+    ".map": "application/json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+}
+FALLBACK = (
+    "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+    "<title>Speedtest</title><style>html,body{margin:0;height:100%;background:#0b0d10;color:#e7e7e8;"
+    "font:16px system-ui,sans-serif}main{height:100%;display:grid;place-items:center}"
+    "b{font-weight:600;font-size:22px;letter-spacing:.4px}</style></head>"
+    "<body><main><b>Speedtest</b></main></body></html>"
+)
+CACHE = {}
+CACHE_LOCK = asyncio.Lock()
+
+
+def allowed(url):
+    parsed = urllib.parse.urlsplit(str(url or ""))
+    if parsed.scheme != "https" and parsed.hostname not in EXTRA_HOSTS:
+        return False
+    host = (parsed.hostname or "").lower()
+    return host in ASSET_HOSTS or host in EXTRA_HOSTS
+
+
+def download(url, limit):
+    if not allowed(url):
+        raise ValueError("host is not allowed")
+    request = urllib.request.Request(url, headers={"User-Agent": "curl/8.5.0"})
+    with urllib.request.urlopen(request, timeout=15) as response:
+        body = response.read(limit + 1)
+    if len(body) > limit:
+        raise ValueError("the body is too large")
+    return body
+
+
+async def fetch(url, limit):
+    return await asyncio.to_thread(download, url, limit)
+
+
+async def cached(key, url, limit):
+    now = asyncio.get_running_loop().time()
+    async with CACHE_LOCK:
+        hit = CACHE.get(key)
+        if hit and hit[0] > now:
+            return hit[1]
+        if hit:
+            CACHE.pop(key, None)
+    body = await fetch(url, limit)
+    total = sum(len(item[1]) for item in CACHE.values()) + len(body)
+    async with CACHE_LOCK:
+        while CACHE and (total > CACHE_BYTES or len(CACHE) >= CACHE_ENTRIES):
+            old = next(iter(CACHE))
+            total -= len(CACHE[old][1])
+            CACHE.pop(old, None)
+        CACHE[key] = (now + CACHE_TTL, body)
+    return body
+
+
+def html_response(body):
+    return web.Response(text=body, content_type="text/html", headers={"Cache-Control": "no-store"})
+
+
+async def index(request):
+    if MASK_KIND == "hole":
+        try:
+            body = await cached("index", MASK_URL.rstrip("/") + "/index.html", HTML_LIMIT)
+            return html_response(body.decode("utf-8", "replace"))
+        except Exception:
+            return html_response(FALLBACK)
+    try:
+        body = await cached("loading", LOADING_HTML, HTML_LIMIT)
+        return html_response(body.decode("utf-8", "replace"))
+    except Exception:
+        return html_response(FALLBACK)
+
+
+async def gate_jsx(request):
+    if MASK_KIND == "hole":
+        raise web.HTTPNotFound()
+    try:
+        body = await cached("gate", MASK_URL, HTML_LIMIT)
+        return web.Response(text=body.decode("utf-8", "replace"), content_type="application/javascript", headers={"Cache-Control": "no-store"})
+    except Exception:
+        return web.Response(text="window.App=function(){return React.createElement('main',null)};", content_type="application/javascript")
+
+
+async def asset(request):
+    name = str(request.match_info.get("name") or "")
+    if not ASSET_NAME.match(name) or "/" in name or name.startswith("."):
+        raise web.HTTPNotFound()
+    extension = os.path.splitext(name)[1].lower()
+    content_type = TYPES.get(extension)
+    if not content_type:
+        raise web.HTTPNotFound()
+    try:
+        body = await cached("asset:" + name, MASK_URL.rstrip("/") + "/assets/" + name, ASSET_LIMIT)
+    except Exception:
+        raise web.HTTPNotFound()
+    return web.Response(body=body, headers={"Content-Type": content_type, "Cache-Control": "public, max-age=300"})
+
+
+async def favicon(request):
+    raise web.HTTPNotFound()
+
+
+async def health(request):
+    return web.Response(text="ok\n")
+
+
+async def proxy(request):
+    client_ws = web.WebSocketResponse(autoping=False, heartbeat=30)
+    await client_ws.prepare(request)
+    try:
+        async with ClientSession() as session:
+            async with session.ws_connect(BACKEND, autoping=False, heartbeat=30) as backend_ws:
+                async def forward(source, target):
+                    async for message in source:
+                        if message.type == WSMsgType.BINARY:
+                            await target.send_bytes(message.data)
+                        elif message.type == WSMsgType.TEXT:
+                            await target.send_str(message.data)
+                        elif message.type == WSMsgType.PING:
+                            await target.ping()
+                        elif message.type == WSMsgType.PONG:
+                            await target.pong()
+                        elif message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
+                            break
+                await asyncio.gather(forward(client_ws, backend_ws), forward(backend_ws, client_ws), return_exceptions=True)
+    except Exception:
+        if not client_ws.closed:
+            await client_ws.close(code=1011, message=b"backend unavailable")
+    return client_ws
+
+
+app = web.Application()
+app.router.add_get(PATH, proxy)
+app.router.add_get("/", index)
+app.router.add_get("/gate.jsx", gate_jsx)
+app.router.add_get("/assets/{name}", asset)
+app.router.add_get("/favicon.ico", favicon)
+app.router.add_get("/health", health)
+web.run_app(app, host="127.0.0.1", port=__SITE_PORT__)
+"""
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +233,61 @@ async def _retry_topic_send(send, refresh):
         return await send()
 
 
+class _SubServer(ThreadingHTTPServer):
+    daemon_threads = True
+    request_queue_size = 64
+    allow_reuse_address = True
+
+    def get_request(self):
+        sock, address = super().get_request()
+        sock.settimeout(SUB_SOCKET_TIMEOUT)
+        return sock, address
+
+    def process_request(self, request, client_address):
+        if not SUB_SLOTS.acquire(blocking=False):
+            _sub_security(client_address[0], "sub_busy", "deny", "too many connections")
+            try:
+                request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except OSError:
+            SUB_SLOTS.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            SUB_SLOTS.release()
+
+
 LOG_TRIM_SIZE = 10 * 1024 * 1024
 BASE_PORT = 8443
 AUTOSTART_INTERVAL = 10
 SUB_POLL_INTERVAL = 30
-SUB_TOKEN_LEN = 24
+SUB_TOKEN_LEN = 43
+SUB_RATE_LIMIT = 10
+SUB_RATE_WINDOW = 60.0
+SUB_BLOCK_STEP = 60.0
+SUB_BLOCK_MAX = 3600.0
+SUB_NOT_FOUND_STEP = 10
+SUB_MAX_CLIENTS = 32
+SUB_MAX_LINE = 2048
+SUB_SOCKET_TIMEOUT = 10.0
+SUB_BUCKET_LIMIT = 4096
+SUB_BIND = os.environ.get("XRAY_SUB_BIND", "0.0.0.0")
+SUB_SECLOG = os.environ.get("OBHOD_SECURITY_LOG", "/var/log/obhod/security.log")
+SUB_SECLOG_ON = os.environ.get("OBHOD_SECLOG", "1").strip().lower() not in {"0", "no", "off", "false", "disabled"}
+SUB_LOCK = threading.Lock()
+SUB_BUCKETS = {}
+SUB_LOG_SEEN = {}
+SUB_LOG_GAP = 2.0
+SUB_SLOTS = threading.BoundedSemaphore(SUB_MAX_CLIENTS)
+SUB_OFF_TEXT = {"0", "no", "off", "false", "disabled", "none", ""}
 SUB_XRAY_CALL_TIMEOUT = 8
 
 def _escape(text):
@@ -70,6 +302,128 @@ def _strip_md(text: str) -> str:
 def _gen_secret(length: int) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _sub_flag(value, default: bool) -> bool:
+    if value is None:
+        return bool(default)
+    if value is True:
+        return True
+    if value is False:
+        return False
+    return str(value).strip().lower() not in SUB_OFF_TEXT
+
+
+def _sub_clean(value, limit: int) -> str:
+    text = re.sub(r"[^ -~]", "", str(value or ""))
+    return re.sub(r"\s+", "_", text.strip())[:limit]
+
+
+def _sub_security(ip: str, event: str, outcome: str, detail: str = "") -> bool:
+    if not SUB_SECLOG_ON:
+        return False
+    line = "security ip=%s event=%s outcome=%s actor=0 detail=%s\n" % (
+        _sub_clean(ip, 64) or "-",
+        _sub_clean(event, 32) or "-",
+        _sub_clean(outcome, 16) or "-",
+        _sub_clean(detail, 120) or "-",
+    )
+    now = time.monotonic()
+    key = (ip, event, detail)
+    with SUB_LOCK:
+        last = SUB_LOG_SEEN.get(key)
+        if last is not None and now - last < SUB_LOG_GAP:
+            return False
+        SUB_LOG_SEEN[key] = now
+        if len(SUB_LOG_SEEN) > SUB_BUCKET_LIMIT:
+            for stale in sorted(SUB_LOG_SEEN, key=SUB_LOG_SEEN.get)[: len(SUB_LOG_SEEN) - SUB_BUCKET_LIMIT]:
+                SUB_LOG_SEEN.pop(stale, None)
+    try:
+        folder = os.path.dirname(SUB_SECLOG)
+        if folder and not os.path.isdir(folder):
+            os.makedirs(folder, mode=0o700, exist_ok=True)
+        with SUB_LOCK:
+            if os.path.islink(SUB_SECLOG):
+                return False
+            handle = os.open(SUB_SECLOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.write(handle, line.encode("utf-8", "replace"))
+            finally:
+                os.close(handle)
+        return True
+    except OSError:
+        return False
+
+
+class _SubBucket:
+    __slots__ = ("window", "count", "seen", "blocked", "misses", "offences")
+
+    def __init__(self, now: float):
+        self.window = now
+        self.count = 0
+        self.seen = now
+        self.blocked = 0.0
+        self.misses = 0
+        self.offences = 0
+
+
+def _sub_entry(ip: str, now: float) -> "_SubBucket":
+    entry = SUB_BUCKETS.get(ip)
+    if entry is None:
+        entry = _SubBucket(now)
+        SUB_BUCKETS[ip] = entry
+    entry.seen = now
+    if now - entry.window >= SUB_RATE_WINDOW:
+        entry.window = now
+        entry.count = 0
+    entry.count += 1
+    return entry
+
+
+def _sub_sweep(now: float) -> None:
+    stale = [key for key, value in SUB_BUCKETS.items() if now - value.seen > SUB_RATE_WINDOW * 2]
+    for key in stale:
+        SUB_BUCKETS.pop(key, None)
+    if len(SUB_BUCKETS) > SUB_BUCKET_LIMIT:
+        ordered = sorted(SUB_BUCKETS.items(), key=lambda pair: pair[1].seen)
+        for key, _value in ordered[: len(SUB_BUCKETS) - SUB_BUCKET_LIMIT]:
+            SUB_BUCKETS.pop(key, None)
+
+
+def _sub_allowed(ip: str) -> tuple:
+    now = time.monotonic()
+    reason = ""
+    with SUB_LOCK:
+        entry = _sub_entry(ip, now)
+        if now < entry.blocked:
+            _sub_sweep(now)
+            return False, ""
+        if entry.count > SUB_RATE_LIMIT:
+            reason = "requests over the limit"
+            entry.offences = min(8, entry.offences + 1)
+            entry.blocked = now + min(SUB_BLOCK_MAX, SUB_BLOCK_STEP * (2 ** (entry.offences - 1)))
+        elif entry.misses >= SUB_NOT_FOUND_STEP:
+            reason = "repeated misses"
+            entry.offences = min(8, entry.offences + 1)
+            entry.blocked = now + min(SUB_BLOCK_MAX, SUB_BLOCK_STEP * (2 ** (entry.offences - 1)))
+            entry.misses = 0
+        _sub_sweep(now)
+    return (not reason), reason
+
+
+def _sub_record(ip: str, missing: bool) -> None:
+    now = time.monotonic()
+    with SUB_LOCK:
+        entry = SUB_BUCKETS.get(ip)
+        if entry is None:
+            entry = _SubBucket(now)
+            SUB_BUCKETS[ip] = entry
+        entry.seen = now
+        if missing:
+            entry.misses += 1
+        else:
+            entry.misses = 0
+            entry.offences = 0
 
 
 def _fmt_bytes(value: int) -> str:
@@ -1169,7 +1523,8 @@ class XRay(loader.Module):
         self._tunnels: Dict[str, str] = {}
         self._site_processes: Dict[str, str] = {}
         self._mask_sites = {
-            "Evil Cat": "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Evil_Cat.jsx",
+            "Evil Cat": ("jsx", ASSET_BASE.rstrip("/") + "/WEB/Evil_Cat.jsx"),
+            "Black Hole": ("hole", ASSET_BASE.rstrip("/") + "/WEB/hole"),
         }
         self._logger_topic = None
         self._asset_channel = None
@@ -1454,80 +1809,42 @@ class XRay(loader.Module):
         user["restart_required"] = True
         self._save_users()
 
-    _WEBSOCKET_SITE_SCRIPT_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/websocket_site.py"
+    _WEBSOCKET_SITE_SCRIPT_URL = ASSET_BASE.rstrip("/") + "/WEB/websocket_site.py"
+
+    def _fetch_site_script(self) -> str:
+        parsed = urllib.parse.urlsplit(self._WEBSOCKET_SITE_SCRIPT_URL)
+        if parsed.scheme != "https" or not parsed.hostname:
+            return ""
+        if parsed.hostname not in ASSET_HOSTS:
+            return ""
+        request = urllib.request.Request(self._WEBSOCKET_SITE_SCRIPT_URL, headers={"User-Agent": "curl/8.5.0"})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            body = response.read(256 * 1024 + 1)
+        if len(body) > 256 * 1024:
+            return ""
+        text = body.decode("utf-8")
+        expected = os.environ.get("XRAY_SITE_SCRIPT_SHA256", "").strip().lower()
+        if expected and hashlib.sha256(body).hexdigest() != expected:
+            logger.warning("[XR] the site template digest does not match, the embedded one is used")
+            return ""
+        return text
 
     def _websocket_site_script(
-        self, path: str, backend_port: int, site_port: int, mask_url: str
+        self, path: str, backend_port: int, site_port: int, mask_kind: str, mask_url: str
     ) -> str:
         try:
-            with urllib.request.urlopen(self._WEBSOCKET_SITE_SCRIPT_URL, timeout=15) as response:
-                template = response.read().decode("utf-8")
+            template = self._fetch_site_script()
+            if not template:
+                raise ValueError("no template")
         except Exception:
-            template = """
-import asyncio
-import urllib.request
-from aiohttp import web, ClientSession, WSMsgType
-
-PATH = "__PATH__"
-BACKEND = "ws://127.0.0.1:__BACKEND_PORT__" + PATH
-GATE_JSX = "__MASK_URL__"
-LOADING_HTML = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB/Loading.html"
-
-async def fetch_text(url, timeout=10):
-    def read():
-        with urllib.request.urlopen(url, timeout=timeout) as response:
-            return response.read().decode("utf-8")
-    return await asyncio.to_thread(read)
-
-async def index(request):
-    try:
-        html = await fetch_text(LOADING_HTML)
-    except Exception:
-        html = "<!doctype html><title>Connecting</title><body style='margin:0;background:#111214;color:#e7e7e8;font:16px system-ui;display:grid;place-items:center;min-height:100vh'>Preparing your connection.</body>"
-    return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-store"})
-
-async def gate_jsx(request):
-    try:
-        body = await fetch_text(GATE_JSX)
-        return web.Response(text=body, content_type="application/javascript", headers={"Cache-Control": "no-store"})
-    except Exception:
-        return web.Response(text="window.App=function(){return React.createElement('main',null)};", content_type="application/javascript")
-
-async def proxy(request):
-    client_ws = web.WebSocketResponse(autoping=False, heartbeat=30)
-    await client_ws.prepare(request)
-    try:
-        async with ClientSession() as session:
-            async with session.ws_connect(BACKEND, autoping=False, heartbeat=30) as backend_ws:
-                async def forward(source, target):
-                    async for message in source:
-                        if message.type == WSMsgType.BINARY:
-                            await target.send_bytes(message.data)
-                        elif message.type == WSMsgType.TEXT:
-                            await target.send_str(message.data)
-                        elif message.type == WSMsgType.PING:
-                            await target.ping()
-                        elif message.type == WSMsgType.PONG:
-                            await target.pong()
-                        elif message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
-                            break
-                await asyncio.gather(forward(client_ws, backend_ws), forward(backend_ws, client_ws), return_exceptions=True)
-    except Exception:
-        if not client_ws.closed:
-            await client_ws.close(code=1011, message=b"backend unavailable")
-    return client_ws
-
-app = web.Application()
-app.router.add_get(PATH, proxy)
-app.router.add_get('/', index)
-app.router.add_get('/gate.jsx', gate_jsx)
-web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
-"""
+            template = SITE_TEMPLATE
         return (
             template.replace("__PATH__", path)
             .replace("__BACKEND_PORT__", str(backend_port))
             .replace("__SITE_PORT__", str(site_port))
+            .replace("__MASK_KIND__", mask_kind or "jsx")
             .replace("__MASK_URL__", mask_url)
+            .replace("__LOADING_URL__", ASSET_BASE.rstrip("/") + "/WEB/Loading.html")
         )
 
     async def _start_websocket_site(self, name: str, user_dir: str) -> Tuple[bool, str]:
@@ -1545,7 +1862,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         mask_name = user.get("mask_site", "Evil Cat")
         if mask_name not in self._mask_sites:
             mask_name = "Evil Cat"
-        mask_url = self._mask_sites[mask_name]
+        mask_kind, mask_url = self._mask_sites[mask_name]
         user["mask_site"] = mask_name
         script_path = os.path.join(user_dir, "websocket_site.py")
         try:
@@ -1565,7 +1882,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         except Exception:
             pass
         try:
-            script_content = self._websocket_site_script(path, user["port"], site_port, mask_url)
+            script_content = self._websocket_site_script(path, user["port"], site_port, mask_kind, mask_url)
         except Exception as e:
             return False, f"site_script_fetch_failed: {e}"
         with open(script_path, "w", encoding="utf-8") as f:
@@ -2623,6 +2940,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             "stats": True,
             "interval": 12,
             "title": "",
+            "primary": "",
             "traffic": {},
             "baseline": {},
         }
@@ -2682,11 +3000,11 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
 
     def _sub_free_port(self, taken: set) -> int:
         for _ in range(64):
-            port = self._find_free_loopback_port()
+            port = random.randint(20000, 60000)
             if port not in taken and not self._port_in_use(port):
                 return port
         for _ in range(64):
-            port = random.randint(20000, 60000)
+            port = self._find_free_loopback_port()
             if port not in taken and not self._port_in_use(port):
                 return port
         return random.randint(20000, 60000)
@@ -2749,8 +3067,11 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
         out = []
         if not self._external_ip:
             return out
+        primary = self._sub_primary()
         for name, user in list(self._users.items()):
             if only and name != only:
+                continue
+            if not only and name != primary:
                 continue
             if user.get("transport") == "socks5":
                 continue
@@ -2953,11 +3274,41 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             server_version = "nginx"
             sys_version = ""
             protocol_version = "HTTP/1.1"
+            timeout = SUB_SOCKET_TIMEOUT
 
             def log_message(self, fmt, *args):
                 return
 
+            def handle_one_request(self):
+                try:
+                    self.raw_requestline = self.rfile.readline(SUB_MAX_LINE + 1)
+                    if len(self.raw_requestline) > SUB_MAX_LINE:
+                        self.raw_requestline = self.raw_requestline[:SUB_MAX_LINE]
+                        self.requestline = ""
+                        self.request_version = ""
+                        self.command = ""
+                        _sub_record(self.client_address[0], True)
+                        _sub_security(self.client_address[0], "sub_request", "deny", "request line too long")
+                        self.send_error(414, "uri too long")
+                        self.close_connection = True
+                        return
+                    if not self.raw_requestline:
+                        self.close_connection = True
+                        return
+                    if not self.parse_request():
+                        return
+                    method = getattr(self, "do_" + self.command, None)
+                    if method is None:
+                        self.send_error(501, "unsupported method")
+                        return
+                    method()
+                    self.wfile.flush()
+                except (TimeoutError, OSError):
+                    self.close_connection = True
+
             def _abort(self):
+                _sub_record(self.client_address[0], True)
+                _sub_security(self.client_address[0], "sub_request", "deny", "unknown subscription")
                 try:
                     self.send_response(404)
                     self.send_header("Content-Length", "0")
@@ -2980,6 +3331,8 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                 self.end_headers()
                 if self.command != "HEAD" and payload:
                     self.wfile.write(payload)
+                if code == 200:
+                    _sub_record(self.client_address[0], False)
 
             def do_HEAD(self):
                 self.do_GET()
@@ -2991,6 +3344,12 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
                     self._abort()
 
             def _dispatch(self):
+                allowed, reason = _sub_allowed(self.client_address[0])
+                if not allowed:
+                    if reason:
+                        _sub_security(self.client_address[0], "sub_rate", "block", reason)
+                    self._reply(429, b"slow down\n", "text/plain; charset=utf-8", "upload=0; download=0; total=0; expire=0")
+                    return
                 raw = self.path or "/"
                 query = ""
                 if "?" in raw:
@@ -3041,6 +3400,15 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
 
         return SubHandler
 
+    def _sub_primary(self) -> str:
+        name = str(self._sub.get("primary") or "")
+        if name and name in self._users:
+            return name
+        for key, user in self._users.items():
+            if user.get("transport") != "socks5":
+                return key
+        return ""
+
     def _sub_start_server(self) -> Tuple[bool, str]:
         if self._sub_server:
             return True, ""
@@ -3051,7 +3419,7 @@ web.run_app(app, host='127.0.0.1', port=__SITE_PORT__)
             self._sub["port"] = port
             self._sub_save()
         try:
-            httpd = ThreadingHTTPServer(("0.0.0.0", port), self._sub_make_handler())
+            httpd = _SubServer((SUB_BIND, port), self._sub_make_handler())
         except OSError as exc:
             return False, str(exc)
         httpd.daemon_threads = True

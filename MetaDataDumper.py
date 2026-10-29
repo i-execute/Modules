@@ -2926,14 +2926,43 @@ class MetaDataDumper(loader.Module):
                 lines = lines[:ET_GROUP_CAP] + [f"<i>{_esc(self._s('et_more', n=extra))}</i>"]
             report.add("exiftool", f"[{g}]", lines)
 
+    def _round_attr_hints(self, info):
+        ev = []
+        fn = (info.get("filename") or "").strip()
+        lo = fn.lower()
+        w = info.get("vw") or 0
+        h = info.get("vh") or 0
+        dimsig = None
+        if w and h and w == h:
+            dimsig = {
+                (300, 300): ("Telegram macOS", "native macOS app rounds video notes to 300px"),
+                (384, 384): ("Telegram Android", "Telegram for Android processes video notes at 384px"),
+                (240, 240): ("Telegram X", "Telegram X sticks to legacy 240px video notes"),
+            }.get((w, h))
+        if lo.startswith("round_"):
+            ev.append(("Telegram Desktop", 3, f"documentAttributeFilename = '{fn}' (round_* server pattern marks Telegram Desktop video notes)"))
+            if dimsig:
+                ev.append((dimsig[0], 1, f"DocumentAttributeVideo {w}x{h} ({dimsig[1]}), but filename already flags Desktop"))
+            return ev
+        ios_name = lo in ("video.mp4", "file.mp4", "video note.mp4", "videonote.mp4")
+        if dimsig:
+            ev.append((dimsig[0], 3, f"DocumentAttributeVideo {w}x{h} ({dimsig[1]})"))
+        if ios_name:
+            score = 2 if dimsig else 3
+            ev.append(("Telegram iOS", score, f"documentAttributeFilename = '{fn}' (server default when the client sends no name: iOS video notes)"))
+            ev.append(("Telegram Web (A/K)", 2, "same server metadata as iOS: generic name, indistinguishable before download"))
+        return ev
+
     def _detect_media(self, reply):
         media = reply.media
         doc = getattr(media, "document", None) if isinstance(media, MessageMediaDocument) else None
-        info = {"media": media, "doc": doc, "round": False, "voice": False, "video": False, "photo": isinstance(media, MessageMediaPhoto) and bool(getattr(media, "photo", None)), "filename": None, "animated": False, "sticker": False}
+        info = {"media": media, "doc": doc, "round": False, "voice": False, "video": False, "photo": isinstance(media, MessageMediaPhoto) and bool(getattr(media, "photo", None)), "filename": None, "animated": False, "sticker": False, "vw": 0, "vh": 0}
         if doc:
             for a in doc.attributes or []:
                 if isinstance(a, DocumentAttributeVideo):
                     info["video"] = True
+                    info["vw"] = a.w or 0
+                    info["vh"] = a.h or 0
                     if a.round_message:
                         info["round"] = True
                 elif isinstance(a, DocumentAttributeAudio) and a.voice:
@@ -3027,7 +3056,7 @@ class MetaDataDumper(loader.Module):
         media = info["media"]
         doc = info["doc"]
         filename = info["filename"]
-        ev = self._fingerprint(facts, et, kind, filename)
+        ev = (self._round_attr_hints(info) if kind == "round" else []) + self._fingerprint(facts, et, kind, filename)
         verdict, scored = self._verdict_lines(ev)
         report.add("summary", self.strings["sec_verdict"], verdict, expandable=False)
         evl = []

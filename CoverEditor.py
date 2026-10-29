@@ -1066,17 +1066,41 @@ class CoverEditor(loader.Module):
         )
 
     @loader.command(
-        ru_doc="Реплай на трек - редактор названия, исполнителя и обложки. ce add реплаем на картинку - добавить обложку в кеш (только во время редактирования)",
-        en_doc="Reply to a track - title, artist and cover editor. ce add as reply to a picture - add a cover to the cache (only while editing)",
+        ru_doc="Реплай на трек - редактор названия, исполнителя и обложки. Реплай на картинку (или дописать add) - добавить обложку в кеш во время редактирования. Картинку можно прикрепить к самому сообщению с командой",
+        en_doc="Reply to a track - title, artist and cover editor. Reply to a picture (or append add) - add a cover to the cache while editing. The picture can also be attached to the command message itself",
     )
     async def cecmd(self, message: Message):
-        """Reply to a track - title, artist and cover editor. ce add as reply to a picture - add a cover to the cache (only while editing)"""
+        """Reply to a track - title, artist and cover editor. Reply to a picture (or ce add) - add a cover to the cache (only while editing). The picture can also be attached to the command message"""
         args = (utils.get_args_raw(message) or "").strip().lower()
-        reply = await message.get_reply_message()
-        if args == "add":
+        reply = None
+        try:
+            reply = await message.get_reply_message()
+        except Exception:
+            reply = None
+        if (
+            reply is None
+            and getattr(message, "reply_to", None) is not None
+            and getattr(message.reply_to, "reply_to_msg_id", None)
+        ):
+            try:
+                reply = await self._client.get_messages(
+                    message.chat_id,
+                    ids=message.reply_to.reply_to_msg_id,
+                )
+            except Exception:
+                reply = None
+        if self._is_image(reply):
+            if args not in ("", "add"):
+                await utils.answer(message, self._s("need_image"))
+                return
             await self._add(message, reply)
             return
-        if not reply:
-            await utils.answer(message, self._s("no_track"))
+        if args == "add":
+            await self._add(message, reply if reply is not None else message)
             return
+        if not reply:
+            if getattr(message, "media", None) is None:
+                await utils.answer(message, self._s("no_track"))
+                return
+            reply = message
         await self._start(message, reply)
