@@ -151,15 +151,6 @@ class VKCalls(loader.Module):
             "5. Send to bot via button below</blockquote>"
         ),
         "auth_open": "Open vkhost.github.io",
-        "auth_input": "Paste token here:",
-        "auth_success": (
-            "<blockquote><b>Authorization successful!</b></blockquote>\n"
-            "<blockquote>User ID: <code>{user_id}</code></blockquote>"
-        ),
-        "auth_failed": (
-            "<blockquote><b>Authorization failed</b></blockquote>\n"
-            "<blockquote>{error}</blockquote>"
-        ),
         "auth_invalid": "<blockquote><b>Invalid token format</b></blockquote>",
         "auth_bot_prompt": (
             "<blockquote><b>VKCalls | Authorization</b></blockquote>\n"
@@ -237,15 +228,6 @@ class VKCalls(loader.Module):
             "5. Отправьте боту по кнопке ниже</blockquote>"
         ),
         "auth_open": "Открыть vkhost.github.io",
-        "auth_input": "Вставить токен здесь:",
-        "auth_success": (
-            "<blockquote><b>Авторизация успешна!</b></blockquote>\n"
-            "<blockquote>User ID: <code>{user_id}</code></blockquote>"
-        ),
-        "auth_failed": (
-            "<blockquote><b>Ошибка авторизации</b></blockquote>\n"
-            "<blockquote>{error}</blockquote>"
-        ),
         "auth_invalid": "<blockquote><b>Неверный формат токена</b></blockquote>",
         "auth_bot_prompt": (
             "<blockquote><b>VKCalls | Авторизация</b></blockquote>\n"
@@ -465,14 +447,6 @@ class VKCalls(loader.Module):
                 [{"text": self.strings["btn_auth_bot"], "url": deeplink}],
                 [
                     {
-                        "text": self.strings["auth_input"],
-                        "input": self.strings["auth_input"],
-                        "handler": self._input_auth,
-                        "style": "success",
-                    }
-                ],
-                [
-                    {
                         "text": self.strings["btn_back"],
                         "callback": self._cb_main_menu,
                         "style": "primary",
@@ -480,41 +454,6 @@ class VKCalls(loader.Module):
                 ],
             ],
         )
-
-    async def _input_auth(self, call: InlineCall, auth_url: str):
-        token = extract_vk_token(auth_url)
-        if not token:
-            await call.edit(self.strings["auth_invalid"])
-            return
-
-        ok = await self._vk.auth(token)
-        if ok:
-            self.config["VK_TOKEN"] = token
-            await call.edit(
-                self.strings["auth_success"].format(user_id=self._vk.user_id or "?"),
-                reply_markup=[
-                    [
-                        {
-                            "text": self.strings["btn_back"],
-                            "callback": self._cb_main_menu,
-                            "style": "primary",
-                        }
-                    ]
-                ],
-            )
-        else:
-            await call.edit(
-                self.strings["auth_failed"].format(error="users.get failed"),
-                reply_markup=[
-                    [
-                        {
-                            "text": self.strings["btn_back"],
-                            "callback": self._cb_main_menu,
-                            "style": "primary",
-                        }
-                    ]
-                ],
-            )
 
     async def _cb_create_call(self, call: InlineCall):
         if not await self._ensure_vk():
