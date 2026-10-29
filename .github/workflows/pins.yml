@@ -1,0 +1,196 @@
+name: pins
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: pins
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  drift:
+    name: pinned engines and shipped assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: the pinned tags must still exist upstream
+        run: |
+          python - <<'PY'
+          import ast, json, pathlib, sys, urllib.request
+          tree = ast.parse(pathlib.Path("XRay.py").read_text(encoding="utf-8"))
+          pins = {}
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Assign):
+                  name = getattr(node.targets[0], "id", "")
+                  if name in {"XRAY_CORE_VERSION", "CLOUDFLARED_VERSION"}:
+                      pins[name] = ast.literal_eval(node.value)
+          repos = {
+              "XRAY_CORE_VERSION": "XTLS/Xray-core",
+              "CLOUDFLARED_VERSION": "cloudflare/cloudflared",
+          }
+          bad = []
+          for key, repo in repos.items():
+              url = f"https://api.github.com/repos/{repo}/releases/tags/{pins[key]}"
+              request = urllib.request.Request(url, headers={"User-Agent": "pins-check", "Accept": "application/vnd.github+json"})
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      json.loads(response.read().decode("utf-8"))
+              except Exception as error:
+                  bad.append(f"{repo}: the pinned tag {pins[key]} is gone: {error}")
+          if bad:
+              print("\n".join(bad))
+              sys.exit(1)
+          print("both pinned tags still exist")
+          PY
+      - name: report a newer release without failing the run
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import ast, json, pathlib, urllib.request
+          tree = ast.parse(pathlib.Path("XRay.py").read_text(encoding="utf-8"))
+          pins = {}
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Assign):
+                  name = getattr(node.targets[0], "id", "")
+                  if name in {"XRAY_CORE_VERSION", "CLOUDFLARED_VERSION"}:
+                      pins[name] = ast.literal_eval(node.value)
+          repos = {
+              "XRAY_CORE_VERSION": "XTLS/Xray-core",
+              "CLOUDFLARED_VERSION": "cloudflare/cloudflared",
+          }
+          for key, repo in repos.items():
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{repo}/releases/latest",
+                  headers={"User-Agent": "pins-check", "Accept": "application/vnd.github+json"},
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  latest = json.loads(response.read().decode("utf-8"))["tag_name"]
+              if latest != pins[key]:
+                  print(f"::warning title=pin drift::{repo} is {latest}, the module pins {pins[key]}")
+              else:
+                  print(f"{repo} is at the pinned {pins[key]}")
+          PY
+      - name: the pinned digests must match the release assets
+        run: |
+          python - <<'PY'
+          import ast, hashlib, pathlib, sys, urllib.request
+          tree = ast.parse(pathlib.Path("XRay.py").read_text(encoding="utf-8"))
+          values = {}
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Assign):
+                  name = getattr(node.targets[0], "id", "")
+                  if name in {"XRAY_CORE_VERSION", "XRAY_CORE_SHA256", "CLOUDFLARED_VERSION", "CLOUDFLARED_SHA256"}:
+                      values[name] = ast.literal_eval(node.value)
+          assets = {
+              "cloudflared-linux-amd64": "https://github.com/cloudflare/cloudflared/releases/download/{tag}/cloudflared-linux-amd64",
+              "cloudflared-linux-arm64": "https://github.com/cloudflare/cloudflared/releases/download/{tag}/cloudflared-linux-arm64",
+          }
+          bad = []
+          for asset, template in assets.items():
+              url = template.format(tag=values["CLOUDFLARED_VERSION"])
+              request = urllib.request.Request(url, headers={"User-Agent": "pins-check"})
+              with urllib.request.urlopen(request, timeout=180) as response:
+                  digest = hashlib.sha256(response.read()).hexdigest()
+              expected = values["CLOUDFLARED_SHA256"].get(asset, "")
+              if digest != expected:
+                  bad.append(f"{asset}: upstream is {digest}, the module pins {expected}")
+          if bad:
+              print("\n".join(bad))
+              sys.exit(1)
+          print("the cloudflared digests are current")
+          PY
+      - name: the shipped web assets must match the module pins
+        run: |
+          python - <<'PY'
+          import ast, hashlib, pathlib, sys
+          web = pathlib.Path("Storage/XRay/WEB")
+          source = pathlib.Path("XRay.py").read_text(encoding="utf-8")
+          pins = {}
+          for node in ast.walk(ast.parse(source)):
+              if isinstance(node, ast.Assign):
+                  name = getattr(node.targets[0], "id", "")
+                  if name in {"GATE_FILES", "HOLE_FILES", "SITE_SCRIPT_SHA256"}:
+                      try:
+                          pins[name] = ast.literal_eval(node.value)
+                      except ValueError:
+                          pass
+          bad = []
+          for key, expected in (pins.get("GATE_FILES") or {}).items():
+              path = {"gate": web / "Evil_Cat.jsx", "loading": web / "Loading.html"}.get(key)
+              if path is None or not path.is_file():
+                  bad.append(f"GATE_FILES[{key}] has no shipped file")
+                  continue
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              if digest != expected:
+                  bad.append(f"GATE_FILES[{key}]: shipped {digest}, pinned {expected}")
+          for key, expected in (pins.get("HOLE_FILES") or {}).items():
+              if key in {"gate", "loading"}:
+                  path = {"gate": web / "Evil_Cat.jsx", "loading": web / "Loading.html"}[key]
+              else:
+                  path = web / "hole" / key
+              if not path.is_file():
+                  bad.append(f"HOLE_FILES[{key}] has no shipped file")
+                  continue
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              if digest != expected:
+                  bad.append(f"HOLE_FILES[{key}]: shipped {digest}, pinned {expected}")
+          script = pins.get("SITE_SCRIPT_SHA256")
+          if isinstance(script, str):
+              digest = hashlib.sha256((web / "websocket_site.py").read_bytes()).hexdigest()
+              if digest != script:
+                  bad.append(f"SITE_SCRIPT_SHA256: shipped {digest}, pinned {script}")
+          if bad:
+              print("\n".join(bad))
+              sys.exit(1)
+          print("the shipped assets match the pins")
+          PY
+      - name: the files the module fetches must match the pinned digests
+        run: |
+          python - <<'PY'
+          import ast, hashlib, pathlib, sys, urllib.request
+          base = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay/WEB"
+          source = pathlib.Path("XRay.py").read_text(encoding="utf-8")
+          pins = {}
+          for node in ast.walk(ast.parse(source)):
+              if isinstance(node, ast.Assign):
+                  name = getattr(node.targets[0], "id", "")
+                  if name in {"GATE_FILES", "HOLE_FILES", "SITE_SCRIPT_SHA256"}:
+                      try:
+                          pins[name] = ast.literal_eval(node.value)
+                      except ValueError:
+                          pass
+          wanted = {}
+          wanted["websocket_site.py"] = pins.get("SITE_SCRIPT_SHA256")
+          for key, value in (pins.get("GATE_FILES") or {}).items():
+              wanted[{"gate": "Evil_Cat.jsx", "loading": "Loading.html"}[key]] = value
+          for key, value in (pins.get("HOLE_FILES") or {}).items():
+              if key in {"gate", "loading"}:
+                  continue
+              wanted["hole/" + key] = value
+          bad = []
+          for name, expected in sorted(wanted.items()):
+              if not isinstance(expected, str):
+                  continue
+              request = urllib.request.Request(f"{base}/{name}", headers={"User-Agent": "pins-check"})
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  digest = hashlib.sha256(response.read()).hexdigest()
+              if digest != expected:
+                  bad.append(f"{name}: served {digest}, pinned {expected}")
+          if bad:
+              print("\n".join(bad))
+              print("the module will fall back to the minimal page until the pin is fixed")
+              sys.exit(1)
+          print("the served files match the pins")
+          PY

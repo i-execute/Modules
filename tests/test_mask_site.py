@@ -16,7 +16,15 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
+def _find_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in [here.parent, *here.parents]:
+        if (parent / "XRay.py").is_file() and (parent / "Storage" / "XRay").is_dir():
+            return parent
+    raise RuntimeError("the repository root is not reachable from the test file")
+
+
+ROOT = _find_root()
 WEB = ROOT / "Storage" / "XRay" / "WEB"
 TEMPLATE = WEB / "websocket_site.py"
 HOLE = WEB / "hole"

@@ -333,14 +333,17 @@ class Token(loader.Module):
 
         return int(api_id), str(api_hash)
 
-    def _get_user_tmp_dir(self, user_id: int, bot_id: str = "") -> str:
-        base = f"/tmp/Token/{user_id}"
-        if bot_id:
-            path = os.path.join(base, str(bot_id))
-        else:
-            path = base
-        os.makedirs(path, exist_ok=True)
+    def _private_dir(self, *parts: str) -> str:
+        base = os.path.join(os.path.expanduser("~"), ".token_on_userbot")
+        os.makedirs(base, mode=0o700, exist_ok=True)
+        os.chmod(base, 0o700)
+        path = os.path.join(base, *[str(part) for part in parts if str(part)])
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        os.chmod(path, 0o700)
         return path
+
+    def _get_user_tmp_dir(self, user_id: int, bot_id: str = "") -> str:
+        return self._private_dir(user_id, bot_id)
 
     def _get_cli_token(self) -> str:
         token = self.config.get("TGCLOUD_TOKEN")
@@ -410,8 +413,7 @@ class Token(loader.Module):
         if local_path and os.path.isfile(local_path) and os.path.getsize(local_path) > 1000:
             return local_path
 
-        tmp_dir = "/tmp/Token"
-        os.makedirs(tmp_dir, exist_ok=True)
+        tmp_dir = self._private_dir()
         tmp_path = os.path.join(tmp_dir, "WebApp.jpg")
 
         if os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 1000:
@@ -425,6 +427,7 @@ class Token(loader.Module):
                     if len(data) > 1000:
                         with open(tmp_path, "wb") as f:
                             f.write(data)
+                        os.chmod(tmp_path, 0o600)
                         return tmp_path
         except Exception as e:
             logger.warning(f"Failed to download WebApp.jpg: {e}")
@@ -534,6 +537,10 @@ class Token(loader.Module):
             self._set_bots(bots)
 
     def _validate_token_api(self, token: str) -> dict:
+        match = BOT_TOKEN_PATTERN.fullmatch(str(token or "").strip())
+        if not match:
+            return None
+        token = match.group(1)
         url = f"https://api.telegram.org/bot{token}/getMe"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "TelegramBotDumper/2.0"})

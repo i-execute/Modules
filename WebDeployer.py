@@ -180,6 +180,52 @@ def _which(name, path_value):
     return shutil.which(name, path=path_value)
 
 
+GUARD_ROOT = "root"
+GUARD_DOCKER = "docker"
+
+
+def _in_docker():
+    if os.path.isfile("/.dockerenv"):
+        return True
+    try:
+        with open("/proc/1/cgroup", "rt") as handle:
+            data = handle.read()
+        if any(marker in data for marker in ("docker", "kubepods", "containerd", "podman", "lxc")):
+            return True
+    except Exception:
+        pass
+    try:
+        with open("/proc/1/environ", "rb") as handle:
+            environment = handle.read()
+        if b"container=" in environment:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _guard_reason() -> str:
+    if os.name == "posix" and os.geteuid() == 0:
+        return GUARD_ROOT
+    if _in_docker():
+        return GUARD_DOCKER
+    return ""
+
+
+def _write_private(path: str, data: str) -> None:
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(handle, 0o600)
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(data)
+    except Exception:
+        try:
+            os.close(handle)
+        except OSError:
+            pass
+        raise
+
+
 def _escape(text):
     if not text:
         return ""
@@ -222,6 +268,9 @@ def _safe_extract(archive_path: str, dest_dir: str, kind: str):
                 target = os.path.abspath(os.path.join(dest_dir, member.filename))
                 if target != abs_dest and not target.startswith(abs_dest + os.sep):
                     raise ValueError(f"Unsafe path in archive: {member.filename}")
+                mode = (member.external_attr >> 16) & 0o170000
+                if mode == 0o120000:
+                    raise ValueError(f"Unsafe link in archive: {member.filename}")
             zf.extractall(dest_dir)
     else:
         try:
@@ -230,7 +279,12 @@ def _safe_extract(archive_path: str, dest_dir: str, kind: str):
                     target = os.path.abspath(os.path.join(dest_dir, member.name))
                     if target != abs_dest and not target.startswith(abs_dest + os.sep):
                         raise ValueError(f"Unsafe path in archive: {member.name}")
-                tf.extractall(dest_dir)
+                    if member.issym() or member.islnk() or member.isdev():
+                        raise ValueError(f"Unsafe link in archive: {member.name}")
+                if hasattr(tarfile, "data_filter"):
+                    tf.extractall(dest_dir, filter="data")
+                else:
+                    tf.extractall(dest_dir)
         except (tarfile.ReadError, tarfile.CompressionError):
             # Fallback if it is a single compressed file (e.g. gzip)
             base = os.path.basename(archive_path)
@@ -419,6 +473,11 @@ class WebDeployer(loader.Module):
 
     strings = {
         "name": "WebDeployer",
+        "guard_title": "<b>WebDeployer is disabled on this server</b>",
+        "guard_root": "The userbot is running as root (uid 0). WebDeployer refuses to start in this mode.",
+        "guard_docker": "The userbot is running inside a container (Docker, Podman, LXC or Kubernetes). WebDeployer refuses to start in this mode.",
+        "guard_why": "Why: this module starts long living web daemons for your sites. Under root a single bug is a full server takeover, and inside a container the site escapes the isolation the container promises. A userbot is not a system service.",
+        "guard_how": "What to do: run the userbot as a regular user with a working <code>systemctl --user</code> session, the module creates only user units. Keep root off limits and do not run it in Docker.",
         "reloaded": "<blockquote><b>WebDeployer reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nSaved sites: <b>{sites}</b></blockquote>",
         "greeting": "<blockquote><b>WebDeployer is ready</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nSaved sites: <b>{sites}</b>\nDeployments and errors will be logged here.\nUse <code>{prefix}wd</code> to manage sites and your GitHub token.</blockquote>",
         "main_menu": (
@@ -542,6 +601,11 @@ class WebDeployer(loader.Module):
     }
 
     strings_ru = {
+        "guard_title": "<b>WebDeployer отключён на этом сервере</b>",
+        "guard_root": "Юзербот запущен от root (uid 0). WebDeployer в таком режиме работать отказывается.",
+        "guard_docker": "Юзербот запущен внутри контейнера (Docker, Podman, LXC или Kubernetes). WebDeployer в таком режиме работать отказывается.",
+        "guard_why": "Почему: модуль поднимает долгоживущие веб-демоны для ваших сайтов. Под root одна ошибка это полный захват сервера, а внутри контейнера сайт выходит за границы обещанной изоляции. Юзербот не является системной службой.",
+        "guard_how": "Что делать: запустите юзербот обычным пользователем с рабочей сессией <code>systemctl --user</code>, модуль создаёт только пользовательские юниты. Root не использовать, в Docker не запускать.",
         "reloaded": "<blockquote><b>WebDeployer перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nСохранено сайтов: <b>{sites}</b></blockquote>",
         "greeting": "<blockquote><b>WebDeployer готов к работе</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nСохранено сайтов: <b>{sites}</b>\nВ этот топик будут приходить логи деплоев и ошибок.\nИспользуйте <code>{prefix}wd</code>, чтобы управлять сайтами и GitHub-токеном.</blockquote>",
         "main_menu": (
@@ -814,18 +878,12 @@ class WebDeployer(loader.Module):
             logger.error(f"[WD] Failed to send topic notification: {e}")
 
     @property
-    def _is_root(self) -> bool:
-        return os.name == "posix" and os.geteuid() == 0
-
-    @property
     def _systemd_dir(self) -> str:
-        if self._is_root:
-            return "/etc/systemd/system"
         return os.path.join(os.path.expanduser("~"), ".config", "systemd", "user")
 
     def _systemctl_env(self):
         env = dict(os.environ)
-        if not self._is_root and os.name == "posix":
+        if os.name == "posix":
             uid = os.geteuid()
             runtime = env.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}"
             env["XDG_RUNTIME_DIR"] = runtime
@@ -834,7 +892,7 @@ class WebDeployer(loader.Module):
 
     async def _systemctl(self, *args: str):
         try:
-            cmd = ["systemctl"] if self._is_root else ["systemctl", "--user"]
+            cmd = ["systemctl", "--user"]
             proc = await asyncio.create_subprocess_exec(
                 *cmd, *args,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -883,10 +941,9 @@ class WebDeployer(loader.Module):
             f"ExecStart={quoted}\n"
             "Restart=on-failure\nRestartSec=3\n"
             f"StandardOutput=append:{log_path}\nStandardError=append:{log_path}\n\n"
-            f"[Install]\nWantedBy={'multi-user.target' if self._is_root else 'default.target'}\n"
+            "[Install]\nWantedBy=default.target\n"
         )
-        with open(os.path.join(self._systemd_dir, unit), "w", encoding="utf-8") as f:
-            f.write(content)
+        _write_private(os.path.join(self._systemd_dir, unit), content)
 
     @staticmethod
     def _systemd_quote(part: str) -> str:
@@ -1112,6 +1169,9 @@ class WebDeployer(loader.Module):
         return []
 
     async def _install_cf_tagged(self, tag: str):
+        reason = _guard_reason()
+        if reason:
+            raise RuntimeError(f"refused: {reason}")
         arch = _cf_arch()
         asset_name = f"cloudflared-linux-{arch}"
         rc, out, _ = await self._curl(
@@ -1207,6 +1267,9 @@ if (typeof App !== 'undefined') {{
             raise RuntimeError(f"npm install ({label}) failed:\n{out[-400:]}")
 
     async def _setup_project(self, site_dir: str, extract_dir: str, port: int, m: Message, filename: str):
+        reason = _guard_reason()
+        if reason:
+            raise RuntimeError(f"refused: {reason}")
         pkg_dirs = []
         for dirpath, dirnames, filenames_in_dir in os.walk(extract_dir):
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_NAMES and not d.startswith(".")]
@@ -1553,11 +1616,28 @@ if (typeof App !== 'undefined') {{
         )
 
     @loader.command(
-        ru_doc="Реплай на .js/.jsx/.ts/.tsx/.html или архив для деплоя | без реплая — меню",
-        en_doc="Reply to .js/.jsx/.ts/.tsx/.html or archive to deploy | without reply — menu",
+        ru_doc="Реплай на .js/.jsx/.ts/.tsx/.html или архив для деплоя | без реплая открывает меню",
+        en_doc="Reply to .js/.jsx/.ts/.tsx/.html or archive to deploy | without reply opens the menu",
     )
+    def _guard_message(self) -> str:
+        reason = _guard_reason()
+        if not reason:
+            return ""
+        head = self.strings["guard_title"] + "\n"
+        body = self.strings["guard_root"] if reason == GUARD_ROOT else self.strings["guard_docker"]
+        return head + body + "\n\n" + self.strings["guard_why"] + "\n\n" + self.strings["guard_how"]
+
+    async def _guard_deny(self, message) -> bool:
+        text = self._guard_message()
+        if not text:
+            return False
+        await utils.answer(message, text)
+        return True
+
     async def wd(self, message: Message):
-        """Reply to .js/.jsx/.ts/.tsx/.html or archive to deploy | without reply — menu"""
+        """Reply to .js/.jsx/.ts/.tsx/.html or archive to deploy | without reply opens the menu"""
+        if await self._guard_deny(message):
+            return
         reply = await message.get_reply_message()
 
         if not reply or not reply.media:

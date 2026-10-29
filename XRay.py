@@ -168,6 +168,19 @@ SUB_MAX_CLIENTS = 32
 SUB_MAX_LINE = 2048
 SUB_SOCKET_TIMEOUT = 10.0
 SUB_BUCKET_LIMIT = 4096
+GUARD_ROOT = "root"
+GUARD_DOCKER = "docker"
+XRAY_CORE_VERSION = "v26.10.21"
+XRAY_CORE_SHA256 = {
+    "64": "0eec3ed4163c273d8c8bf821f7d219e257921cf584aa3fb970715e458e631978",
+    "arm64-v8a": "d1304946c486d98e6b886e9b931eaaaebb23835b30e217638037b7f2721d4e9c",
+}
+CLOUDFLARED_VERSION = "2026.10.5"
+CLOUDFLARED_SHA256 = {
+    "cloudflared-linux-amd64": "e1bc0cf084fd9e590554fe769a86b1db46701c3f847a43d902f7b974a4e16298",
+    "cloudflared-linux-arm64": "72e0d05a67e09da87cf495e409a28c3cc5994dd23fc66a982eebea6a55923b7d",
+}
+RELEASE_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "api.github.com")
 SUB_BIND = os.environ.get("XRAY_SUB_BIND", "0.0.0.0")
 SUB_SECLOG = os.environ.get("OBHOD_SECURITY_LOG", "/var/log/obhod/security.log")
 SUB_SECLOG_ON = os.environ.get("OBHOD_SECLOG", "1").strip().lower() not in {"0", "no", "off", "false", "disabled"}
@@ -329,6 +342,66 @@ def _fmt_bytes(value: int) -> str:
         return f"{int(size)} {units[idx]}"
     return f"{size:.2f} {units[idx]}"
 
+def _guard_reason() -> str:
+    if os.name == "posix" and os.geteuid() == 0:
+        return GUARD_ROOT
+    if _in_docker():
+        return GUARD_DOCKER
+    return ""
+
+
+def _release_allowed(url: str) -> bool:
+    try:
+        parts = urllib.parse.urlsplit(str(url or ""))
+    except ValueError:
+        return False
+    if parts.scheme != "https":
+        return False
+    return (parts.hostname or "").lower() in RELEASE_HOSTS
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _curl_header_config(token: str) -> Tuple[List[str], str]:
+    clean = str(token or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.+=/-]{8,2048}", clean):
+        return [], ""
+    fd, path = tempfile.mkstemp(prefix="xr-curl-", suffix=".cfg")
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(f'header = "Authorization: Bearer {clean}"\n')
+    return ["-K", path], path
+
+
+def _drop_curl_config(path: str) -> None:
+    if not path:
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _write_private(path: str, data: str) -> None:
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(handle, 0o600)
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(data)
+    except Exception:
+        try:
+            os.close(handle)
+        except OSError:
+            pass
+        raise
+
+
 def _in_docker():
     if os.path.isfile("/.dockerenv"):
         return True
@@ -355,6 +428,11 @@ class XRay(loader.Module):
 
     strings = {
         "name": "XRay",
+        "guard_title": "<b>XRay is disabled on this server</b>",
+        "guard_root": "The userbot is running as root (uid 0). XRay refuses to start in this mode.",
+        "guard_docker": "The userbot is running inside a container (Docker, Podman, LXC or Kubernetes). XRay refuses to start in this mode.",
+        "guard_why": "Why: this module starts long living daemons and holds VPN keys. Under root a single bug is a full server takeover, and inside a container the listeners escape the isolation the container promises. A userbot is not a system service.",
+        "guard_how": "What to do: run the userbot as a regular user with a working <code>systemctl --user</code> session, the module creates only user units. Keep root off limits and do not run it in Docker.",
         "reloaded": "<blockquote><b>XRay reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nUsers: <b>{users}</b>\nSubscriptions: <b>{subscriptions}</b>\nLog file limit: <b>{log_size} MB</b></blockquote>",
         "greeting": "<blockquote><b>XRay is ready</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nConfigured users: <b>{users}</b>\nSubscriptions: <b>{subscriptions}</b>\nLog file limit: <b>{log_size} MB</b>\nUse <code>{prefix}xray</code> to manage the service.</blockquote>",
         
@@ -873,6 +951,11 @@ class XRay(loader.Module):
 
     strings_ru = {
         "name": "XRay",
+        "guard_title": "<b>XRay отключён на этом сервере</b>",
+        "guard_root": "Юзербот запущен от root (uid 0). XRay в таком режиме работать отказывается.",
+        "guard_docker": "Юзербот запущен внутри контейнера (Docker, Podman, LXC или Kubernetes). XRay в таком режиме работать отказывается.",
+        "guard_why": "Почему: модуль поднимает долгоживущие демоны и держит ключи VPN. Под root одна ошибка это полный захват сервера, а внутри контейнера слушающие порты выходят за границы обещанной изоляции. Юзербот не является системной службой.",
+        "guard_how": "Что делать: запустите юзербот обычным пользователем с рабочей сессией <code>systemctl --user</code>, модуль создаёт только пользовательские юниты. Root не использовать, в Docker не запускать.",
         "reloaded": "<blockquote><b>XRay перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nПользователей: <b>{users}</b>\nПодписок: <b>{subscriptions}</b>\nЛимит файла лога: <b>{log_size} MB</b></blockquote>",
         "greeting": "<blockquote><b>XRay готов к работе</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nНастроено пользователей: <b>{users}</b>\nПодписок: <b>{subscriptions}</b>\nЛимит файла лога: <b>{log_size} MB</b>\nДля управления используйте <code>{prefix}xray</code>.</blockquote>",
         "main_menu": (
@@ -1433,7 +1516,12 @@ class XRay(loader.Module):
         self._cloudflared_path = os.path.join(self._root, "cloudflared")
         
         os.makedirs(self._root, mode=0o700, exist_ok=True)
+        os.chmod(self._root, 0o700)
         os.makedirs(os.path.join(self._root, "users"), mode=0o700, exist_ok=True)
+        os.chmod(os.path.join(self._root, "users"), 0o700)
+        reason = _guard_reason()
+        if reason:
+            logger.warning("[XR] the module is disabled on this host, reason: %s", reason)
 
         self._users = self._db.get("XR", "users", {})
         self._external_ip = await self._detect_external_ip()
@@ -1615,20 +1703,16 @@ class XRay(loader.Module):
         return f"{safe}{'-cf-tunnel' if kind == 'cf' else '-site' if kind == 'site' else ''}.service"
 
     @property
-    def _is_root(self) -> bool:
-        return os.name == "posix" and os.geteuid() == 0
-
-    @property
     def _systemd_user_dir(self) -> str:
-        if self._is_root:
-            return "/etc/systemd/system"
         return os.path.join(os.path.expanduser("~"), ".config", "systemd", "user")
 
     async def _systemctl(self, *args: str) -> Tuple[bool, str]:
         try:
-            cmd = ["systemctl"] if self._is_root else ["systemctl", "--user"]
+            cmd = ["systemctl", "--user"]
+            env = dict(os.environ)
+            env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
             proc = await asyncio.create_subprocess_exec(
-                *cmd, *args,
+                *cmd, *args, env=env,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             out, err = await proc.communicate()
@@ -1669,10 +1753,9 @@ class XRay(loader.Module):
             f"ExecStart={quoted}\n"
             "Restart=on-failure\nRestartSec=3\n"
             f"StandardOutput=append:{log_path}\nStandardError=append:{log_path}\n\n"
-            f"[Install]\nWantedBy={'multi-user.target' if self._is_root else 'default.target'}\n"
+            "[Install]\nWantedBy=default.target\n"
         )
-        with open(os.path.join(self._systemd_user_dir, unit), "w", encoding="utf-8") as f:
-            f.write(content)
+        _write_private(os.path.join(self._systemd_user_dir, unit), content)
 
     async def _unit_active(self, unit: str) -> bool:
         ok, out = await self._systemctl("is-active", "--quiet", unit)
@@ -1743,6 +1826,9 @@ class XRay(loader.Module):
         )
 
     async def _start_websocket_site(self, name: str, user_dir: str) -> Tuple[bool, str]:
+        reason = _guard_reason()
+        if reason:
+            return False, reason
         unit = self._unit_name(name, "site")
         if await self._unit_active(unit):
             return True, ""
@@ -1814,6 +1900,9 @@ class XRay(loader.Module):
         await self._stop_unit(self._unit_name(name, "site"))
 
     async def _start_websocket_tunnel(self, name: str, user_dir: str) -> Tuple[bool, str]:
+        reason = _guard_reason()
+        if reason:
+            return False, reason
         unit = self._unit_name(name, "cf")
         if await self._unit_active(unit):
             return True, ""
@@ -1996,6 +2085,9 @@ class XRay(loader.Module):
         )
 
     async def _install_cloudflared(self) -> Tuple[bool, str]:
+        reason = _guard_reason()
+        if reason:
+            return False, reason
         arch = platform.machine().lower()
         asset = {
             "x86_64": "cloudflared-linux-amd64",
@@ -2005,17 +2097,24 @@ class XRay(loader.Module):
         }.get(arch)
         if not asset:
             return False, f"Unsupported arch: {arch}"
+        expected = CLOUDFLARED_SHA256.get(asset, "")
+        if not expected:
+            return False, f"No pinned digest for {asset}"
         tmp_path = f"{self._cloudflared_path}.tmp"
         try:
             process = await asyncio.create_subprocess_exec(
                 "curl", "-fL", "--max-time", "120", "-o", tmp_path,
-                f"https://github.com/cloudflare/cloudflared/releases/latest/download/{asset}",
+                f"https://github.com/cloudflare/cloudflared/releases/download/{CLOUDFLARED_VERSION}/{asset}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             _, err = await process.communicate()
             if process.returncode != 0 or not os.path.isfile(tmp_path):
                 return False, err.decode(errors="replace")[:200] or "Download failed"
+            got = _sha256_file(tmp_path)
+            if got != expected:
+                os.unlink(tmp_path)
+                return False, f"Digest mismatch for {asset}: {got}"
             os.chmod(tmp_path, 0o755)
             check = await asyncio.create_subprocess_exec(
                 tmp_path, "--version",
@@ -2079,16 +2178,19 @@ class XRay(loader.Module):
     async def _gh_get_releases(self) -> List[Dict]:
         gh_token = self._gh_token()
         curl_cmd = ["curl", "-sL", "--max-time", "15"]
-        if gh_token:
-            curl_cmd += ["-H", f"Authorization: Bearer {gh_token}"]
+        extra, cfg = _curl_header_config(gh_token)
+        curl_cmd += extra
         curl_cmd.append("https://api.github.com/repos/XTLS/Xray-core/releases")
         
-        p = await asyncio.create_subprocess_exec(
-            *curl_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await p.communicate()
+        try:
+            p = await asyncio.create_subprocess_exec(
+                *curl_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await p.communicate()
+        finally:
+            _drop_curl_config(cfg)
         
         if p.returncode != 0:
             return []
@@ -2216,8 +2318,11 @@ class XRay(loader.Module):
         await self._cb_setup_menu(call)
 
     async def _install_xray(self, tag: str) -> Tuple[bool, str]:
-        if _in_docker():
-            return False, "docker"
+        reason = _guard_reason()
+        if reason:
+            return False, reason
+        if tag != XRAY_CORE_VERSION:
+            return False, f"Refused: only {XRAY_CORE_VERSION} is allowed, {tag} is not pinned"
 
         for name in list(self._processes.keys()):
             await self._stop_user(name)
@@ -2237,16 +2342,19 @@ class XRay(loader.Module):
             tmp = None
             gh_token = self._gh_token()
             curl_cmd = ["curl", "-sL", "--max-time", "15"]
-            if gh_token:
-                curl_cmd += ["-H", f"Authorization: Bearer {gh_token}"]
+            extra, cfg = _curl_header_config(gh_token)
+            curl_cmd += extra
             curl_cmd.append(f"https://api.github.com/repos/XTLS/Xray-core/releases/tags/{tag}")
             
-            p = await asyncio.create_subprocess_exec(
-                *curl_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            out, _ = await p.communicate()
+            try:
+                p = await asyncio.create_subprocess_exec(
+                    *curl_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                out, _ = await p.communicate()
+            finally:
+                _drop_curl_config(cfg)
             if p.returncode != 0:
                 return False, "GitHub API failed"
             
@@ -2271,6 +2379,11 @@ class XRay(loader.Module):
             if not download_url:
                 available = [a.get("name", "") for a in assets]
                 return False, f"No download URL for arch={go_arch} in {available}"
+            if not _release_allowed(download_url):
+                return False, "Refused: the asset URL is outside the GitHub release hosts"
+            expected = XRAY_CORE_SHA256.get(go_arch, "")
+            if not expected:
+                return False, f"No pinned digest for arch={go_arch}"
             
             tmp = os.path.join(self._root, "tmp_install")
             os.makedirs(tmp, exist_ok=True)
@@ -2285,6 +2398,10 @@ class XRay(loader.Module):
             
             if not os.path.exists(dl):
                 return False, "Download failed"
+
+            got = _sha256_file(dl)
+            if got != expected:
+                return False, f"Digest mismatch for arch={go_arch}: {got}"
             
             p = await asyncio.create_subprocess_exec(
                 "python3", "-m", "zipfile", "-e", dl, tmp,
@@ -2614,6 +2731,11 @@ class XRay(loader.Module):
             return f"vless://{uuid_str}@{ip}:{port}?{urllib.parse.urlencode(params)}#{urllib.parse.quote(name, safe='')}"
 
     async def _start_user(self, name: str) -> Tuple[bool, str]:
+        if _guard_reason():
+            return False, "refused: root or container detected"
+        return await self._start_user_impl(name)
+
+    async def _start_user_impl(self, name: str) -> Tuple[bool, str]:
         unit = self._unit_name(name)
         if name in self._processes or await self._unit_active(unit):
             return False, "already_running"
@@ -2642,9 +2764,7 @@ class XRay(loader.Module):
         
         config = self._build_config(user)
         config_path = os.path.join(user_dir, "config.json")
-        
-        with open(config_path, "w") as f:
-            json.dump(config, f, indent=2)
+        _write_private(config_path, json.dumps(config, indent=2))
         
         try:
             start_log = os.path.join(user_dir, "start.log")
@@ -3306,6 +3426,9 @@ class XRay(loader.Module):
         return ""
 
     def _sub_start_server(self) -> Tuple[bool, str]:
+        reason = _guard_reason()
+        if reason:
+            return False, reason
         if self._sub_server:
             return True, ""
         self._sub_ensure()
@@ -3636,9 +3759,10 @@ class XRay(loader.Module):
         
         if not markup:
             markup.append([{
-                "text": "Failed to load releases",
-                "callback": self._cb_setup_menu,
-                "style": "danger",
+                "text": XRAY_CORE_VERSION,
+                "callback": self._cb_install_xray_version,
+                "args": (XRAY_CORE_VERSION,),
+                "style": "primary",
             }])
         
         markup.append([{
@@ -5027,8 +5151,25 @@ class XRay(loader.Module):
         en_doc="- XRay multi-user VPN manager",
     )
 
+    def _guard_message(self) -> str:
+        reason = _guard_reason()
+        if not reason:
+            return ""
+        head = self.strings["guard_title"] + "\n"
+        body = self.strings["guard_root"] if reason == GUARD_ROOT else self.strings["guard_docker"]
+        return head + body + "\n\n" + self.strings["guard_why"] + "\n\n" + self.strings["guard_how"]
+
+    async def _guard_deny(self, message) -> bool:
+        text = self._guard_message()
+        if not text:
+            return False
+        await utils.answer(message, text)
+        return True
+
     async def xr(self, message):
         """- XRay multi-user VPN manager"""
+        if await self._guard_deny(message):
+            return
         await self._reattach_processes()
         active_cnt = await self._get_active_count()
         await self.inline.form(

@@ -20,6 +20,9 @@ import struct
 import tarfile
 import tempfile
 import time
+import contextlib
+import hashlib
+import urllib.parse
 import urllib.request
 import uuid
 import zipfile
@@ -52,6 +55,8 @@ EXIFTOOL_URLS = (
 )
 EXIFTOOL_VER_URL = "https://exiftool.org/ver.txt"
 EXIFTOOL_FALLBACK_VER = "13.59"
+EXIFTOOL_HOSTS = ("sourceforge.net", "github.com", "codeload.github.com", "exiftool.org")
+EXIFTOOL_SHA256 = ""
 MP4_EPOCH = datetime(1904, 1, 1, tzinfo=timezone.utc)
 WAVE_BARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
 
@@ -2113,9 +2118,16 @@ class MetaDataDumper(loader.Module):
         last_error = None
         for tpl in EXIFTOOL_URLS:
             url = tpl.format(v=version)
+            parts = urllib.parse.urlsplit(url)
+            if parts.scheme != "https" or (parts.hostname or "").lower() not in EXIFTOOL_HOSTS:
+                last_error = "the archive host is not allowed"
+                continue
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "curl/8.5.0"})
                 data = urllib.request.urlopen(req, timeout=90).read()
+                if EXIFTOOL_SHA256 and hashlib.sha256(data).hexdigest() != EXIFTOOL_SHA256:
+                    last_error = "the archive digest does not match the pin"
+                    continue
                 tf = tarfile.open(fileobj=io.BytesIO(data))
                 tmp = tempfile.mkdtemp(dir=self._data_dir)
                 for member in tf.getmembers():

@@ -1,0 +1,189 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  compile:
+    name: compile all modules
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: parse every python file
+        run: |
+          python - <<'PY'
+          import ast, pathlib, sys
+          bad = []
+          for path in sorted(pathlib.Path(".").rglob("*.py")):
+              if any(part in {".git", "__pycache__"} for part in path.parts):
+                  continue
+              try:
+                  ast.parse(path.read_text(encoding="utf-8"))
+              except SyntaxError as error:
+                  bad.append(f"{path}:{error.lineno}: {error.msg}")
+          if bad:
+              print("\n".join(bad))
+              sys.exit(1)
+          print("all python files parse")
+          PY
+      - name: refuse emoji and long dashes in the maintained modules
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+          strict = {"XRay.py", "WebDeployer.py"}
+          bad = []
+          for path in sorted(p for p in pathlib.Path(".").glob("*.py") if p.name in strict):
+              for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+                  if any(0x1F000 <= ord(char) <= 0x1FAFF for char in line):
+                      bad.append(f"{path}:{number}: emoji")
+                  if "\u2014" in line or "\u2013" in line:
+                      bad.append(f"{path}:{number}: long dash")
+          if bad:
+              print("\n".join(bad))
+              sys.exit(1)
+          print("module style is clean")
+          PY
+
+  tests:
+    name: mask and hardening suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: install the only two packages the suite needs
+        run: python -m pip install --disable-pip-version-check pytest aiohttp
+      - name: run the suite from the repository root
+        run: python -m pytest tests -p no:cacheprovider --maxfail=1
+      - name: run the suite from the other directory too
+        run: python -m pytest Storage/tests -p no:cacheprovider --maxfail=1
+        if: ${{ hashFiles('Storage/tests/*.py') != '' }}
+
+  policy:
+    name: root removal and pin drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: the module must never run as root and never touch the system manager
+        run: |
+          python - <<'PY'
+          import pathlib, sys
+          rules = {
+              "_is_root": "the root branch must stay deleted",
+              "/etc/systemd/system": "a system unit directory must never appear",
+              "multi-user.target": "the system target must never appear",
+          }
+          bad = []
+          for path in sorted(pathlib.Path(".").glob("*.py")):
+              text = path.read_text(encoding="utf-8")
+              for needle, why in rules.items():
+                  if needle in text:
+                      bad.append(f"{path}: {needle}: {why}")
+              for line in text.split("\n"):
+                  if '"systemctl"' not in line:
+                      continue
+                  if '["systemctl", "--user"]' not in line:
+                      bad.append(f"{path}: {line.strip()}")
+          if bad:
+              print("\n".join(bad))
+              sys.exit(1)
+          print("no root compatibility code found")
+          PY
+      - name: the refusal strings must exist in both languages
+        run: |
+          python - <<'PY'
+          import ast, pathlib, sys
+          need = {"guard_title", "guard_root", "guard_docker", "guard_why", "guard_how"}
+          for path in sorted(pathlib.Path(".").glob("*.py")):
+              source = path.read_text(encoding="utf-8")
+              if "GUARD_ROOT" not in source:
+                  continue
+              tree = ast.parse(source)
+              tables = {}
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Assign):
+                      name = getattr(node.targets[0], "id", "")
+                      if name in {"strings", "strings_ru"}:
+                          tables[name] = ast.literal_eval(node.value)
+              if not tables:
+                  continue
+              for name, table in tables.items():
+                  missing = need - set(table)
+                  if missing:
+                      print(f"{path}:{name} misses {sorted(missing)}")
+                      sys.exit(1)
+          print("guard strings are in place")
+          PY
+      - name: the pinned engine digests must match the shipped files
+        run: |
+          python - <<'PY'
+          import ast, hashlib, json, pathlib, sys
+          module = pathlib.Path("XRay.py")
+          tree = ast.parse(module.read_text(encoding="utf-8"))
+          pins = {}
+          for node in ast.walk(tree):
+              if isinstance(node, ast.Assign):
+                  name = getattr(node.targets[0], "id", "")
+                  if name in {"GATE_FILES", "HOLE_FILES", "SITE_SCRIPT_SHA256"}:
+                      try:
+                          pins[name] = ast.literal_eval(node.value)
+                      except ValueError:
+                          pass
+          web = pathlib.Path("Storage/XRay/WEB")
+          mapping = {
+              "gate": web / "Evil_Cat.jsx",
+              "loading": web / "Loading.html",
+          }
+          bad = []
+          gate = pins.get("GATE_FILES") or {}
+          for key, path in mapping.items():
+              if key in gate:
+                  got = hashlib.sha256(path.read_bytes()).hexdigest()
+                  if got != gate[key]:
+                      bad.append(f"GATE_FILES[{key}] is {got}, the file says {gate[key]}")
+          hole = pins.get("HOLE_FILES") or {}
+          for key, expected in hole.items():
+              path = web / ("hole/" + key if key not in {"gate", "loading"} else "")
+              if key in mapping:
+                  continue
+              if key == "index.html":
+                  path = web / "hole" / "index.html"
+              if not path.is_file():
+                  bad.append(f"HOLE_FILES[{key}] has no file")
+                  continue
+              got = hashlib.sha256(path.read_bytes()).hexdigest()
+              if got != expected:
+                  bad.append(f"HOLE_FILES[{key}] is {got}, the module says {expected}")
+          script = pins.get("SITE_SCRIPT_SHA256")
+          if isinstance(script, str):
+              got = hashlib.sha256((web / "websocket_site.py").read_bytes()).hexdigest()
+              if got != script:
+                  bad.append(f"SITE_SCRIPT_SHA256 is {got}, the module says {script}")
+          if bad:
+              print("\n".join(bad))
+              sys.exit(1)
+          print("the shipped digests match the module pins")
+          PY
