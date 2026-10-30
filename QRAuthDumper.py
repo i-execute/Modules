@@ -49,38 +49,12 @@ def _install_deps():
             pass
 
 
-try:
-    import aiohttp
-    AIOHTTP_OK = True
-except ImportError:
-    aiohttp = None
-    AIOHTTP_OK = False
-
 
 def _escape(text):
     if not text:
         return ""
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-
-async def _upload_to_x0(data: bytes, filename: str, content_type: str = "image/png") -> str:
-    if not AIOHTTP_OK:
-        return ""
-    try:
-        form = aiohttp.FormData()
-        form.add_field("file", data, filename=filename, content_type=content_type)
-        async with aiohttp.ClientSession() as s:
-            async with s.post(
-                "https://x0.at",
-                data=form,
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as r:
-                text = (await r.text()).strip()
-                if text.startswith("http"):
-                    return text
-    except Exception:
-        pass
-    return ""
 
 
 @loader.tds
@@ -405,10 +379,10 @@ class QRAuthDumper(loader.Module):
         img.save(buf, format="PNG")
         return buf.getvalue()
 
-    async def _upload_qr(self, url: str, attempt: int = 0) -> str:
-        data = self._make_qr_bytes(url)
-        filename = f"qr_{attempt}_{int(asyncio.get_event_loop().time())}.png"
-        return await _upload_to_x0(data, filename, "image/png")
+    def _upload_qr(self, url: str, attempt: int = 0) -> io.BytesIO:
+        buf = io.BytesIO(self._make_qr_bytes(url))
+        buf.name = "qr.png"
+        return buf
 
     def _parse_string_session(self, session_str):
         try:
@@ -674,8 +648,8 @@ class QRAuthDumper(loader.Module):
             qr = await tc.qr_login()
 
             attempt = 0
-            qr_url = await self._upload_qr(qr.url, attempt=attempt)
-            if not qr_url:
+            qr_photo = self._upload_qr(qr.url, attempt=attempt)
+            if not qr_photo:
                 self._active_sessions.pop(uid, None)
                 await call.edit(
                     text=self.strings["upload_failed"],
@@ -689,7 +663,7 @@ class QRAuthDumper(loader.Module):
 
             await call.edit(
                 text=self.strings["qr_prompt"].format(timeout=timeout),
-                photo=qr_url,
+                photo=qr_photo,
                 reply_markup=self._main_markup(uid),
             )
 
@@ -712,12 +686,12 @@ class QRAuthDumper(loader.Module):
                     try:
                         attempt += 1
                         await qr.recreate()
-                        new_url = await self._upload_qr(qr.url, attempt=attempt)
+                        new_photo = self._upload_qr(qr.url, attempt=attempt)
                         tl = timeout - elapsed
-                        if new_url:
+                        if new_photo:
                             await call.edit(
                                 text=self.strings["qr_refreshed"].format(time_left=tl),
-                                photo=new_url,
+                                photo=new_photo,
                                 reply_markup=self._main_markup(uid),
                             )
                         else:
