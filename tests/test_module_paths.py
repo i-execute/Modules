@@ -169,11 +169,24 @@ def test_the_music_modules_carry_no_upload_host(name):
     assert "_parse_upload_url" not in text
 
 
-@pytest.mark.parametrize("name", ("YNDXMusic.py", "YTMusic.py", "SCMusic.py"))
-def test_covers_travel_as_public_urls(name):
+def test_the_yandex_cover_is_passed_as_a_jpeg_upload():
+    text = MUSIC["YNDXMusic.py"]
+    assert "def cover_photo(data: bytes):" in text
+    assert 'buf.name = "cover.jpg"' in text
+    values = [
+        line.split("=", 1)[1].strip()
+        for line in text.split("\n")
+        if line.strip().startswith(("edit_kwargs[", "form_kwargs[", "photo = cover_photo("))
+        and ("\"photo\"]" in line.strip() or "cover_photo(" in line.strip())
+    ]
+    assert values
+    assert any("cover_photo(" in value for value in values)
+
+
+@pytest.mark.parametrize("name", ("YTMusic.py", "SCMusic.py"))
+def test_the_other_music_modules_still_use_a_remote_url(name):
     text = MUSIC[name]
     assert "cover_photo" not in text
-    assert "io.BytesIO" not in text.split("def ", 1)[0] or True
     for line in text.split("\n"):
         stripped = line.strip()
         if stripped.startswith(("edit_kwargs[", "form_kwargs[")) and "\"photo\"]" in stripped:
@@ -237,10 +250,10 @@ def test_the_cover_is_attached_by_an_edit_not_by_a_form(name):
     (
         ("YTMusic.py", "_yts_get_cover", "_best_thumb_url"),
         ("SCMusic.py", "_scs_get_cover", "_big_artwork"),
-        ("YNDXMusic.py", "_yms_get_cover", "_get_best_cover_url"),
+        ("YNDXMusic.py", "_yms_get_cover", "_cover_bytes"),
     ),
 )
-def test_a_cover_getter_returns_a_remote_url(name, getter, tail):
+def test_a_cover_getter_never_talks_to_a_file_host(name, getter, tail):
     tree = ast.parse(MUSIC[name])
     body = None
     for node in ast.walk(tree):
@@ -249,12 +262,30 @@ def test_a_cover_getter_returns_a_remote_url(name, getter, tail):
     assert body is not None, getter
     source = ast.get_source_segment(MUSIC[name], body) or ""
     assert tail in source
-    assert "normalize_cover(" not in source
     assert "_upload" not in source
-    returned = [line for line in source.split("\n") if line.strip().startswith("return ")]
-    assert returned
-    for line in returned:
-        assert "BytesIO" not in line
+    assert "x0.at" not in source
+
+
+def test_an_image_is_recognised_by_telegram_before_it_is_sent():
+    yndx = MUSIC["YNDXMusic.py"]
+    assert 'buf.name = "cover.jpg"' in yndx
+
+    tree = ast.parse(MUSIC["YTMusic.py"])
+    thumbs = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_best_thumb_url"
+    ][0]
+    thumbs_source = ast.get_source_segment(MUSIC["YTMusic.py"], thumbs) or ""
+    assert ".jpg" in thumbs_source
+
+    sc = MUSIC["SCMusic.py"]
+    assert '"-t500x500.jpg"' in sc
+
+    for name in ("YNDXMusic.py", "YTMusic.py", "SCMusic.py"):
+        for line in MUSIC[name].split("\n"):
+            if "\"photo\"] =" in line:
+                assert "avatars" not in line, (name, line)
 
 
 @pytest.mark.parametrize("name", ("YNDXMusic.py", "YTMusic.py", "SCMusic.py"))
@@ -339,6 +370,25 @@ def test_a_missing_cover_does_not_touch_the_form():
     owner._safe_form = namespace["_safe_form"].__get__(owner, type(owner))
     asyncio.run(owner._safe_form(text="x", message=1, reply_markup=[]))
     assert edits == []
+
+
+def test_the_cover_object_looks_like_an_image_to_telethon():
+    import io
+    import re as _re
+
+    source = MUSIC["YNDXMusic.py"]
+    lines = source.split("\n")
+    body = None
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.FunctionDef) and node.name == "cover_photo":
+            body = textwrap.dedent("\n".join(lines[node.lineno - 1:node.end_lineno]))
+    assert body
+    namespace = {"io": io}
+    exec(body, namespace)
+    cover = namespace["cover_photo"](b"\xff\xd8\xff" + b"0" * 300)
+    assert isinstance(cover, io.BytesIO)
+    assert _re.match(r"\.(png|jpe?g)$", "." + cover.name.rsplit(".", 1)[-1], _re.IGNORECASE)
+    assert namespace["cover_photo"](b"") is None
 
 
 def test_the_yandex_module_uploads_only_tracks():
