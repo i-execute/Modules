@@ -13,6 +13,7 @@ import logging
 import math
 import mimetypes
 import os
+import stat
 import plistlib
 import re
 import shutil
@@ -1876,6 +1877,11 @@ class MetaDataDumper(loader.Module):
             "<blockquote><code>{error}</code></blockquote>"
         ),
         "expired": "Report expired, run the command again",
+        "no_data_dir": (
+            "<b>No working directory</b>\n"
+            "<blockquote>The module could not get a writable directory: <code>{reason}</code>\n"
+            "Set TMPDIR to a writable path and try again</blockquote>"
+        ),
         "header": "<b>MetaDataDumper</b> | <code>{title}</code>\n",
         "page_info": "<i>{page}</i>\n",
         "btn_summary": "Summary",
@@ -1951,6 +1957,11 @@ class MetaDataDumper(loader.Module):
             "<blockquote><code>{error}</code></blockquote>"
         ),
         "expired": "Отчет устарел, запустите команду снова",
+        "no_data_dir": (
+            "<b>Нет рабочего каталога</b>\n"
+            "<blockquote>Модуль не смог получить каталог для записи: <code>{reason}</code>\n"
+            "Укажите TMPDIR в доступное место и повторите</blockquote>"
+        ),
         "header": "<b>MetaDataDumper</b> | <code>{title}</code>\n",
         "page_info": "<i>{page}</i>\n",
         "btn_summary": "Сводка",
@@ -2037,35 +2048,94 @@ class MetaDataDumper(loader.Module):
         self._et_lock = asyncio.Lock()
         self._et_task = None
 
-    @property
-    def _data_dir(self):
-        if path := getattr(self, "_data_dir_path", None):
-            return path
+    DATA_DIR_NAME = "MetaDataDumper"
 
+    def _data_uid(self):
         uid = getattr(self, "_tg_id", None)
         if not uid and getattr(self, "_client", None):
             uid = getattr(self._client, "tg_id", None)
-        if not uid:
-            uid = "common"
-        path = os.path.join(tempfile.gettempdir(), f"MetaDataDumper-{uid}")
+        return str(uid) if uid else "common"
+
+    def _data_dir_candidates(self, uid):
+        base = tempfile.gettempdir()
+        yield os.path.join(base, f"{self.DATA_DIR_NAME}-{uid}")
+        runtime = os.environ.get("XDG_RUNTIME_DIR") or ""
+        if runtime:
+            yield os.path.join(runtime, f"{self.DATA_DIR_NAME}-{uid}")
+        home = os.path.expanduser("~")
+        if home and home != "~":
+            cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(home, ".cache")
+            yield os.path.join(cache, self.DATA_DIR_NAME, uid)
+            yield os.path.join(home, f".{self.DATA_DIR_NAME}", uid)
+
+    @staticmethod
+    def _prepare_dir(path):
         try:
             os.makedirs(path, mode=0o700, exist_ok=True)
-        except PermissionError:
-            path = tempfile.mkdtemp(
-                prefix=f"MetaDataDumper-{uid}-",
-                dir=tempfile.gettempdir(),
-            )
+        except OSError:
+            return ""
+        try:
+            info = os.stat(path)
+        except OSError:
+            return ""
+        if not stat.S_ISDIR(info.st_mode):
+            return ""
+        if info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) != 0o700:
+            try:
+                os.chmod(path, 0o700)
+            except OSError:
+                pass
+        if not os.access(path, os.W_OK | os.X_OK):
+            return ""
+        probe = os.path.join(path, ".probe")
+        try:
+            with open(probe, "w", encoding="utf-8") as handle:
+                handle.write("ok")
+            os.remove(probe)
+        except OSError:
+            return ""
+        return path
+
+    def _resolve_data_dir(self):
+        uid = self._data_uid()
+        for candidate in self._data_dir_candidates(uid):
+            path = self._prepare_dir(candidate)
+            if path:
+                return path, ""
+        try:
+            return tempfile.mkdtemp(prefix=f"{self.DATA_DIR_NAME}-{uid}-"), "temporary directory"
+        except OSError as error:
+            return "", str(error)
+
+    @property
+    def _data_dir(self):
+        cached = getattr(self, "_data_dir_path", "")
+        if cached:
+            return cached
+        try:
+            path, reason = self._resolve_data_dir()
+        except Exception as error:
+            path, reason = "", f"{type(error).__name__}: {error}"
         self._data_dir_path = path
-        return self._data_dir_path
+        self._data_dir_reason = reason
+        return path
+
+    def _workdir(self):
+        path = self._data_dir
+        return path if path and os.path.isdir(path) else ""
+
+    def _no_data_dir_text(self):
+        return self._s("no_data_dir", reason=_esc(self._data_dir_reason or "unknown"))
 
     async def client_ready(self, client, db):
         self._client = client
         self._owner = await client.get_me()
         self._tg_id = self._owner.id if self._owner else getattr(client, "tg_id", None)
+        workdir = self._workdir()
         try:
-            for name in os.listdir(self._data_dir):
+            for name in (os.listdir(workdir) if workdir else []):
                 if name.startswith(("dl_", "tmp", "blob")):
-                    p = os.path.join(self._data_dir, name)
+                    p = os.path.join(workdir, name)
                     if os.path.isdir(p):
                         shutil.rmtree(p, ignore_errors=True)
                     else:
@@ -2113,8 +2183,10 @@ class MetaDataDumper(loader.Module):
         return None
 
     def _download_exiftool(self, version):
-        os.makedirs(self._data_dir, exist_ok=True)
-        target = os.path.join(self._data_dir, "exiftool")
+        workdir = self._workdir()
+        if not workdir:
+            raise RuntimeError(self._data_dir_reason or "no writable data directory")
+        target = os.path.join(workdir, "exiftool")
         last_error = None
         for tpl in EXIFTOOL_URLS:
             url = tpl.format(v=version)
@@ -2129,7 +2201,7 @@ class MetaDataDumper(loader.Module):
                     last_error = "the archive digest does not match the pin"
                     continue
                 tf = tarfile.open(fileobj=io.BytesIO(data))
-                tmp = tempfile.mkdtemp(dir=self._data_dir)
+                tmp = tempfile.mkdtemp(dir=workdir)
                 for member in tf.getmembers():
                     parts = member.name.split("/", 1)
                     if len(parts) < 2:
@@ -2186,7 +2258,7 @@ class MetaDataDumper(loader.Module):
             system = shutil.which("exiftool")
             if system:
                 candidates.append(([system], "system"))
-            portable = os.path.join(self._data_dir, "exiftool", "exiftool")
+            portable = os.path.join(self._workdir() or tempfile.gettempdir(), "exiftool", "exiftool")
             if perl and os.path.isfile(portable):
                 candidates.append(([perl, portable], "portable"))
             for cmd, src in candidates:
@@ -2304,8 +2376,10 @@ class MetaDataDumper(loader.Module):
                 pos += bsize
 
     async def _download(self, client, message, media_obj, size, form, kind, ext):
-        os.makedirs(self._data_dir, exist_ok=True)
-        tmpdir = tempfile.mkdtemp(prefix="dl_", dir=self._data_dir)
+        workdir = self._workdir()
+        if not workdir:
+            raise RuntimeError(self._data_dir_reason or "no writable data directory")
+        tmpdir = tempfile.mkdtemp(prefix="dl_", dir=workdir)
         path = os.path.join(tmpdir, "blob" + ext)
         with open(path, "wb"):
             pass
@@ -3036,6 +3110,13 @@ class MetaDataDumper(loader.Module):
             silent=True,
         )
         if not form:
+            return
+        if not self._workdir():
+            await self._edit(
+                form,
+                self._no_data_dir_text(),
+                [[{"text": self.strings["btn_close"], "callback": self._cb_close, "args": ("",), "style": "danger"}]],
+            )
             return
         tmpdir = None
         try:

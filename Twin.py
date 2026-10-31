@@ -32,67 +32,69 @@ class Twin(loader.Module):
         "name": "Twin",
         
         "session_success": (
-            "<b>Session Connected Successfully</b>\n\n"
-            "<b>Account:</b> {name}\n"
-            "<b>ID:</b> <code>{id}</code>\n\n"
-            "Click continue to access settings"
+            "<b>Twin</b> | session connected\n"
+            "<blockquote>"
+            "<b>Account</b> | {name}\n"
+            "<b>ID</b> | <code>{id}</code>"
+            "</blockquote>\n"
+            "<i>Press continue to open the settings</i>"
         ),
-        
         "main_menu": (
-            "<b>Twin Account Manager</b>\n\n"
-            "<b>Status:</b> {status}\n"
-            "<b>Account:</b> {account}\n"
-            "<b>Nickname:</b> {nickname}\n"
-            "<b>Timezone:</b> UTC{timezone}\n"
-            "<b>Auto-reply:</b> {autoreply}\n"
-            "<b>Triggers:</b> {triggers}\n"
-            "<b>Online mode:</b> {online}"
+            "<b>Twin</b> | account manager\n"
+            "<blockquote>"
+            "<b>Status</b> | {status}\n"
+            "<b>Account</b> | {account}\n"
+            "<b>Nickname</b> | {nickname}\n"
+            "<b>Timezone</b> | UTC{timezone}\n"
+            "<b>Auto-reply</b> | {autoreply}\n"
+            "<b>Triggers</b> | {triggers}\n"
+            "<b>Online mode</b> | {online}"
+            "</blockquote>"
         ),
-        
         "session_menu": (
-            "<b>Session Management</b>\n\n"
-            "<b>Current status:</b> {status}\n"
-            "{info}"
+            "<b>Twin</b> | session\n"
+            "<blockquote>"
+            "<b>Status</b> | {status}{info}"
+            "</blockquote>"
         ),
-        
         "settings_menu": (
-            "<b>Settings</b>\n\n"
-            "<b>Nickname:</b> {nickname}\n"
-            "<b>Timezone:</b> UTC{timezone}\n"
-            "<b>Auto-reply text:</b> {text}\n"
-            "<b>Media:</b> {media}"
+            "<b>Twin</b> | settings\n"
+            "<blockquote>"
+            "<b>Nickname</b> | {nickname}\n"
+            "<b>Timezone</b> | UTC{timezone}\n"
+            "<b>Auto-reply text</b> | {text}\n"
+            "<b>Media</b> | {media}"
+            "</blockquote>"
         ),
-        
         "nickname_menu": (
-            "<b>Nickname Settings</b>\n\n"
-            "<b>Current:</b> {nickname}\n"
-            "<b>Format:</b> {nickname} | HH:MM"
+            "<b>Twin</b> | nickname\n"
+            "<blockquote>"
+            "<b>Current</b> | {nickname}\n"
+            "<b>Format</b> | <code>{nickname} | HH:MM</code>"
+            "</blockquote>"
         ),
-        
         "timezone_menu": (
-            "<b>Timezone Settings</b>\n\n"
-            "<b>Current:</b> UTC{timezone}"
+            "<b>Twin</b> | timezone\n"
+            "<blockquote><b>Current</b> | UTC{timezone}</blockquote>"
         ),
-        
         "text_menu": (
-            "<b>Auto-reply Text Settings</b>\n\n"
-            "<b>Current:</b> {text}"
+            "<b>Twin</b> | auto-reply text\n"
+            "<blockquote><b>Current</b> | {text}</blockquote>"
         ),
-        
         "media_menu": (
-            "<b>Media Settings</b>\n\n"
-            "<b>Status:</b> {status}"
+            "<b>Twin</b> | media\n"
+            "<blockquote><b>Status</b> | {status}</blockquote>"
         ),
-        
         "triggers_menu": (
-            "<b>Trigger Words ({count}/10)</b>\n\n"
-            "{triggers}"
+            "<b>Twin</b> | triggers {count}/10\n"
+            "<blockquote>{triggers}</blockquote>"
         ),
-        
         "online_menu": (
-            "<b>Online Status Control</b>\n\n"
-            "<b>Current mode:</b> {mode}\n"
-            "<b>Account visibility:</b> {visibility}"
+            "<b>Twin</b> | online status\n"
+            "<blockquote>"
+            "<b>Current mode</b> | {mode}\n"
+            "<b>Account visibility</b> | {visibility}"
+            "</blockquote>"
         ),
         
         "btn_continue": "Continue",
@@ -138,8 +140,11 @@ class Twin(loader.Module):
         
         "session_removed": "Session removed",
         "session_invalid": "Invalid session: {error}",
-        "session_info": "Account: {name}\nID: {id}",
-        "no_session": "<b>No session configured.</b> Reply to StringSession with <code>.twin</code> command",
+        "session_info": "<b>Account</b> | {name}\n<b>ID</b> | {id}",
+        "no_session": (
+            "<b>No session</b>\n"
+            "<blockquote>Reply to a StringSession with <code>.twin</code></blockquote>"
+        ),
         
         "nickname_set": "Nickname set: {nickname}",
         "timezone_set": "Timezone set: UTC{timezone}",
@@ -154,8 +159,14 @@ class Twin(loader.Module):
         "triggers_list": "{triggers}",
         "triggers_empty": "No triggers set",
         
-        "online_enabling": "<b>Enabling online mode...</b>\n\nTwin account will appear online",
-        "online_disabling": "<b>Disabling online mode...</b>\n\nTwin account will go offline",
+        "online_enabling": (
+            "<b>Enabling online mode</b>\n"
+            "<blockquote>Twin account will appear online</blockquote>"
+        ),
+        "online_disabling": (
+            "<b>Disabling online mode</b>\n"
+            "<blockquote>Twin account will go offline</blockquote>"
+        ),
         
         "error_no_session": "No session configured",
         "error_not_connected": "Session not connected",
@@ -163,67 +174,69 @@ class Twin(loader.Module):
 
     strings_ru = {
         "session_success": (
-            "<b>Сессия успешно подключена</b>\n\n"
-            "<b>Аккаунт:</b> {name}\n"
-            "<b>ID:</b> <code>{id}</code>\n\n"
-            "Нажмите продолжить для доступа к настройкам"
+            "<b>Twin</b> | сессия подключена\n"
+            "<blockquote>"
+            "<b>Аккаунт</b> | {name}\n"
+            "<b>ID</b> | <code>{id}</code>"
+            "</blockquote>\n"
+            "<i>Нажмите продолжить, чтобы открыть настройки</i>"
         ),
-        
         "main_menu": (
-            "<b>Twin Account Manager</b>\n\n"
-            "<b>Статус:</b> {status}\n"
-            "<b>Аккаунт:</b> {account}\n"
-            "<b>Никнейм:</b> {nickname}\n"
-            "<b>Часовой пояс:</b> UTC{timezone}\n"
-            "<b>Автоответ:</b> {autoreply}\n"
-            "<b>Триггеры:</b> {triggers}\n"
-            "<b>Режим онлайн:</b> {online}"
+            "<b>Twin</b> | управление аккаунтом\n"
+            "<blockquote>"
+            "<b>Статус</b> | {status}\n"
+            "<b>Аккаунт</b> | {account}\n"
+            "<b>Никнейм</b> | {nickname}\n"
+            "<b>Часовой пояс</b> | UTC{timezone}\n"
+            "<b>Автоответ</b> | {autoreply}\n"
+            "<b>Триггеры</b> | {triggers}\n"
+            "<b>Режим онлайн</b> | {online}"
+            "</blockquote>"
         ),
-        
         "session_menu": (
-            "<b>Управление сессией</b>\n\n"
-            "<b>Текущий статус:</b> {status}\n"
-            "{info}"
+            "<b>Twin</b> | сессия\n"
+            "<blockquote>"
+            "<b>Статус</b> | {status}{info}"
+            "</blockquote>"
         ),
-        
         "settings_menu": (
-            "<b>Настройки</b>\n\n"
-            "<b>Никнейм:</b> {nickname}\n"
-            "<b>Часовой пояс:</b> UTC{timezone}\n"
-            "<b>Текст автоответа:</b> {text}\n"
-            "<b>Медиа:</b> {media}"
+            "<b>Twin</b> | настройки\n"
+            "<blockquote>"
+            "<b>Никнейм</b> | {nickname}\n"
+            "<b>Часовой пояс</b> | UTC{timezone}\n"
+            "<b>Текст автоответа</b> | {text}\n"
+            "<b>Медиа</b> | {media}"
+            "</blockquote>"
         ),
-        
         "nickname_menu": (
-            "<b>Настройки никнейма</b>\n\n"
-            "<b>Текущий:</b> {nickname}\n"
-            "<b>Формат:</b> {nickname} | ЧЧ:ММ"
+            "<b>Twin</b> | никнейм\n"
+            "<blockquote>"
+            "<b>Текущий</b> | {nickname}\n"
+            "<b>Формат</b> | <code>{nickname} | ЧЧ:ММ</code>"
+            "</blockquote>"
         ),
-        
         "timezone_menu": (
-            "<b>Настройки часового пояса</b>\n\n"
-            "<b>Текущий:</b> UTC{timezone}"
+            "<b>Twin</b> | часовой пояс\n"
+            "<blockquote><b>Текущий</b> | UTC{timezone}</blockquote>"
         ),
-        
         "text_menu": (
-            "<b>Настройки текста автоответа</b>\n\n"
-            "<b>Текущий:</b> {text}"
+            "<b>Twin</b> | текст автоответа\n"
+            "<blockquote><b>Текущий</b> | {text}</blockquote>"
         ),
-        
         "media_menu": (
-            "<b>Настройки медиа</b>\n\n"
-            "<b>Статус:</b> {status}"
+            "<b>Twin</b> | медиа\n"
+            "<blockquote><b>Статус</b> | {status}</blockquote>"
         ),
-        
         "triggers_menu": (
-            "<b>Слова-триггеры ({count}/10)</b>\n\n"
-            "{triggers}"
+            "<b>Twin</b> | триггеры {count}/10\n"
+            "<blockquote>{triggers}</blockquote>"
         ),
-        
         "online_menu": (
-            "<b>Управление онлайн статусом</b>\n\n"
-            "<b>Текущий режим:</b> {mode}\n"
-            "<b>Видимость аккаунта:</b> {visibility}"
+            "<b>Twin</b> | онлайн статус\n"
+            "<blockquote>"
+            "<b>Текущий режим</b> | {mode}\n"
+            "<b>Видимость аккаунта</b> | {visibility}"
+            "</blockquote>"
         ),
         
         "btn_continue": "Продолжить",
@@ -269,8 +282,11 @@ class Twin(loader.Module):
         
         "session_removed": "Сессия удалена",
         "session_invalid": "Неверная сессия: {error}",
-        "session_info": "Аккаунт: {name}\nID: {id}",
-        "no_session": "<b>Сессия не настроена.</b> Ответьте на StringSession командой <code>.twin</code>",
+        "session_info": "<b>Аккаунт</b> | {name}\n<b>ID</b> | {id}",
+        "no_session": (
+            "<b>Нет сессии</b>\n"
+            "<blockquote>Ответьте на StringSession командой <code>.twin</code></blockquote>"
+        ),
         
         "nickname_set": "Никнейм установлен: {nickname}",
         "timezone_set": "Часовой пояс установлен: UTC{timezone}",
@@ -285,8 +301,14 @@ class Twin(loader.Module):
         "triggers_list": "{triggers}",
         "triggers_empty": "Триггеры не установлены",
         
-        "online_enabling": "<b>Включение режима онлайн...</b>\n\nTwin аккаунт появится в сети",
-        "online_disabling": "<b>Выключение режима онлайн...</b>\n\nTwin аккаунт пропадет из сети",
+        "online_enabling": (
+            "<b>Включаю режим онлайн</b>\n"
+            "<blockquote>Twin аккаунт появится в сети</blockquote>"
+        ),
+        "online_disabling": (
+            "<b>Выключаю режим онлайн</b>\n"
+            "<blockquote>Twin аккаунт пропадет из сети</blockquote>"
+        ),
         
         "error_no_session": "Сессия не настроена",
         "error_not_connected": "Сессия не подключена",
@@ -595,7 +617,7 @@ class Twin(loader.Module):
         status = self.strings["status_connected"] if self._connected else self.strings["status_disconnected"]
         info = ""
         if self._twin_me:
-            info = self.strings["session_info"].format(
+            info = "\n" + self.strings["session_info"].format(
                 name=self._twin_me.first_name,
                 id=self._twin_me.id
             )

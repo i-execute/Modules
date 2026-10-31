@@ -8,7 +8,6 @@ __version__ = (2, 1, 0)
 
 import asyncio
 import io
-import json
 import logging
 import os
 import re
@@ -315,74 +314,15 @@ def _embed_id3(filepath: str, title: str, artist: str, cover_data: typing.Option
     except Exception:
         pass
 
-
-UPLOAD_UA = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0"
-
-UPLOAD_PROVIDERS = {
-    "x0.at": {
-        "url": "https://x0.at",
-        "field": "file",
-        "extra": {},
-    },
-    "uguu.se": {
-        "url": "https://uguu.se/upload?output=text",
-        "field": "files[]",
-        "extra": {},
-    },
-    "pomf.lain.la": {
-        "url": "https://pomf.lain.la/upload.php",
-        "field": "files[]",
-        "extra": {},
-    },
-}
+COVER_CACHE_MAX = 64
 
 
-def _parse_upload_url(text: str, base: str = "") -> str:
-    text = (text or "").strip()
-    if not text:
-        return ""
-    try:
-        data = json.loads(text)
-    except Exception:
-        first = text.splitlines()[0].strip()
-        return first if first.startswith("http") and " " not in first else ""
-    queue = [data]
-    while queue:
-        item = queue.pop(0)
-        if isinstance(item, dict):
-            for key in ("url", "src", "link"):
-                value = item.get(key)
-                if isinstance(value, str):
-                    return base + value if value.startswith("/") else value
-            queue += list(item.values())
-        elif isinstance(item, list):
-            queue += item
-    return ""
-
-
-async def _upload_via(provider: str, data: bytes, filename: str, content_type: str = "audio/mpeg", timeout: int = 60) -> str:
-    cfg = UPLOAD_PROVIDERS.get(provider) or UPLOAD_PROVIDERS["x0.at"]
-    if not AIOHTTP_OK:
-        return ""
-    try:
-        form = aiohttp.FormData()
-        for key, value in cfg["extra"].items():
-            form.add_field(key, value)
-        form.add_field(cfg["field"], data, filename=filename, content_type=content_type)
-        async with aiohttp.ClientSession(headers={"User-Agent": UPLOAD_UA}) as s:
-            async with s.post(
-                cfg["url"],
-                data=form,
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as r:
-                text = await r.text()
-                url = _parse_upload_url(text, cfg.get("base", ""))
-                if url:
-                    return url
-                _log("UPLOAD", f"{provider}: HTTP {r.status}: {text.strip()[:120]}")
-    except Exception as e:
-        _log("UPLOAD", f"{provider}: {type(e).__name__}: {e}")
-    return ""
+def cover_photo(data: bytes):
+    if not data:
+        return None
+    buf = io.BytesIO(data)
+    buf.name = "cover.jpg"
+    return buf
 
 
 @loader.tds
@@ -474,11 +414,6 @@ class YTMusic(loader.Module):
                 "SEARCH_LIMIT", 5,
                 "Search results limit (1-10)",
                 validator=loader.validators.Integer(minimum=1, maximum=10),
-            ),
-            loader.ConfigValue(
-                "UPLOAD_PROVIDER", "x0.at",
-                "File hosting used to upload covers",
-                validator=loader.validators.Choice(list(UPLOAD_PROVIDERS)),
             ),
             loader.ConfigValue(
                 "YT_COOKIES", "",
@@ -912,15 +847,16 @@ class YTMusic(loader.Module):
             "cover_cache": {},
         }
         self._yts_locks[new_sid] = asyncio.Lock()
-        cover_url = await self._yts_get_cover(new_sid, 0)
+        cover = await self._yts_get_cover(new_sid, 0)
         markup = self._yts_markup(new_sid, len(tracks))
         track = tracks[0]
         edit_kwargs = dict(
             text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['channel'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
             reply_markup=markup,
         )
-        if cover_url:
-            edit_kwargs["photo"] = cover_url
+        photo = cover_photo(cover)
+        if photo:
+            edit_kwargs["photo"] = photo
         await self._safe_edit(call, **edit_kwargs)
         asyncio.ensure_future(self._yts_prefetch_covers(new_sid))
 
@@ -959,7 +895,7 @@ class YTMusic(loader.Module):
             "cover_cache": {},
         }
         self._yts_locks[session_id] = asyncio.Lock()
-        cover_url = await self._yts_get_cover(session_id, 0)
+        cover = await self._yts_get_cover(session_id, 0)
         markup = self._yts_markup(session_id, len(tracks))
         track = tracks[0]
         try:
@@ -972,8 +908,9 @@ class YTMusic(loader.Module):
             reply_markup=markup,
             silent=True,
         )
-        if cover_url:
-            form_kwargs["photo"] = cover_url
+        photo = cover_photo(cover)
+        if photo:
+            form_kwargs["photo"] = photo
         if is_forum and topic_id:
             form_kwargs["reply_to"] = topic_id
         await self._safe_form(**form_kwargs)
@@ -999,11 +936,7 @@ class YTMusic(loader.Module):
             kwargs.pop("photo")
             return await call.edit(**kwargs)
 
-    async def _upload_file(self, data, filename, content_type="audio/mpeg"):
-        timeout = 60 if content_type.startswith("audio") else 20
-        return await _upload_via(self.config["UPLOAD_PROVIDER"], data, filename, content_type, timeout)
-
-    async def _yts_get_cover(self, session_id: str, idx: int) -> typing.Optional[str]:
+    async def _yts_get_cover(self, session_id: str, idx: int) -> typing.Optional[bytes]:
         sess = self._yts_sessions.get(session_id)
         if not sess:
             return None
@@ -1017,17 +950,14 @@ class YTMusic(loader.Module):
             return cache[idx]
         thumb_url = await _best_thumb_url(vid)
         raw = await _download_image(thumb_url) if thumb_url else None
-        x0_url = None
+        cover = None
         if raw:
-            norm = normalize_cover(raw, force_jpeg=True) or raw
-            x0_url = await self._upload_file(
-                norm,
-                sanitize_fn(f"{track['channel']} - {track['title']}") + ".jpg",
-                "image/jpeg",
-            )
-        self._cover_cache[vid] = x0_url
-        cache[idx] = x0_url
-        return x0_url
+            cover = normalize_cover(raw, force_jpeg=True) or raw
+        self._cover_cache[vid] = cover
+        if len(self._cover_cache) > COVER_CACHE_MAX:
+            self._cover_cache.pop(next(iter(self._cover_cache)))
+        cache[idx] = cover
+        return cover
 
     async def _yts_prefetch_covers(self, session_id: str):
         sess = self._yts_sessions.get(session_id)
@@ -1097,14 +1027,15 @@ class YTMusic(loader.Module):
         sess = self._yts_sessions[session_id]
         idx = sess["index"]
         track = sess["tracks"][idx]
-        cover_url = await self._yts_get_cover(session_id, idx)
+        cover = await self._yts_get_cover(session_id, idx)
         markup = self._yts_markup(session_id, len(sess["tracks"]))
         edit_kwargs = dict(
             text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['channel'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
             reply_markup=markup,
         )
-        if cover_url:
-            edit_kwargs["photo"] = cover_url
+        photo = cover_photo(cover)
+        if photo:
+            edit_kwargs["photo"] = photo
         await self._safe_edit(call, **edit_kwargs)
 
     async def _yts_download(self, call: InlineCall, session_id: str):
@@ -1178,15 +1109,16 @@ class YTMusic(loader.Module):
             "cover_cache": {},
         }
         self._yts_locks[session_id] = asyncio.Lock()
-        cover_url = await self._yts_get_cover(session_id, 0)
+        cover = await self._yts_get_cover(session_id, 0)
         markup = self._yts_markup(session_id, len(tracks))
         track = tracks[0]
         edit_kwargs = dict(
             text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['channel'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
             reply_markup=markup,
         )
-        if cover_url:
-            edit_kwargs["photo"] = cover_url
+        photo = cover_photo(cover)
+        if photo:
+            edit_kwargs["photo"] = photo
         await self._safe_edit(call, **edit_kwargs)
         asyncio.ensure_future(self._yts_prefetch_covers(session_id))
 
