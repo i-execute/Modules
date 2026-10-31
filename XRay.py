@@ -1667,31 +1667,59 @@ class XRay(loader.Module):
 
     async def on_unload(self):
         self._closing = True
+        try:
+            await self._stop_monitor()
+        except Exception as e:
+            logger.warning("[XR] the monitor loop was not stopped cleanly: %s", e)
+        for step in (
+            self._sub_stop_task,
+            self._sub_stop_server,
+            self._stop_all_units,
+        ):
+            try:
+                result = step()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:
+                logger.warning("[XR] unload step %s failed: %s", getattr(step, "__name__", step), e)
+
+    async def _stop_monitor(self):
         task = self._monitor_task
         self._monitor_task = None
-        if task:
-            task.cancel()
-            try:
-                await asyncio.wait_for(task, timeout=UNLOAD_WAIT)
-            except asyncio.CancelledError:
-                pass
-            except asyncio.TimeoutError:
-                logger.warning("[XR] the monitor loop did not stop in %.0fs", UNLOAD_WAIT)
-            except Exception as e:
-                logger.warning("[XR] the monitor loop ended with an error: %s", e)
+        if not task:
+            return
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=UNLOAD_WAIT)
+        except asyncio.CancelledError:
+            pass
+        except asyncio.TimeoutError:
+            logger.warning("[XR] the monitor loop did not stop in %.0fs", UNLOAD_WAIT)
+        except Exception as e:
+            logger.warning("[XR] the monitor loop ended with an error: %s", e)
 
-        await self._sub_stop_task()
-        self._sub_stop_server()
-        
+    async def _stop_all_units(self):
         for name in list(self._processes.keys()):
             if name in self._users:
                 self._users[name]["resume_on_module_load"] = True
-            await self._stop_user(name)
+            try:
+                await self._stop_user(name)
+            except Exception as e:
+                logger.warning("[XR] the user %s was not stopped: %s", name, e)
         for name in list(self._tunnels.keys()):
-            await self._stop_websocket_tunnel(name)
+            try:
+                await self._stop_websocket_tunnel(name)
+            except Exception as e:
+                logger.warning("[XR] the tunnel of %s was not stopped: %s", name, e)
         for name in list(self._site_processes.keys()):
-            await self._stop_websocket_site(name)
-        self._save_users()
+            try:
+                await self._stop_websocket_site(name)
+            except Exception as e:
+                logger.warning("[XR] the site of %s was not stopped: %s", name, e)
+        try:
+            self._save_users()
+        except Exception as e:
+            logger.warning("[XR] the users were not saved: %s", e)
 
     def _guard_message(self) -> str:
         reason = _guard_reason()
@@ -1837,11 +1865,16 @@ class XRay(loader.Module):
     def _websocket_site_script(
         self, path: str, backend_port: int, site_port: int, mask_kind: str, mask_url: str, mask_files: Dict[str, str]
     ) -> str:
-        try:
-            template = self._fetch_site_script()
-            if not template:
-                raise ValueError("no template")
-        except Exception:
+        template = ""
+        for _ in range(2):
+            try:
+                template = self._fetch_site_script()
+            except Exception as e:
+                logger.warning("[XR] the site template was not fetched: %s", e)
+                template = ""
+            if template:
+                break
+        if not template:
             template = MINIMAL_SITE_TEMPLATE
         return (
             template.replace("__PATH__", path)
@@ -3037,6 +3070,15 @@ class XRay(loader.Module):
             self._monitor_task.cancel()
         
         self._monitor_task = asyncio.create_task(monitor_loop())
+        self._monitor_task.add_done_callback(self._monitor_done)
+
+    @staticmethod
+    def _monitor_done(task):
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.warning("[XR] the monitor loop stopped: %s", error)
 
     def _save_users(self):
         self._db.set("XR", "users", self._users)

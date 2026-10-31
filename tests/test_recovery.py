@@ -230,7 +230,13 @@ def test_a_crashed_monitor_does_not_break_the_unload() -> None:
         task = asyncio.create_task(monitor())
         await asyncio.sleep(0)
         instance = _Unload(task)
-        _bind(instance, _compile("on_unload"), "on_unload")
+        _bind(
+            instance,
+            _compile("on_unload", "_stop_monitor", "_stop_all_units"),
+            "on_unload",
+            "_stop_monitor",
+            "_stop_all_units",
+        )
         await instance.on_unload()
         return instance, task
 
@@ -252,8 +258,10 @@ def test_a_hanging_monitor_does_not_block_the_unload(monkeypatch) -> None:
         task = asyncio.create_task(monitor())
         await asyncio.sleep(0)
         instance = _Unload(task)
-        namespace = _compile("on_unload", extra={"UNLOAD_WAIT": 0.05})
-        _bind(instance, namespace, "on_unload")
+        namespace = _compile(
+            "on_unload", "_stop_monitor", "_stop_all_units", extra={"UNLOAD_WAIT": 0.05}
+        )
+        _bind(instance, namespace, "on_unload", "_stop_monitor", "_stop_all_units")
         await instance.on_unload()
         return instance
 
@@ -297,3 +305,47 @@ def test_the_heal_path_does_nothing_while_the_module_is_closing() -> None:
     _bind(instance, _compile("_heal_websocket_stack"), "_heal_websocket_stack")
     asyncio.run(instance._heal_websocket_stack("bob"))
     assert instance.calls == []
+
+
+def test_a_failing_cleanup_step_does_not_break_the_unload() -> None:
+    async def scenario():
+        async def monitor():
+            return None
+
+        task = asyncio.create_task(monitor())
+        await asyncio.sleep(0)
+
+        class Broken(_Unload):
+            async def _stop_user(self, name, reason=""):
+                raise FileNotFoundError(2, "No such file or directory", "websocket_site.py")
+
+            async def _stop_websocket_tunnel(self, name):
+                raise PermissionError(13, "Permission denied", "daemon.log")
+
+            def _save_users(self):
+                self.saved += 1
+
+        instance = Broken(task)
+        namespace = _compile("on_unload", "_stop_monitor", "_stop_all_units")
+        _bind(instance, namespace, "on_unload", "_stop_monitor", "_stop_all_units")
+        await instance.on_unload()
+        return instance
+
+    instance = asyncio.run(scenario())
+    assert instance._closing is True
+    assert instance.saved == 1
+
+
+def test_the_mask_template_is_pulled_every_time_and_checked_locally() -> None:
+    source = VPN.read_text(encoding="utf-8")
+    fetch = _grab("_fetch_site_script")["_fetch_site_script"]
+    assert "urlopen" in fetch
+    assert "sha256" in fetch
+    assert "cache" not in fetch.lower()
+    assert "_WEBSOCKET_SITE_SCRIPT_URL" in fetch
+
+    script = _grab("_websocket_site_script")["_websocket_site_script"]
+    assert "for _ in range(2):" in script
+    assert "self._fetch_site_script()" in script
+    assert "MINIMAL_SITE_TEMPLATE" in script
+    assert "self._site_template" not in source
