@@ -233,6 +233,7 @@ def test_the_websocket_stack_is_restarted_after_a_reboot() -> None:
     owner._root = "/home/u/.xray_on_userbot/1"
     owner._users = {"bob": {"transport": "websocket", "websocket_mode": "tls-fallback"}}
     owner._heal_attempts = {}
+    owner._closing = False
     owner.calls = []
 
     async def inactive(unit: str) -> bool:
@@ -314,6 +315,7 @@ def test_a_broken_stack_is_not_retried_every_cycle() -> None:
     owner._root = "/home/u/.xray_on_userbot/1"
     owner._users = {"bob": {"transport": "websocket", "websocket_mode": "tls-fallback"}}
     owner._heal_attempts = {}
+    owner._closing = False
     owner.calls = []
 
     async def inactive(unit: str) -> bool:
@@ -353,6 +355,7 @@ def test_a_healthy_stack_only_refreshes_the_link() -> None:
     owner._root = "/home/u/.xray_on_userbot/1"
     owner._users = {"bob": {"transport": "websocket", "websocket_mode": "tls-fallback"}}
     owner._heal_attempts = {"bob": 1.0}
+    owner._closing = False
     owner.calls = []
 
     async def active(unit: str) -> bool:

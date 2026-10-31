@@ -189,15 +189,18 @@ def _embed_id3(filepath: str, title: str, artist: str, cover_data: typing.Option
     except Exception:
         pass
 
-COVER_CACHE_MAX = 64
-
-
-def cover_photo(data: bytes):
-    if not data:
+def _big_artwork(url: str):
+    if not url:
         return None
-    buf = io.BytesIO(data)
-    buf.name = "cover.jpg"
-    return buf
+    if not url.startswith("https://"):
+        return None
+    for suffix in ("-large.jpg", "-t300x300.jpg", "-crop.jpg"):
+        if url.endswith(suffix):
+            return url[: -len(suffix)] + "-t500x500.jpg"
+    return url
+
+
+COVER_CACHE_MAX = 64
 
 
 @loader.tds
@@ -672,9 +675,8 @@ class SCMusic(loader.Module):
             text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['username'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
             reply_markup=markup,
         )
-        photo = cover_photo(cover)
-        if photo:
-            edit_kwargs["photo"] = photo
+        if cover:
+            edit_kwargs["photo"] = cover
         await self._safe_edit(call, **edit_kwargs)
         asyncio.ensure_future(self._scs_prefetch_covers(new_sid))
 
@@ -730,23 +732,27 @@ class SCMusic(loader.Module):
             reply_markup=markup,
             silent=True,
         )
-        photo = cover_photo(cover)
-        if photo:
-            form_kwargs["photo"] = photo
+        if cover:
+            form_kwargs["photo"] = cover
         if is_forum and topic_id:
             form_kwargs["reply_to"] = topic_id
         await self._safe_form(**form_kwargs)
         asyncio.ensure_future(self._scs_prefetch_covers(session_id))
 
     async def _safe_form(self, **kwargs):
+        photo = kwargs.pop("photo", None)
+        form = await self.inline.form(**kwargs)
+        if not form or not photo:
+            return form
         try:
-            return await self.inline.form(**kwargs)
+            await form.edit(
+                text=kwargs.get("text"),
+                photo=photo,
+                reply_markup=kwargs.get("reply_markup"),
+            )
         except Exception as e:
-            if "photo" not in kwargs:
-                raise
-            _log("UPLOAD", f"photo rejected by Telegram ({type(e).__name__}), retry without it")
-            kwargs.pop("photo")
-            return await self.inline.form(**kwargs)
+            _log("UPLOAD", f"cover skipped ({type(e).__name__}: {e})")
+        return form
 
     async def _safe_edit(self, call, **kwargs):
         try:
@@ -776,12 +782,7 @@ class SCMusic(loader.Module):
             cache[idx] = self._cover_cache[track_id]
             return cache[idx]
 
-        raw = await _download_image_aiohttp(art_url)
-        if not raw:
-            cache[idx] = None
-            return None
-
-        cover = normalize_cover(raw, force_jpeg=True) or raw
+        cover = _big_artwork(art_url)
         self._cover_cache[track_id] = cover
         if len(self._cover_cache) > COVER_CACHE_MAX:
             self._cover_cache.pop(next(iter(self._cover_cache)))
@@ -862,9 +863,8 @@ class SCMusic(loader.Module):
             text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['username'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
             reply_markup=markup,
         )
-        photo = cover_photo(cover)
-        if photo:
-            edit_kwargs["photo"] = photo
+        if cover:
+            edit_kwargs["photo"] = cover
         await self._safe_edit(call, **edit_kwargs)
 
     async def _scs_download(self, call, session_id: str):
@@ -942,9 +942,8 @@ class SCMusic(loader.Module):
             text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['username'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
             reply_markup=markup,
         )
-        photo = cover_photo(cover)
-        if photo:
-            edit_kwargs["photo"] = photo
+        if cover:
+            edit_kwargs["photo"] = cover
         await self._safe_edit(call, **edit_kwargs)
         asyncio.ensure_future(self._scs_prefetch_covers(session_id))
 

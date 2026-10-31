@@ -317,14 +317,6 @@ def _embed_id3(filepath: str, title: str, artist: str, cover_data: typing.Option
 COVER_CACHE_MAX = 64
 
 
-def cover_photo(data: bytes):
-    if not data:
-        return None
-    buf = io.BytesIO(data)
-    buf.name = "cover.jpg"
-    return buf
-
-
 @loader.tds
 class YTMusic(loader.Module):
     """YouTube Music audio downloader and search"""
@@ -854,9 +846,8 @@ class YTMusic(loader.Module):
             text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['channel'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
             reply_markup=markup,
         )
-        photo = cover_photo(cover)
-        if photo:
-            edit_kwargs["photo"] = photo
+        if cover:
+            edit_kwargs["photo"] = cover
         await self._safe_edit(call, **edit_kwargs)
         asyncio.ensure_future(self._yts_prefetch_covers(new_sid))
 
@@ -908,23 +899,27 @@ class YTMusic(loader.Module):
             reply_markup=markup,
             silent=True,
         )
-        photo = cover_photo(cover)
-        if photo:
-            form_kwargs["photo"] = photo
+        if cover:
+            form_kwargs["photo"] = cover
         if is_forum and topic_id:
             form_kwargs["reply_to"] = topic_id
         await self._safe_form(**form_kwargs)
         asyncio.ensure_future(self._yts_prefetch_covers(session_id))
 
     async def _safe_form(self, **kwargs):
+        photo = kwargs.pop("photo", None)
+        form = await self.inline.form(**kwargs)
+        if not form or not photo:
+            return form
         try:
-            return await self.inline.form(**kwargs)
+            await form.edit(
+                text=kwargs.get("text"),
+                photo=photo,
+                reply_markup=kwargs.get("reply_markup"),
+            )
         except Exception as e:
-            if "photo" not in kwargs:
-                raise
-            _log("UPLOAD", f"photo rejected by Telegram ({type(e).__name__}), retry without it")
-            kwargs.pop("photo")
-            return await self.inline.form(**kwargs)
+            _log("UPLOAD", f"cover skipped ({type(e).__name__}: {e})")
+        return form
 
     async def _safe_edit(self, call, **kwargs):
         try:
@@ -948,11 +943,7 @@ class YTMusic(loader.Module):
         if vid in self._cover_cache:
             cache[idx] = self._cover_cache[vid]
             return cache[idx]
-        thumb_url = await _best_thumb_url(vid)
-        raw = await _download_image(thumb_url) if thumb_url else None
-        cover = None
-        if raw:
-            cover = normalize_cover(raw, force_jpeg=True) or raw
+        cover = await _best_thumb_url(vid)
         self._cover_cache[vid] = cover
         if len(self._cover_cache) > COVER_CACHE_MAX:
             self._cover_cache.pop(next(iter(self._cover_cache)))
@@ -1033,9 +1024,8 @@ class YTMusic(loader.Module):
             text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['channel'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
             reply_markup=markup,
         )
-        photo = cover_photo(cover)
-        if photo:
-            edit_kwargs["photo"] = photo
+        if cover:
+            edit_kwargs["photo"] = cover
         await self._safe_edit(call, **edit_kwargs)
 
     async def _yts_download(self, call: InlineCall, session_id: str):
@@ -1116,9 +1106,8 @@ class YTMusic(loader.Module):
             text=f"<b>{escape_html(track['title'])}</b>\n<b>{escape_html(track['channel'])}</b>\n<blockquote>{track['dur_str']}</blockquote>",
             reply_markup=markup,
         )
-        photo = cover_photo(cover)
-        if photo:
-            edit_kwargs["photo"] = photo
+        if cover:
+            edit_kwargs["photo"] = cover
         await self._safe_edit(call, **edit_kwargs)
         asyncio.ensure_future(self._yts_prefetch_covers(session_id))
 

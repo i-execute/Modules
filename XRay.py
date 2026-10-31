@@ -158,6 +158,7 @@ LOG_TRIM_SIZE = 10 * 1024 * 1024
 BASE_PORT = 8443
 AUTOSTART_INTERVAL = 10
 HEAL_COOLDOWN = 300
+UNLOAD_WAIT = 5.0
 SUB_POLL_INTERVAL = 30
 SUB_TOKEN_LEN = 43
 SUB_RATE_LIMIT = 10
@@ -1493,6 +1494,7 @@ class XRay(loader.Module):
         self._users: Dict[str, Dict] = {}
         self._processes: Dict[str, str] = {}
         self._monitor_task = None
+        self._closing = False
         self._heal_attempts = {}
         self._external_ip = ""
         self._link_cache: Dict[str, str] = {}
@@ -1664,12 +1666,19 @@ class XRay(loader.Module):
         return await self._client.send_file(peer, file, **kwargs)
 
     async def on_unload(self):
-        if self._monitor_task:
-            self._monitor_task.cancel()
+        self._closing = True
+        task = self._monitor_task
+        self._monitor_task = None
+        if task:
+            task.cancel()
             try:
-                await self._monitor_task
+                await asyncio.wait_for(task, timeout=UNLOAD_WAIT)
             except asyncio.CancelledError:
                 pass
+            except asyncio.TimeoutError:
+                logger.warning("[XR] the monitor loop did not stop in %.0fs", UNLOAD_WAIT)
+            except Exception as e:
+                logger.warning("[XR] the monitor loop ended with an error: %s", e)
 
         await self._sub_stop_task()
         self._sub_stop_server()
@@ -1867,6 +1876,10 @@ class XRay(loader.Module):
         mask_files = GATE_FILES if mask_kind == "jsx" else HOLE_FILES
         script_path = os.path.join(user_dir, "websocket_site.py")
         try:
+            os.makedirs(user_dir, mode=0o700, exist_ok=True)
+        except OSError as e:
+            return False, f"user_dir_unavailable: {e}"
+        try:
             p = await asyncio.create_subprocess_exec(
                 sys.executable, "-c", "import aiohttp",
                 stdout=asyncio.subprocess.PIPE,
@@ -1886,8 +1899,10 @@ class XRay(loader.Module):
             script_content = self._websocket_site_script(path, user["port"], site_port, mask_kind, mask_url, mask_files)
         except Exception as e:
             return False, f"site_script_fetch_failed: {e}"
-        with open(script_path, "w", encoding="utf-8") as f:
-            f.write(script_content)
+        try:
+            _write_private(script_path, script_content)
+        except OSError as e:
+            return False, f"site_script_write_failed: {e}"
         log_path = os.path.join(user_dir, "daemon.log")
         try:
             self._write_unit(unit, f"XRay WebSocket site for {name}", [sys.executable, script_path], log_path)
@@ -2002,6 +2017,8 @@ class XRay(loader.Module):
         return host
 
     async def _heal_websocket_stack(self, name: str) -> None:
+        if self._closing:
+            return
         user = self._users.get(name)
         if not user or user.get("transport") != "websocket":
             return
@@ -2954,53 +2971,67 @@ class XRay(loader.Module):
         except:
             return 0
 
+    async def _monitor_cycle(self):
+        for name in self._users:
+            self._trim_user_logs(name)
+
+        for name, proc in list(self._processes.items()):
+            user = self._users.get(name)
+            if not user:
+                continue
+
+            limit = user.get("device_limit", 0)
+            if limit == 0:
+                continue
+
+            active = self._get_active_connections(
+                user["port"], user.get("transport", ""), user.get("site_port")
+            )
+
+            if active > limit:
+                user["autostart"] = False
+                self._save_users()
+                await self._stop_user(name, self.strings["log_reason_limit"])
+                await self._send_log(
+                    self.strings["log_device_limit"].format(
+                        **self._log_user_data(user),
+                        limit=limit,
+                        active=active,
+                    ),
+                    name=name
+                )
+
+        if self._closing or not self._xray_installed():
+            return
+
+        for name, user in list(self._users.items()):
+            if self._closing:
+                return
+            if user.get("transport") == "websocket":
+                await self._heal_websocket_stack(name)
+
+        for name, user in list(self._users.items()):
+            if self._closing:
+                return
+            if not user.get("autostart"):
+                continue
+            if name in self._processes:
+                continue
+
+            await self._start_user(name)
+
     def _start_monitor(self):
         async def monitor_loop():
-            while True:
+            while not self._closing:
                 await asyncio.sleep(AUTOSTART_INTERVAL)
-                for name in self._users:
-                    self._trim_user_logs(name)
-                
-                for name, proc in list(self._processes.items()):
-                    user = self._users.get(name)
-                    if not user:
-                        continue
-                    
-                    limit = user.get("device_limit", 0)
-                    if limit == 0:
-                        continue
-                    
-                    active = self._get_active_connections(
-                        user["port"], user.get("transport", ""), user.get("site_port")
-                    )
-                    
-                    if active > limit:
-                        user["autostart"] = False
-                        self._save_users()
-                        await self._stop_user(name, self.strings["log_reason_limit"])
-                        await self._send_log(
-                            self.strings["log_device_limit"].format(
-                                **self._log_user_data(user),
-                                limit=limit,
-                                active=active,
-                            ),
-                            name=name
-                        )
-                        
-                if not self._xray_installed():
-                    continue
-
-                for name, user in list(self._users.items()):
-                    if user.get("transport") == "websocket":
-                        await self._heal_websocket_stack(name)
-
-                for name, user in list(self._users.items()):
-                    if not user.get("autostart"):
-                        continue
-                    if name in self._processes:
-                        continue
-                    
-                    await self._start_user(name)
+                if self._closing:
+                    return
+                try:
+                    await self._monitor_cycle()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning("[XR] monitor cycle failed: %s", e)
         
         if self._monitor_task:
             self._monitor_task.cancel()
