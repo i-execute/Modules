@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (5, 1, 0)
+__version__ = (5, 2, 0)
 # meta developer: Execute_forge.t.me 
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
@@ -28,6 +28,7 @@ import re
 import random
 import secrets
 import string
+import urllib.error
 import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta
@@ -158,6 +159,12 @@ LOG_TRIM_SIZE = 10 * 1024 * 1024
 BASE_PORT = 8443
 AUTOSTART_INTERVAL = 10
 HEAL_COOLDOWN = 300
+SUB_PORT_CANDIDATES = (2096, 2097, 8443, 2053, 2083, 2087, 9443)
+SUB_TUNNEL_UNIT = "xray-sub-tunnel.service"
+TUNNEL_PROBE_TIMEOUT = 6.0
+TUNNEL_PROBE_INTERVAL = 120.0
+TUNNEL_PROBE_RETRY = 10.0
+TUNNEL_PROBE_FAILS = 2
 UNLOAD_WAIT = 5.0
 SUB_POLL_INTERVAL = 30
 SUB_TOKEN_LEN = 43
@@ -632,6 +639,31 @@ class XRay(loader.Module):
         "btn_toggle_transport": "Switch Transport",
         "btn_socks5": "SOCKS5",
         "btn_transport": "Transport",
+        "ws_status": (
+            "<blockquote>"
+            "<b>Tunnel health</b> | {health}\n"
+            "<b>Mask site</b> | {site}\n"
+            "<b>Cloudflare tunnel</b> | {tunnel}"
+            "</blockquote>"
+        ),
+        "ws_ok": "<b>alive</b>",
+        "ws_dead": "<b>dead</b>",
+        "ws_up": "<b>running</b>",
+        "ws_down": "<b>stopped</b>",
+        "ws_refreshed": (
+            "<b>The link was refreshed</b>\n"
+            "<blockquote>User: <code>{name}</code>\nTunnel: <code>{host}</code></blockquote>"
+        ),
+        "tunnel_restarted": (
+            "<b>The tunnel was rebuilt</b>\n"
+            "<blockquote>User: {name}\nNew link host: <code>{host}</code>\nThe old link stops working, take the fresh one.</blockquote>"
+        ),
+        "btn_ws_refresh": "Refresh link",
+        "sub_tls_on": "<blockquote><b>Transport</b> | <b>https</b> through <code>{host}</code>\nClients accept the link without complaints</blockquote>",
+        "sub_tls_off": "<blockquote><b>Transport</b> | <b>http</b> on <code>{host}</code>\nMany clients refuse plain http, press the https button</blockquote>",
+        "btn_sub_tls": "https tunnel",
+        "sub_tls_done": "<blockquote><b>The subscription tunnel is up</b>\n<code>{url}</code></blockquote>",
+        "sub_tls_fail": "<blockquote><b>The tunnel did not start</b>\n<code>{error}</code>\nThe plain http link keeps working</blockquote>",
         "btn_autostart_on": "Autostart: On",
         "btn_autostart_off": "Autostart: Off",
         "btn_chrome": "Chrome",
@@ -1292,6 +1324,31 @@ class XRay(loader.Module):
 
         "btn_socks5": "SOCKS5",
         "btn_transport": "Транспорт",
+        "ws_status": (
+            "<blockquote>"
+            "<b>Состояние туннеля</b> | {health}\n"
+            "<b>Сайт-маска</b> | {site}\n"
+            "<b>Туннель Cloudflare</b> | {tunnel}"
+            "</blockquote>"
+        ),
+        "ws_ok": "<b>живой</b>",
+        "ws_dead": "<b>мёртвый</b>",
+        "ws_up": "<b>работает</b>",
+        "ws_down": "<b>остановлен</b>",
+        "ws_refreshed": (
+            "<b>Ссылка обновлена</b>\n"
+            "<blockquote>Юзер: <code>{name}</code>\nТуннель: <code>{host}</code></blockquote>"
+        ),
+        "tunnel_restarted": (
+            "<b>Туннель пересобран</b>\n"
+            "<blockquote>Юзер: {name}\nНовый хост: <code>{host}</code>\nСтарая ссылка больше не работает, возьмите новую.</blockquote>"
+        ),
+        "btn_ws_refresh": "Обновить ссылку",
+        "sub_tls_on": "<blockquote><b>Транспорт</b> | <b>https</b> через <code>{host}</code>\nКлиенты принимают ссылку без ругани</blockquote>",
+        "sub_tls_off": "<blockquote><b>Транспорт</b> | <b>http</b> на <code>{host}</code>\nМногие клиенты не принимают http, нажмите кнопку https</blockquote>",
+        "btn_sub_tls": "https-туннель",
+        "sub_tls_done": "<blockquote><b>Туннель подписки поднят</b>\n<code>{url}</code></blockquote>",
+        "sub_tls_fail": "<blockquote><b>Туннель не поднялся</b>\n<code>{error}</code>\nОбычная http-ссылка продолжает работать</blockquote>",
         "btn_autostart_on": "Автозапуск: Вкл",
         "btn_autostart_off": "Автозапуск: Выкл",
 
@@ -1496,6 +1553,8 @@ class XRay(loader.Module):
         self._monitor_task = None
         self._closing = False
         self._heal_attempts = {}
+        self._tunnel_fails = {}
+        self._tunnel_probe = {}
         self._external_ip = ""
         self._link_cache: Dict[str, str] = {}
         self._tunnels: Dict[str, str] = {}
@@ -1699,6 +1758,10 @@ class XRay(loader.Module):
             logger.warning("[XR] the monitor loop ended with an error: %s", e)
 
     async def _stop_all_units(self):
+        try:
+            await self._sub_tunnel_stop()
+        except Exception as e:
+            logger.warning("[XR] the subscription tunnel was not stopped: %s", e)
         for name in list(self._processes.keys()):
             if name in self._users:
                 self._users[name]["resume_on_module_load"] = True
@@ -2049,6 +2112,75 @@ class XRay(loader.Module):
         await self._send_ws_link_to_log_topic(user)
         return host
 
+    def _probe_host(self, host: str, path: str = "/") -> bool:
+        if not host:
+            return False
+        url = f"https://{host}{path or '/'}"
+        request = urllib.request.Request(url, headers={"User-Agent": "curl/8.5.0"})
+        try:
+            with urllib.request.urlopen(request, timeout=TUNNEL_PROBE_TIMEOUT) as response:
+                response.read(64)
+                return True
+        except urllib.error.HTTPError:
+            return True
+        except Exception:
+            return False
+
+    async def _host_alive(self, host: str, path: str = "/") -> bool:
+        if not host:
+            return False
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(self._probe_host, host, path),
+                timeout=TUNNEL_PROBE_TIMEOUT + 2,
+            )
+        except Exception:
+            return False
+
+    async def _check_tunnel_health(self, name: str) -> bool:
+        user = self._users.get(name)
+        if not user or user.get("transport") != "websocket":
+            return False
+        host = user.get("tunnel_host") or ""
+        if not host:
+            return False
+        now = time.time()
+        stamps = self._tunnel_probe
+        failures = self._tunnel_fails.get(name, 0)
+        gap = TUNNEL_PROBE_RETRY if failures else TUNNEL_PROBE_INTERVAL
+        last = stamps.get(name, 0.0)
+        if last and now - last < gap:
+            return not failures
+        stamps[name] = now
+        path = user.get("path") or "/xhttps"
+        alive = await self._host_alive(host, path)
+        if alive:
+            self._tunnel_fails.pop(name, None)
+            return True
+        fails = self._tunnel_fails.get(name, 0) + 1
+        self._tunnel_fails[name] = fails
+        logger.warning("[XR] the tunnel of %s looks dead (%s/%s)", name, fails, TUNNEL_PROBE_FAILS)
+        return fails < TUNNEL_PROBE_FAILS
+
+    async def _restart_tunnel(self, name: str) -> bool:
+        user = self._users.get(name)
+        if not user:
+            return False
+        user_dir = os.path.join(self._root, "users", name)
+        await self._stop_websocket_tunnel(name)
+        ok, error = await self._start_websocket_tunnel(name, user_dir)
+        self._tunnel_fails.pop(name, None)
+        if not ok:
+            logger.warning("[XR] the tunnel of %s was not restarted: %s", name, error)
+            return False
+        host = user.get("tunnel_host") or ""
+        await self._send_log(
+            self.strings["tunnel_restarted"].format(name=_escape(name), host=_escape(host)),
+            name=name,
+        )
+        await self._send_ws_link_to_log_topic(user)
+        return True
+
     async def _heal_websocket_stack(self, name: str) -> None:
         if self._closing:
             return
@@ -2065,6 +2197,13 @@ class XRay(loader.Module):
         if site_up and cf_up:
             self._heal_attempts.pop(name, None)
             await self._refresh_tunnel_host(name)
+            if not await self._check_tunnel_health(name):
+                now = time.time()
+                last = self._heal_attempts.get(name, 0.0)
+                if now - last < HEAL_COOLDOWN:
+                    return
+                self._heal_attempts[name] = now
+                await self._restart_tunnel(name)
             return
         now = time.time()
         last = self._heal_attempts.get(name, 0.0)
@@ -2824,13 +2963,14 @@ class XRay(loader.Module):
             if not path.startswith("/"):
                 path = "/" + path
             fallback = user.get("websocket_mode") == "tls-fallback"
+            host_header = user.get("tunnel_host", "")
             params = urllib.parse.urlencode({
                 "type": "ws",
                 "encryption": "none" if fallback else user.get("vless_encryption", "none"),
                 "path": path,
-                "host": user.get("tunnel_host", "") if fallback else "",
+                "host": host_header if fallback else "",
                 "security": "tls" if fallback else "none",
-                **({"sni": user.get("tunnel_host", "")} if fallback else {}),
+                **({"sni": host_header, "alpn": "http/1.1", "fp": fp} if fallback else {}),
             })
             host = user.get("tunnel_host") if fallback else ip
             return f"vless://{uuid_str}@{host}:{443 if fallback else port}?{params}#{urllib.parse.quote(name, safe='')}"
@@ -3121,6 +3261,7 @@ class XRay(loader.Module):
             "interval": 12,
             "title": "",
             "primary": "",
+            "tunnel_host": "",
             "traffic": {},
             "baseline": {},
         }
@@ -3179,6 +3320,15 @@ class XRay(loader.Module):
         return taken
 
     def _sub_free_port(self, taken: set) -> int:
+        busy = set(taken)
+        if self._sub.get("port"):
+            try:
+                busy.add(int(self._sub["port"]))
+            except (TypeError, ValueError):
+                pass
+        for port in SUB_PORT_CANDIDATES:
+            if port not in busy and not self._port_in_use(port):
+                return port
         for _ in range(64):
             port = random.randint(20000, 60000)
             if port not in taken and not self._port_in_use(port):
@@ -3217,6 +3367,9 @@ class XRay(loader.Module):
         return f"/{self._sub_prefix()}/*"
 
     def _sub_base_url(self) -> str:
+        host = self._sub.get("tunnel_host") or ""
+        if host:
+            return f"https://{host}"
         if not self._external_ip:
             return ""
         return f"http://{self._external_ip}:{self._sub.get('port', 0)}"
@@ -3248,10 +3401,11 @@ class XRay(loader.Module):
         if not self._external_ip:
             return out
         primary = self._sub_primary()
-        for name, user in list(self._users.items()):
+        ordered = list(self._users.items())
+        if not only and primary:
+            ordered.sort(key=lambda pair: pair[0] != primary)
+        for name, user in ordered:
             if only and name != only:
-                continue
-            if not only and name != primary:
                 continue
             if user.get("transport") == "socks5":
                 continue
@@ -3589,6 +3743,79 @@ class XRay(loader.Module):
                 return key
         return ""
 
+    def _sub_tunnel_log(self) -> str:
+        root = self._root or os.path.expanduser("~")
+        return os.path.join(root, "sub-tunnel.log")
+
+    async def _sub_tunnel_start(self) -> Tuple[bool, str]:
+        self._sub_ensure()
+        if not self._sub.get("enabled"):
+            return False, "sub_disabled"
+        reason = _guard_reason()
+        if reason:
+            return False, reason
+        unit = SUB_TUNNEL_UNIT
+        if await self._unit_active(unit):
+            await self._sub_tunnel_refresh()
+            return True, ""
+        if not self._cloudflared_installed():
+            return False, "cloudflared_not_installed"
+        port = int(self._sub.get("port") or 0)
+        if not port:
+            return False, "sub_port_missing"
+        log_path = self._sub_tunnel_log()
+        start_size = os.path.getsize(log_path) if os.path.exists(log_path) else 0
+        cloudflared = self._cloudflared_path
+        try:
+            self._write_unit(
+                unit,
+                "XRay subscription tunnel",
+                [cloudflared, "tunnel", "--protocol", "http2", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"],
+                log_path,
+            )
+            ok, output = await self._start_unit(unit)
+            if not ok:
+                return False, output
+            deadline = time.time() + 40
+            hostname = ""
+            while time.time() < deadline:
+                await asyncio.sleep(1)
+                hostname = self._read_tunnel_host(log_path, start_size)
+                if hostname:
+                    break
+                if not await self._unit_active(unit):
+                    break
+            if not hostname:
+                await self._stop_unit(unit)
+                return False, "cloudflared_tunnel_failed"
+            self._sub["tunnel_host"] = hostname
+            self._sub_save()
+            logger.info("[XR] subscription tunnel is %s", hostname)
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+
+    async def _sub_tunnel_refresh(self) -> str:
+        if not self._sub.get("port"):
+            return ""
+        host = self._read_tunnel_host(self._sub_tunnel_log())
+        if not host:
+            return ""
+        if host == self._sub.get("tunnel_host"):
+            return ""
+        self._sub["tunnel_host"] = host
+        self._sub_save()
+        logger.info("[XR] subscription tunnel moved to %s", host)
+        return host
+
+    async def _sub_tunnel_stop(self):
+        self._sub["tunnel_host"] = ""
+        self._sub_save()
+        try:
+            await self._stop_unit(SUB_TUNNEL_UNIT)
+        except Exception as e:
+            logger.debug("[XR] the subscription tunnel was not stopped: %s", e)
+
     def _sub_start_server(self) -> Tuple[bool, str]:
         reason = _guard_reason()
         if reason:
@@ -3633,6 +3860,10 @@ class XRay(loader.Module):
         ok, err = self._sub_start_server()
         if not ok:
             logger.error(f"[XR] subscription server failed to start: {err}")
+            return
+        ok, err = await self._sub_tunnel_start()
+        if not ok:
+            logger.warning(f"[XR] the subscription tunnel is off: {err}, plain http is used")
 
     async def _sub_enable(self) -> Tuple[bool, str]:
         self._sub_ensure()
@@ -3644,12 +3875,14 @@ class XRay(loader.Module):
             self._sub_save()
             return False, err
         self._sub_start_task()
+        await self._sub_tunnel_start()
         return True, ""
 
     async def _sub_disable(self):
         self._sub["enabled"] = False
         self._sub_save()
         await self._sub_stop_task()
+        await self._sub_tunnel_stop()
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._sub_stop_server)
 
@@ -4076,6 +4309,16 @@ class XRay(loader.Module):
             uptime=uptime,
         )
         
+        if user.get("transport") == "websocket" and user.get("websocket_mode") == "tls-fallback":
+            site_ok = await self._unit_active(self._unit_name(name, "site"))
+            tunnel_ok = await self._unit_active(self._unit_name(name, "cf"))
+            health_ok = bool(user.get("tunnel_host")) and self._tunnel_fails.get(name, 0) < TUNNEL_PROBE_FAILS
+            text += "\n" + self.strings["ws_status"].format(
+                health=self.strings["ws_ok"] if health_ok else self.strings["ws_dead"],
+                site=self.strings["ws_up"] if site_ok else self.strings["ws_down"],
+                tunnel=self.strings["ws_up"] if tunnel_ok else self.strings["ws_down"],
+            )
+
         markup = []
         
         if is_running:
@@ -4116,6 +4359,9 @@ class XRay(loader.Module):
         ])
         
         if user.get("transport") == "websocket" and user.get("websocket_mode") == "tls-fallback":
+            markup.append([
+                {"text": self.strings["btn_ws_refresh"], "callback": self._cb_refresh_link, "args": (name,), "style": "success"},
+            ])
             markup.append([
                 {"text": self.strings["btn_mask_site"], "callback": self._cb_mask_site_menu, "args": (name,), "style": "primary"},
             ])
@@ -4227,6 +4473,38 @@ class XRay(loader.Module):
             self.strings["user_deleted"].format(name=_escape(name)),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
         )
+
+    async def _cb_refresh_link(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if not user:
+            await call.answer("User not found", show_alert=True)
+            return
+        if user.get("transport") != "websocket" or user.get("websocket_mode") != "tls-fallback":
+            await self._cb_get_user_link(call, name)
+            return
+        await call.edit(self.strings["loading"])
+        user_dir = os.path.join(self._root, "users", name)
+        site_unit = self._unit_name(name, "site")
+        cf_unit = self._unit_name(name, "cf")
+        if not await self._unit_active(site_unit):
+            ok, error = await self._start_websocket_site(name, user_dir)
+            if not ok:
+                logger.warning("[XR] the mask site of %s did not start: %s", name, error)
+        if not await self._unit_active(cf_unit):
+            await self._start_websocket_tunnel(name, user_dir)
+        host = user.get("tunnel_host") or ""
+        if host and not await self._host_alive(host, user.get("path") or "/xhttps"):
+            await self._restart_tunnel(name)
+            host = user.get("tunnel_host") or ""
+        self._tunnel_fails.pop(name, None)
+        await self._send_ws_link_to_log_topic(user)
+        if not host:
+            await call.edit(
+                self.strings["setup_fail"].format(error="tunnel is not running"),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]],
+            )
+            return
+        await self._cb_get_user_link(call, name)
 
     async def _cb_get_user_link(self, call: InlineCall, name: str):
         await call.edit(self.strings["loading"])
@@ -4829,6 +5107,28 @@ class XRay(loader.Module):
             ]]
         )
 
+    async def _cleanup_stale_units(self, name: str) -> None:
+        if name in self._users:
+            return
+        for kind in ("xray", "site", "cf"):
+            unit = self._unit_name(name, kind)
+            path = os.path.join(self._systemd_user_dir, unit)
+            if not os.path.exists(path):
+                continue
+            try:
+                await self._stop_unit(unit)
+            except Exception:
+                pass
+            try:
+                os.remove(path)
+                logger.info("[XR] removed the stale unit %s", unit)
+            except OSError:
+                pass
+        try:
+            await self._systemctl("daemon-reload")
+        except Exception:
+            pass
+
     async def _cb_add_user_transport_choice(self, call: InlineCall, name: str):
         name = name.strip()
         
@@ -4839,9 +5139,7 @@ class XRay(loader.Module):
         if name in self._users:
             await call.answer(self.strings["err_name_exists"], show_alert=True)
             return
-        if os.path.exists(os.path.join(self._systemd_user_dir, self._unit_name(name))):
-            await call.answer("A systemd service with this username already exists", show_alert=True)
-            return
+        await self._cleanup_stale_units(name)
         
         text = self.strings["add_user_transport"].format(name=_escape(name))
         
@@ -5011,6 +5309,7 @@ class XRay(loader.Module):
                 {"text": self.strings["btn_sub_reset"], "callback": self._cb_sub_reset, "style": "danger"},
             ])
             markup.append([
+                {"text": self.strings["btn_sub_tls"], "callback": self._cb_sub_tls, "style": "success"},
                 {"text": self.strings["btn_sub_apply"], "callback": self._cb_sub_apply, "style": "primary"},
             ])
 
@@ -5027,10 +5326,39 @@ class XRay(loader.Module):
                 title=_escape(self._sub.get("title") or "-"),
         )
 
+        if self._sub.get("enabled"):
+            host = self._sub.get("tunnel_host") or ""
+            if host:
+                text += "\n" + self.strings["sub_tls_on"].format(host=_escape(host))
+            else:
+                text += "\n" + self.strings["sub_tls_off"].format(
+                    host=_escape(f"{self._external_ip or '?'}:{self._sub.get('port', 0)}")
+                )
+
         if _in_docker():
             text = text.replace("</blockquote>", self.strings["sub_docker_warn"] + "</blockquote>")
 
         await call.edit(text, reply_markup=markup)
+
+    async def _cb_sub_tls(self, call: InlineCall):
+        if not self._sub.get("enabled"):
+            await call.answer(self.strings["sub_stopped"], show_alert=True)
+            return
+        if not self._sub_server:
+            await call.answer(self.strings["sub_stopped"], show_alert=True)
+            return
+        await call.edit(self.strings["loading"])
+        ok, error = await self._sub_tunnel_start()
+        if not ok:
+            await call.edit(
+                self.strings["sub_tls_fail"].format(error=_escape(str(error)[:200])),
+                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+            )
+            return
+        await call.edit(
+            self.strings["sub_tls_done"].format(url=_escape(self._sub_url())),
+            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
+        )
 
     async def _cb_sub_toggle(self, call: InlineCall):
         await call.edit(self.strings["loading"], reply_markup=[])

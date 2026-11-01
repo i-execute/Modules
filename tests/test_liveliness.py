@@ -371,6 +371,12 @@ def test_a_healthy_stack_only_refreshes_the_link() -> None:
     owner._unit_name = lambda name, kind="xray": f"{name}-{kind}.service"
     owner._refresh_tunnel_host = refresh
 
+    async def healthy(name: str) -> bool:
+        return True
+
+    owner._check_tunnel_health = healthy
+    owner._tunnel_fails = {}
+
     asyncio.run(owner._heal_websocket_stack("bob"))
     assert owner.calls == ["refresh"]
     assert owner._heal_attempts == {}
