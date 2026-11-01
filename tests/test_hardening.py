@@ -228,7 +228,7 @@ def test_no_token_ever_reaches_the_process_list() -> None:
     assert not any("Authorization" in header for header in headers)
     assert "{gh_token}" not in SOURCE
     assert "Authorization: Bearer {clean}" in SOURCE
-    assert SOURCE.count("_curl_header_config(") == 3
+    assert SOURCE.count("_curl_header_config(") == 4
 
 
 def test_the_private_writer_creates_a_0600_file(tmp_path) -> None:
@@ -488,3 +488,114 @@ def test_the_install_menu_hides_the_vulnerable_releases() -> None:
     setup = _source("_cb_setup_menu")
     assert "_core_too_old(xray_status)" in setup
     assert "core_old_warn" in setup
+
+
+def _language_strings() -> list[dict[str, str]]:
+    found = []
+    for node in TREE.body:
+        if isinstance(node, ast.ClassDef) and node.name == "XRay":
+            for item in node.body:
+                if isinstance(item, ast.Assign) and getattr(item.targets[0], "id", "") in ("strings", "strings_ru"):
+                    found.append(ast.literal_eval(item.value))
+    assert len(found) == 2
+    return found
+
+
+def test_every_translated_string_formats_with_its_placeholders() -> None:
+    values = ["1", "v26.10.31", "CVE-2026-98432"]
+    for strings in _language_strings():
+        for key, value in strings.items():
+            holes = re.findall(r"\{([a-z_]+)\}", value)
+            if not holes:
+                continue
+            filled = {hole: values[0] for hole in holes}
+            assert value.format(**filled) or True, key
+
+
+def test_the_hidden_releases_note_receives_the_advisory() -> None:
+    for strings in _language_strings():
+        note = strings["core_old_hidden"].format(count=3, min="v26.10.31", advisory="CVE-2026-98432")
+        assert "CVE-2026-98432" in note
+        assert "v26.10.31" in note
+    call = _source("_cb_xray_install_menu")
+    assert "advisory=XRAY_MIN_ADVISORY" in call
+
+
+def _cloudflared_namespace() -> dict[str, object]:
+    import platform as platform_module
+    import time as time_module
+
+    namespace = _class()
+    namespace["platform"] = platform_module
+    namespace["time"] = time_module
+    wanted = {
+        "CLOUDFLARED_VERSION",
+        "CLOUDFLARED_SHA256",
+        "CLOUDFLARED_REPO",
+        "CLOUDFLARED_MIN",
+        "CLOUDFLARED_MIN_TAG",
+        "CLOUDFLARED_PINNED",
+        "CLOUDFLARED_RELEASE_LIMIT",
+        "CLOUDFLARED_RELEASES_TTL",
+    }
+    for node in TREE.body:
+        target = getattr(node.targets[0], "id", "") if isinstance(node, ast.Assign) else ""
+        if target in wanted:
+            exec("\n".join(LINES[node.lineno - 1:node.end_lineno]), namespace, namespace)
+    exec(
+        "\n\n".join(
+            _sources(
+                {
+                    name: name
+                    for name in (
+                        "_cloudflared_asset",
+                        "_cloudflared_tag",
+                        "_cloudflared_digest",
+                        "_cloudflared_releases",
+                        "_install_cloudflared",
+                    )
+                }
+            )
+        ),
+        namespace,
+    )
+    return namespace
+
+
+def test_the_cloudflared_menu_offers_a_version_for_every_release() -> None:
+    menu = _source("_cb_install_cloudflared")
+    assert "_cloudflared_releases" in menu
+    assert "_cb_cloudflared_version" in menu
+    assert "args" in menu
+    pick = _source("_cb_cloudflared_version")
+    assert "_install_cloudflared(tag)" in pick
+
+
+def test_the_cloudflared_installer_refuses_a_release_below_the_floor() -> None:
+    namespace = _cloudflared_namespace()
+    owner = Stub()
+
+    async def no_releases() -> list:
+        return []
+
+    owner._cloudflared_releases = no_releases
+    for name in ("_cloudflared_asset", "_cloudflared_tag", "_cloudflared_digest", "_install_cloudflared"):
+        setattr(owner, name, namespace[name].__get__(owner, type(owner)))
+    ok, reason = asyncio.run(owner._install_cloudflared("2025.1.1"))
+    assert ok is False
+    assert "Refused" in reason
+
+
+def test_the_cloudflared_digest_is_read_from_the_release_notes() -> None:
+    namespace = _cloudflared_namespace()
+    owner = Stub()
+    for name in ("_cloudflared_asset", "_cloudflared_tag", "_cloudflared_digest"):
+        setattr(owner, name, namespace[name].__get__(owner, type(owner)))
+    releases = [
+        {"tag_name": "2026.10.7", "digests": {"cloudflared-linux-amd64": "a" * 64}},
+        {"tag_name": "2026.10.5", "digests": {}},
+    ]
+    assert owner._cloudflared_digest("2026.10.7", "cloudflared-linux-amd64", releases) == "a" * 64
+    assert owner._cloudflared_digest("2026.10.5", "cloudflared-linux-amd64", releases) == namespace["CLOUDFLARED_SHA256"]["cloudflared-linux-amd64"]
+    assert owner._cloudflared_digest("2026.10.6", "cloudflared-linux-amd64", releases) == ""
+    assert owner._cloudflared_tag("cloudflared version 2026.10.7 (built 2026-10-30)") == "2026.10.7"

@@ -2,8 +2,8 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (5, 3, 0)
-# meta developer: Execute_forge.t.me 
+__version__ = (5, 4, 0)
+# meta developer: Execute_forge.t.me
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
 import os
@@ -113,7 +113,6 @@ app.router.add_get("/health", health)
 web.run_app(app, host="127.0.0.1", port=__SITE_PORT__)
 """
 
-
 logger = logging.getLogger(__name__)
 
 async def _retry_topic_send(send, refresh):
@@ -122,7 +121,6 @@ async def _retry_topic_send(send, refresh):
     except Exception:
         await refresh()
         return await send()
-
 
 class _SubServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -154,7 +152,6 @@ class _SubServer(ThreadingHTTPServer):
             super().process_request_thread(request, client_address)
         finally:
             SUB_SLOTS.release()
-
 
 LOG_TRIM_SIZE = 10 * 1024 * 1024
 BASE_PORT = 8443
@@ -193,6 +190,12 @@ CLOUDFLARED_SHA256 = {
     "cloudflared-linux-amd64": "e1bc0cf084fd9e590554fe769a86b1db46701c3f847a43d902f7b974a4e16298",
     "cloudflared-linux-arm64": "72e0d05a67e09da87cf495e409a28c3cc5994dd23fc66a982eebea6a55923b7d",
 }
+CLOUDFLARED_REPO = "cloudflare/cloudflared"
+CLOUDFLARED_MIN = (2026, 10, 5)
+CLOUDFLARED_MIN_TAG = "2026.10.5"
+CLOUDFLARED_PINNED = {CLOUDFLARED_VERSION: dict(CLOUDFLARED_SHA256)}
+CLOUDFLARED_RELEASE_LIMIT = 8
+CLOUDFLARED_RELEASES_TTL = 600
 RELEASE_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "api.github.com")
 SUB_BIND = os.environ.get("XRAY_SUB_BIND", "0.0.0.0")
 SUB_SECLOG = os.environ.get("OBHOD_SECURITY_LOG", "/var/log/obhod/security.log")
@@ -218,7 +221,6 @@ def _gen_secret(length: int) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
-
 def _sub_flag(value, default: bool) -> bool:
     if value is None:
         return bool(default)
@@ -228,11 +230,9 @@ def _sub_flag(value, default: bool) -> bool:
         return False
     return str(value).strip().lower() not in SUB_OFF_TEXT
 
-
 def _sub_clean(value, limit: int) -> str:
     text = re.sub(r"[^ -~]", "", str(value or ""))
     return re.sub(r"\s+", "_", text.strip())[:limit]
-
 
 def _sub_security(ip: str, event: str, outcome: str, detail: str = "") -> bool:
     if not SUB_SECLOG_ON:
@@ -269,7 +269,6 @@ def _sub_security(ip: str, event: str, outcome: str, detail: str = "") -> bool:
     except OSError:
         return False
 
-
 class _SubBucket:
     __slots__ = ("window", "count", "seen", "blocked", "misses", "offences")
 
@@ -280,7 +279,6 @@ class _SubBucket:
         self.blocked = 0.0
         self.misses = 0
         self.offences = 0
-
 
 def _sub_entry(ip: str, now: float) -> "_SubBucket":
     entry = SUB_BUCKETS.get(ip)
@@ -294,7 +292,6 @@ def _sub_entry(ip: str, now: float) -> "_SubBucket":
     entry.count += 1
     return entry
 
-
 def _sub_sweep(now: float) -> None:
     stale = [key for key, value in SUB_BUCKETS.items() if now - value.seen > SUB_RATE_WINDOW * 2]
     for key in stale:
@@ -303,7 +300,6 @@ def _sub_sweep(now: float) -> None:
         ordered = sorted(SUB_BUCKETS.items(), key=lambda pair: pair[1].seen)
         for key, _value in ordered[: len(SUB_BUCKETS) - SUB_BUCKET_LIMIT]:
             SUB_BUCKETS.pop(key, None)
-
 
 def _sub_allowed(ip: str) -> tuple:
     now = time.monotonic()
@@ -325,7 +321,6 @@ def _sub_allowed(ip: str) -> tuple:
         _sub_sweep(now)
     return (not reason), reason
 
-
 def _sub_record(ip: str, missing: bool) -> None:
     now = time.monotonic()
     with SUB_LOCK:
@@ -339,7 +334,6 @@ def _sub_record(ip: str, missing: bool) -> None:
         else:
             entry.misses = 0
             entry.offences = 0
-
 
 def _fmt_bytes(value: int) -> str:
     try:
@@ -362,7 +356,6 @@ def _guard_reason() -> str:
         return GUARD_DOCKER
     return ""
 
-
 def _version_tuple(text) -> tuple:
     for token in re.split(r"[^0-9A-Za-z.]+", str(text or "")):
         parts = token.lstrip("vV").split(".")
@@ -375,13 +368,11 @@ def _version_tuple(text) -> tuple:
         return tuple(numbers + [0] * (3 - len(numbers)))
     return ()
 
-
 def _core_too_old(tag) -> bool:
     version = _version_tuple(tag)
     if not version:
         return False
     return version < XRAY_MIN_VERSION
-
 
 def _release_allowed(url: str) -> bool:
     try:
@@ -392,14 +383,12 @@ def _release_allowed(url: str) -> bool:
         return False
     return (parts.hostname or "").lower() in RELEASE_HOSTS
 
-
 def _sha256_file(path: str) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
         for chunk in iter(lambda: handle.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
 
 def _curl_header_config(token: str) -> Tuple[List[str], str]:
     clean = str(token or "").strip()
@@ -411,7 +400,6 @@ def _curl_header_config(token: str) -> Tuple[List[str], str]:
         handle.write(f'header = "Authorization: Bearer {clean}"\n')
     return ["-K", path], path
 
-
 def _drop_curl_config(path: str) -> None:
     if not path:
         return
@@ -419,7 +407,6 @@ def _drop_curl_config(path: str) -> None:
         os.unlink(path)
     except OSError:
         pass
-
 
 def _write_private(path: str, data: str) -> None:
     handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -433,7 +420,6 @@ def _write_private(path: str, data: str) -> None:
         except OSError:
             pass
         raise
-
 
 def _in_docker():
     if os.path.isfile("/.dockerenv"):
@@ -469,7 +455,7 @@ class XRay(loader.Module):
         "guard_how": "What to do: run the userbot as a regular user with a working <code>systemctl --user</code> session, the module creates only user units. Keep root off limits and do not run it in Docker.",
         "reloaded": "<blockquote><b>XRay reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nUsers: <b>{users}</b>\nSubscriptions: <b>{subscriptions}</b>\nLog file limit: <b>{log_size} MB</b></blockquote>",
         "greeting": "<blockquote><b>XRay is ready</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nConfigured users: <b>{users}</b>\nSubscriptions: <b>{subscriptions}</b>\nLog file limit: <b>{log_size} MB</b>\nUse <code>{prefix}xray</code> to manage the service.</blockquote>",
-        
+
         "main_menu": (
             "<b>XRay Multi-User VPN</b>\n"
             "<blockquote>Total users: {total}\n"
@@ -477,7 +463,7 @@ class XRay(loader.Module):
             "XRay version: {version}\n"
             "Cloudflared version: {cloudflared_version}</blockquote>"
         ),
-        
+
         "setup_menu": (
             "<b>Setup & Installation</b>\n"
             "<blockquote>"
@@ -486,7 +472,7 @@ class XRay(loader.Module):
             "GitHub API: {gh_status}"
             "</blockquote>"
         ),
-        
+
         "xray_install_menu": (
             "<b>XRay Core Installation</b>\n"
             "<blockquote>"
@@ -494,23 +480,23 @@ class XRay(loader.Module):
             "Select version to install:"
             "</blockquote>"
         ),
-        
+
         "xray_installing": (
             "<b>Installing XRay</b>\n"
             "<blockquote>Version: {version}\nPlease wait...</blockquote>"
         ),
-        
+
         "loading": "<b>Loading...</b>",
-        
+
         "collecting_versions": "<b>Collecting versions...</b>",
-        
+
         "user_item": "{status} {name} ({port})",
-        
+
         "users_menu": (
             "<b>Users Management</b>\n"
             "<blockquote>Total: {total}\nActive: {active}</blockquote>"
         ),
-        
+
         "user_menu": (
             "<b>User: {name}</b>\n"
             "<blockquote>"
@@ -526,7 +512,7 @@ class XRay(loader.Module):
         ),
         "btn_mask_site": "Mask Site",
         "mask_site_menu": "<b>WebSocket Mask Site</b>\n<blockquote>Current: <code>{current}</code></blockquote>",
-        
+
         "user_settings": (
             "<b>Settings: {name}</b>\n"
             "<blockquote>"
@@ -541,22 +527,22 @@ class XRay(loader.Module):
             "Device limit: {limit}"
             "</blockquote>"
         ),
-        
+
         "add_user_name": (
             "<b>Add New User</b>\n"
             "<blockquote>Enter username (alphanumeric, no spaces):</blockquote>"
         ),
-        
+
         "add_user_transport": (
             "<b>Add User: {name}</b>\n"
             "<blockquote>Select transport type:</blockquote>"
         ),
-        
+
         "add_user_limit": (
             "<b>Add User: {name}</b>\n"
             "<blockquote>Enter device limit (0 = unlimited):</blockquote>"
         ),
-        
+
         "user_created": (
             "<b>User Created</b>\n"
             "<blockquote>"
@@ -566,22 +552,15 @@ class XRay(loader.Module):
             "Limit: {limit}"
             "</blockquote>"
         ),
-        
+
         "user_deleted": (
             "<b>User Deleted</b>\n"
             "<blockquote>{name} removed</blockquote>"
         ),
-        
+
         "user_started": "<b>Started</b>",
         "user_stopped": "<b>Stoped</b>",
-        
-        "link_message": (
-            "<b>VLESS Link: {name}</b>\n"
-            "<blockquote>"
-            "Clients:\n"
-            "iOS/Android: Happ, v2RayTun"
-            "</blockquote>"
-        ),
+
         "link_sent": (
             "<b>VLESS Link: {name}</b>\n"
             "<blockquote>"
@@ -599,7 +578,7 @@ class XRay(loader.Module):
             "URL: <code>socks5://{user}:{pass}@{ip}:{port}</code>"
             "</blockquote>"
         ),
-        
+
         "padding_menu": (
             "<b>Padding Bytes: {name}</b>\n"
             "<blockquote>"
@@ -607,37 +586,32 @@ class XRay(loader.Module):
             "Set minimum and maximum values"
             "</blockquote>"
         ),
-        
-        "padding_set": (
-            "<b>Padding Updated</b>\n"
-            "<blockquote>{min}-{max} bytes</blockquote>"
-        ),
-        
+
         "sni_set": (
             "<b>SNI Updated</b>\n"
             "<blockquote>{sni}</blockquote>"
         ),
-        
+
         "dest_set": (
             "<b>Dest Updated</b>\n"
             "<blockquote>{dest}</blockquote>"
         ),
-        
+
         "path_set": (
             "<b>Path Updated</b>\n"
             "<blockquote>{path}</blockquote>"
         ),
-        
+
         "fp_set": (
             "<b>Fingerprint Updated</b>\n"
             "<blockquote>{fp}</blockquote>"
         ),
-        
+
         "limit_set": (
             "<b>Device Limit Updated</b>\n"
             "<blockquote>{limit}</blockquote>"
         ),
-        
+
         "btn_setup": "Setup",
         "btn_users": "Users",
         "btn_add_user": "Add User",
@@ -647,7 +621,6 @@ class XRay(loader.Module):
         "btn_stop": "Stop",
         "btn_restart": "Restart",
         "btn_get_link": "Get Link",
-        "btn_get_logs": "Get Logs",
         "btn_settings": "Settings",
         "btn_delete": "Delete User",
         "btn_xhttp": "XHTTP",
@@ -660,7 +633,6 @@ class XRay(loader.Module):
         "btn_set_fp": "Fingerprint",
         "btn_set_limit": "Device Limit",
         "btn_encryption": "Encryption",
-        "btn_toggle_transport": "Switch Transport",
         "btn_socks5": "SOCKS5",
         "btn_transport": "Transport",
         "ws_status": (
@@ -674,10 +646,6 @@ class XRay(loader.Module):
         "ws_dead": "<b>dead</b>",
         "ws_up": "<b>running</b>",
         "ws_down": "<b>stopped</b>",
-        "ws_refreshed": (
-            "<b>The link was refreshed</b>\n"
-            "<blockquote>User: <code>{name}</code>\nTunnel: <code>{host}</code></blockquote>"
-        ),
         "tunnel_restarted": (
             "<b>The tunnel was rebuilt</b>\n"
             "<blockquote>User: {name}\nNew link host: <code>{host}</code>\nThe old link stops working, take the fresh one.</blockquote>"
@@ -711,8 +679,14 @@ class XRay(loader.Module):
         "btn_install_xray": "Install XRay Core",
         "btn_reinstall_xray": "Reinstall XRay Core",
         "btn_install_cloudflared": "Install Cloudflared",
+        "cf_install_menu": "<b>Cloudflared</b>\n<blockquote>Installed: {current}\nMinimum allowed: {min}\nEvery binary is checked against the digest published in its release notes</blockquote>",
+        "cf_no_releases": "<blockquote>The release list is unreachable, only the pinned {version} is offered</blockquote>",
+        "cf_installed_mark": " (installed)",
+        "cf_installing": "<b>Installing Cloudflared {version}</b>\n<blockquote>Downloading and checking the digest</blockquote>",
+        "cf_installed": "<b>Cloudflared Installed</b>\n<blockquote>{version}</blockquote>",
+        "not_installed": "Not installed",
         "btn_reinstall_cloudflared": "Reinstall Cloudflared",
-        
+
         "input_name": "Enter username:",
         "input_limit": "Enter device limit:",
         "input_sni": "Enter SNI (e.g. www.microsoft.com):",
@@ -720,66 +694,50 @@ class XRay(loader.Module):
         "input_path": "Enter path (e.g. /xhttps):",
         "input_padding_min": "Enter minimum padding bytes:",
         "input_padding_max": "Enter maximum padding bytes:",
-        
-        "err_docker": (
-            "<b>Docker Detected</b>\n"
-            "<blockquote>Module cannot work in containers</blockquote>"
-        ),
-        
+
         "err_name_exists": (
             "<b>Error</b>\n"
             "<blockquote>Username already exists</blockquote>"
         ),
-        
+
         "err_invalid_name": (
             "<b>Error</b>\n"
             "<blockquote>Invalid username format</blockquote>"
         ),
-        
+
         "err_invalid_limit": (
             "<b>Error</b>\n"
             "<blockquote>Limit must be a number</blockquote>"
         ),
-        
+
         "err_invalid_padding": (
             "<b>Error</b>\n"
             "<blockquote>Max must be greater than min</blockquote>"
         ),
-        
+
         "err_port_busy": (
             "<b>Error</b>\n"
             "<blockquote>Port {port} is busy</blockquote>"
         ),
-        
+
         "err_not_running": (
             "<b>Error</b>\n"
             "<blockquote>User is not running</blockquote>"
         ),
-        
+
         "err_already_running": (
             "<b>Error</b>\n"
             "<blockquote>User is already running</blockquote>"
         ),
-        
+
         "setup_done": (
             "<b>Installation Complete</b>\n"
             "<blockquote>XRay {version} installed successfully</blockquote>"
         ),
-        
+
         "setup_fail": (
             "<b>Installation Failed</b>\n"
             "<blockquote>{error}</blockquote>"
-        ),
-        
-        "device_limit_exceeded": (
-            "<b>Device Limit Exceeded</b>\n"
-            "<blockquote>"
-            "User: {name}\n"
-            "Limit: {limit}\n"
-            "Active: {active}\n"
-            "Process stopped\n"
-            "Autostart disabled"
-            "</blockquote>"
         ),
 
         "log_user_started": (
@@ -857,27 +815,6 @@ class XRay(loader.Module):
         "transport_set": (
             "<b>Transport Updated</b>\n"
             "<blockquote>{transport}</blockquote>"
-        ),
-
-        "socks5_info": (
-            "<b>SOCKS5: {name}</b>\n"
-            "<blockquote>"
-            "Host: {ip}\n"
-            "Port: {port}\n"
-            "Login: {user}\n"
-            "Password: {pass}\n\n"
-            "URL: <code>socks5://{user}:{pass}@{ip}:{port}</code>"
-            "</blockquote>"
-        ),
-
-        "autostart_on": (
-            "<b>Autostart Enabled</b>\n"
-            "<blockquote>{name} will restart automatically if the process crashes</blockquote>"
-        ),
-
-        "autostart_off": (
-            "<b>Autostart Disabled</b>\n"
-            "<blockquote>{name} will need to be started manually</blockquote>"
         ),
 
         "sub_on": "enabled",
@@ -1007,11 +944,6 @@ class XRay(loader.Module):
             "<blockquote>{title}</blockquote>"
         ),
 
-        "sub_regen_done": (
-            "<b>Token rotated</b>\n"
-            "<blockquote>The old link no longer works.</blockquote>"
-        ),
-
         "sub_port_done": (
             "<b>Port updated</b>\n"
             "<blockquote>New port: {port}</blockquote>"
@@ -1040,7 +972,7 @@ class XRay(loader.Module):
             "Версия XRay: {version}\n"
             "Версия Cloudflared: {cloudflared_version}</blockquote>"
         ),
-        
+
         "setup_menu": (
             "<b>Установка и настройка</b>\n"
             "<blockquote>"
@@ -1049,7 +981,7 @@ class XRay(loader.Module):
             "GitHub API: {gh_status}"
             "</blockquote>"
         ),
-        
+
         "xray_install_menu": (
             "<b>Установка XRay Core</b>\n"
             "<blockquote>"
@@ -1057,23 +989,23 @@ class XRay(loader.Module):
             "Выберите версию для установки:"
             "</blockquote>"
         ),
-        
+
         "xray_installing": (
             "<b>Установка XRay</b>\n"
             "<blockquote>Версия: {version}\nПодождите...</blockquote>"
         ),
-        
+
         "loading": "<b>Загрузка...</b>",
-        
+
         "collecting_versions": "<b>Сбор версий...</b>",
-        
+
         "user_item": "{status} {name} ({port})",
-        
+
         "users_menu": (
             "<b>Управление юзерами</b>\n"
             "<blockquote>Всего: {total}\nАктивных: {active}</blockquote>"
         ),
-        
+
         "user_menu": (
             "<b>Юзер: {name}</b>\n"
             "<blockquote>"
@@ -1089,7 +1021,7 @@ class XRay(loader.Module):
         ),
         "btn_mask_site": "Сайт-маска",
         "mask_site_menu": "<b>Сайт-маска WebSocket</b>\n<blockquote>Текущий: <code>{current}</code></blockquote>",
-        
+
         "user_settings": (
             "<b>Настройки: {name}</b>\n"
             "<blockquote>"
@@ -1104,22 +1036,22 @@ class XRay(loader.Module):
             "Лимит: {limit}"
             "</blockquote>"
         ),
-        
+
         "add_user_name": (
             "<b>Добавить юзера</b>\n"
             "<blockquote>Введите имя (латиница, без пробелов):</blockquote>"
         ),
-        
+
         "add_user_transport": (
             "<b>Добавить: {name}</b>\n"
             "<blockquote>Выберите транспорт:</blockquote>"
         ),
-        
+
         "add_user_limit": (
             "<b>Добавить: {name}</b>\n"
             "<blockquote>Лимит устройств (0 = безлимит):</blockquote>"
         ),
-        
+
         "user_created": (
             "<b>Юзер создан</b>\n"
             "<blockquote>"
@@ -1129,22 +1061,15 @@ class XRay(loader.Module):
             "Лимит: {limit}"
             "</blockquote>"
         ),
-        
+
         "user_deleted": (
             "<b>Юзер удалён</b>\n"
             "<blockquote>{name} удалён</blockquote>"
         ),
-        
+
         "user_started": "<b>Started</b>",
         "user_stopped": "<b>Stoped</b>",
-        
-        "link_message": (
-            "<b>VLESS ссылка: {name}</b>\n"
-            "<blockquote>"
-            "Клиенты:\n"
-            "iOS/Android: Happ, v2RayTun"
-            "</blockquote>"
-        ),
+
         "link_sent": (
             "<b>VLESS ссылка: {name}</b>\n"
             "<blockquote>"
@@ -1152,7 +1077,7 @@ class XRay(loader.Module):
             "iOS/Android: Happ, v2RayTun"
             "</blockquote>"
         ),
-        
+
         "padding_menu": (
             "<b>Padding Bytes: {name}</b>\n"
             "<blockquote>"
@@ -1160,37 +1085,32 @@ class XRay(loader.Module):
             "Установите мин. и макс. значения"
             "</blockquote>"
         ),
-        
-        "padding_set": (
-            "<b>Padding обновлён</b>\n"
-            "<blockquote>{min}-{max} байт</blockquote>"
-        ),
-        
+
         "sni_set": (
             "<b>SNI обновлён</b>\n"
             "<blockquote>{sni}</blockquote>"
         ),
-        
+
         "dest_set": (
             "<b>Dest обновлён</b>\n"
             "<blockquote>{dest}</blockquote>"
         ),
-        
+
         "path_set": (
             "<b>Путь обновлён</b>\n"
             "<blockquote>{path}</blockquote>"
         ),
-        
+
         "fp_set": (
             "<b>Fingerprint обновлён</b>\n"
             "<blockquote>{fp}</blockquote>"
         ),
-        
+
         "limit_set": (
             "<b>Лимит обновлён</b>\n"
             "<blockquote>{limit}</blockquote>"
         ),
-        
+
         "btn_setup": "Настройка",
         "btn_users": "Юзеры",
         "btn_add_user": "Добавить юзера",
@@ -1200,7 +1120,6 @@ class XRay(loader.Module):
         "btn_stop": "Остановить",
         "btn_restart": "Перезапустить",
         "btn_get_link": "Получить ссылку",
-        "btn_get_logs": "Получить логи",
         "btn_settings": "Настройки",
         "btn_delete": "Удалить",
         "btn_xhttp": "XHTTP",
@@ -1213,15 +1132,20 @@ class XRay(loader.Module):
         "btn_set_fp": "Fingerprint",
         "btn_set_limit": "Лимит",
         "btn_encryption": "Шифрование",
-        "btn_toggle_transport": "Сменить транспорт",
         "btn_chrome": "Chrome",
         "btn_firefox": "Firefox",
         "btn_safari": "Safari",
         "btn_install_xray": "Установить XRay Core",
         "btn_reinstall_xray": "Переустановить XRay Core",
         "btn_install_cloudflared": "Установить Cloudflared",
+        "cf_install_menu": "<b>Cloudflared</b>\n<blockquote>Установлено: {current}\nМинимум: {min}\nКаждый бинарник сверяется с дайджестом из заметок к релизу</blockquote>",
+        "cf_no_releases": "<blockquote>Список релизов недоступен, предлагается только запиненный {version}</blockquote>",
+        "cf_installed_mark": " (установлена)",
+        "cf_installing": "<b>Установка Cloudflared {version}</b>\n<blockquote>Скачивание и проверка дайджеста</blockquote>",
+        "cf_installed": "<b>Cloudflared установлен</b>\n<blockquote>{version}</blockquote>",
+        "not_installed": "Не установлен",
         "btn_reinstall_cloudflared": "Переустановить Cloudflared",
-        
+
         "input_name": "Введите имя:",
         "input_limit": "Введите лимит:",
         "input_sni": "Введите SNI (напр. www.microsoft.com):",
@@ -1229,66 +1153,50 @@ class XRay(loader.Module):
         "input_path": "Введите путь (напр. /xhttps):",
         "input_padding_min": "Минимальный padding (байты):",
         "input_padding_max": "Максимальный padding (байты):",
-        
-        "err_docker": (
-            "<b>Обнаружен Docker</b>\n"
-            "<blockquote>Модуль не работает в контейнерах</blockquote>"
-        ),
-        
+
         "err_name_exists": (
             "<b>Ошибка</b>\n"
             "<blockquote>Имя уже занято</blockquote>"
         ),
-        
+
         "err_invalid_name": (
             "<b>Ошибка</b>\n"
             "<blockquote>Неверный формат имени</blockquote>"
         ),
-        
+
         "err_invalid_limit": (
             "<b>Ошибка</b>\n"
             "<blockquote>Лимит должен быть числом</blockquote>"
         ),
-        
+
         "err_invalid_padding": (
             "<b>Ошибка</b>\n"
             "<blockquote>Макс должен быть больше мин</blockquote>"
         ),
-        
+
         "err_port_busy": (
             "<b>Ошибка</b>\n"
             "<blockquote>Порт {port} занят</blockquote>"
         ),
-        
+
         "err_not_running": (
             "<b>Ошибка</b>\n"
             "<blockquote>Юзер не запущен</blockquote>"
         ),
-        
+
         "err_already_running": (
             "<b>Ошибка</b>\n"
             "<blockquote>Юзер уже запущен</blockquote>"
         ),
-        
+
         "setup_done": (
             "<b>Установка завершена</b>\n"
             "<blockquote>XRay {version} успешно установлен</blockquote>"
         ),
-        
+
         "setup_fail": (
             "<b>Ошибка установки</b>\n"
             "<blockquote>{error}</blockquote>"
-        ),
-        
-        "device_limit_exceeded": (
-            "<b>Превышен лимит устройств</b>\n"
-            "<blockquote>"
-            "Юзер: {name}\n"
-            "Лимит: {limit}\n"
-            "Активных: {active}\n"
-            "Процесс остановлен\n"
-            "Автозапуск отключён"
-            "</blockquote>"
         ),
 
         "log_user_started": (
@@ -1357,9 +1265,6 @@ class XRay(loader.Module):
         ),
         "btn_gh_auth": "Авторизация GitHub",
         "btn_gh_revoke": "Отозвать токен",
-        
-        "loading": "<b>Загрузка...</b>",
-        "collecting_versions": "<b>Сбор версий...</b>",
 
         "btn_socks5": "SOCKS5",
         "btn_transport": "Транспорт",
@@ -1374,10 +1279,6 @@ class XRay(loader.Module):
         "ws_dead": "<b>мёртвый</b>",
         "ws_up": "<b>работает</b>",
         "ws_down": "<b>остановлен</b>",
-        "ws_refreshed": (
-            "<b>Ссылка обновлена</b>\n"
-            "<blockquote>Юзер: <code>{name}</code>\nТуннель: <code>{host}</code></blockquote>"
-        ),
         "tunnel_restarted": (
             "<b>Туннель пересобран</b>\n"
             "<blockquote>Юзер: {name}\nНовый хост: <code>{host}</code>\nСтарая ссылка больше не работает, возьмите новую.</blockquote>"
@@ -1416,17 +1317,6 @@ class XRay(loader.Module):
             "<blockquote>{transport}</blockquote>"
         ),
 
-        "socks5_info": (
-            "<b>SOCKS5: {name}</b>\n"
-            "<blockquote>"
-            "Host: {ip}\n"
-            "Port: {port}\n"
-            "Логин: {user}\n"
-            "Пароль: {pass}\n\n"
-            "URL: <code>socks5://{user}:{pass}@{ip}:{port}</code>"
-            "</blockquote>"
-        ),
-
         "socks5_sent": (
             "<b>SOCKS5: {name}</b>\n"
             "<blockquote>"
@@ -1437,16 +1327,6 @@ class XRay(loader.Module):
             "URL: <code>socks5://{user}:{pass}@{ip}:{port}</code>\n\n"
             "Файл proxies.txt отправлен в чат"
             "</blockquote>"
-        ),
-
-        "autostart_on": (
-            "<b>Автозапуск включён</b>\n"
-            "<blockquote>{name} будет подниматься автоматически, если процесс упадёт</blockquote>"
-        ),
-
-        "autostart_off": (
-            "<b>Автозапуск выключен</b>\n"
-            "<blockquote>{name} нужно будет запускать вручную</blockquote>"
         ),
 
         "sub_on": "включено",
@@ -1576,11 +1456,6 @@ class XRay(loader.Module):
             "<blockquote>{title}</blockquote>"
         ),
 
-        "sub_regen_done": (
-            "<b>Токен обновлён</b>\n"
-            "<blockquote>Старая ссылка больше не работает.</blockquote>"
-        ),
-
         "sub_port_done": (
             "<b>Порт обновлён</b>\n"
             "<blockquote>Новый порт: {port}</blockquote>"
@@ -1633,7 +1508,7 @@ class XRay(loader.Module):
         self._root = os.path.join(os.path.expanduser("~"), ".xray_on_userbot", str(tg_user_id))
         self._xray_path = os.path.join(self._root, "xray")
         self._cloudflared_path = os.path.join(self._root, "cloudflared")
-        
+
         os.makedirs(self._root, mode=0o700, exist_ok=True)
         os.chmod(self._root, 0o700)
         os.makedirs(os.path.join(self._root, "users"), mode=0o700, exist_ok=True)
@@ -1671,10 +1546,10 @@ class XRay(loader.Module):
                     self.strings["greeting"].format(**values),
                     is_greeting=True,
                 )
-        
+
         if not self._xray_installed():
             logger.warning("[XR] XRay not installed")
-        
+
         await self._reattach_processes()
         for name, user in self._users.items():
             if user.pop("resume_on_module_load", False) and not user.get("restart_required"):
@@ -2406,7 +2281,7 @@ class XRay(loader.Module):
                     f.write(f"[{ts}] {plain}\n")
             except Exception as e:
                 logger.error(f"[XR] Failed to write daemon log for {name}: {e}")
-        
+
         if not self._logger_topic or not self._asset_channel:
             return
         chat_id = int(f"-100{self._asset_channel}")
@@ -2490,27 +2365,93 @@ class XRay(loader.Module):
             and os.access(self._cloudflared_path, os.X_OK)
         )
 
-    async def _install_cloudflared(self) -> Tuple[bool, str]:
-        reason = _guard_reason()
-        if reason:
-            return False, reason
+    def _cloudflared_asset(self) -> str:
         arch = platform.machine().lower()
-        asset = {
+        return {
             "x86_64": "cloudflared-linux-amd64",
             "amd64": "cloudflared-linux-amd64",
             "aarch64": "cloudflared-linux-arm64",
             "arm64": "cloudflared-linux-arm64",
-        }.get(arch)
+        }.get(arch, "")
+
+    def _cloudflared_tag(self, raw: str) -> str:
+        found = re.search(r"(\d{4}\.\d{1,2}\.\d{1,2})", str(raw or ""))
+        return found.group(1) if found else ""
+
+    def _cloudflared_digest(self, tag: str, asset: str, releases: List[Dict] = None) -> str:
+        tag = str(tag or "").strip()
+        for known in releases or []:
+            if known.get("tag_name") == tag:
+                found = known.get("digests", {}).get(asset, "")
+                if found:
+                    return found
+                break
+        return CLOUDFLARED_PINNED.get(tag, {}).get(asset, "")
+
+    async def _cloudflared_releases(self) -> List[Dict]:
+        cached = getattr(self, "_cf_releases", None)
+        if cached and time.time() - cached[0] < CLOUDFLARED_RELEASES_TTL:
+            return cached[1]
+        curl_cmd = ["curl", "-sL", "--max-time", "15", "-H", "Accept: application/json"]
+        extra, cfg = _curl_header_config(self._gh_token())
+        curl_cmd += extra
+        curl_cmd.append(f"https://api.github.com/repos/{CLOUDFLARED_REPO}/releases?per_page=30")
+        out = b""
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *curl_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await process.communicate()
+        except Exception:
+            return []
+        finally:
+            _drop_curl_config(cfg)
+        try:
+            data = json.loads(out.decode())
+        except Exception:
+            return []
+        if not isinstance(data, list):
+            return []
+        found = []
+        for release in data:
+            tag = str(release.get("tag_name") or "").strip().lstrip("v")
+            if not tag or release.get("draft") or release.get("prerelease"):
+                continue
+            numbers = _version_tuple(tag)
+            if numbers and numbers < CLOUDFLARED_MIN:
+                continue
+            digests = {}
+            for name, digest in re.findall(r"([\w.\-]+):\s*([0-9a-f]{64})", release.get("body") or ""):
+                digests[name.strip()] = digest
+            digests.update(CLOUDFLARED_PINNED.get(tag, {}))
+            found.append({"tag_name": tag, "digests": digests, "published_at": release.get("published_at", "")})
+            if len(found) >= CLOUDFLARED_RELEASE_LIMIT:
+                break
+        self._cf_releases = (time.time(), found)
+        return found
+
+    async def _install_cloudflared(self, version: str = "") -> Tuple[bool, str]:
+        reason = _guard_reason()
+        if reason:
+            return False, reason
+        asset = self._cloudflared_asset()
         if not asset:
-            return False, f"Unsupported arch: {arch}"
-        expected = CLOUDFLARED_SHA256.get(asset, "")
+            return False, f"Unsupported arch: {platform.machine().lower()}"
+        tag = self._cloudflared_tag(version) or CLOUDFLARED_VERSION
+        numbers = _version_tuple(tag)
+        if numbers and numbers < CLOUDFLARED_MIN:
+            return False, f"Refused: {tag} is below {CLOUDFLARED_MIN_TAG}, install a newer release"
+        releases = await self._cloudflared_releases()
+        expected = self._cloudflared_digest(tag, asset, releases)
         if not expected:
-            return False, f"No pinned digest for {asset}"
+            return False, f"No published digest for {asset} in {tag}"
         tmp_path = f"{self._cloudflared_path}.tmp"
         try:
             process = await asyncio.create_subprocess_exec(
                 "curl", "-fL", "--max-time", "120", "-o", tmp_path,
-                f"https://github.com/cloudflare/cloudflared/releases/download/{CLOUDFLARED_VERSION}/{asset}",
+                f"https://github.com/{CLOUDFLARED_REPO}/releases/download/{tag}/{asset}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -2531,6 +2472,7 @@ class XRay(loader.Module):
             if check.returncode != 0:
                 return False, "Cloudflared validation failed"
             os.replace(tmp_path, self._cloudflared_path)
+            self._cf_releases = None
             return True, await self._get_version("cloudflared")
         except Exception as e:
             return False, str(e)
@@ -2587,7 +2529,7 @@ class XRay(loader.Module):
         extra, cfg = _curl_header_config(gh_token)
         curl_cmd += extra
         curl_cmd.append("https://api.github.com/repos/XTLS/Xray-core/releases")
-        
+
         try:
             p = await asyncio.create_subprocess_exec(
                 *curl_cmd,
@@ -2597,17 +2539,17 @@ class XRay(loader.Module):
             out, _ = await p.communicate()
         finally:
             _drop_curl_config(cfg)
-        
+
         if p.returncode != 0:
             return []
-        
+
         try:
             data = json.loads(out.decode())
             if isinstance(data, list):
                 return data[:5]
         except:
             pass
-        
+
         return []
 
     async def _gh_device_flow(self, call: InlineCall):
@@ -2748,7 +2690,7 @@ class XRay(loader.Module):
         go_arch = arch_map.get(arch)
         if not go_arch:
             return False, f"Unsupported arch: {arch}"
-        
+
         try:
             tmp = None
             gh_token = self._gh_token()
@@ -2756,7 +2698,7 @@ class XRay(loader.Module):
             extra, cfg = _curl_header_config(gh_token)
             curl_cmd += extra
             curl_cmd.append(f"https://api.github.com/repos/XTLS/Xray-core/releases/tags/{tag}")
-            
+
             try:
                 p = await asyncio.create_subprocess_exec(
                     *curl_cmd,
@@ -2768,7 +2710,7 @@ class XRay(loader.Module):
                 _drop_curl_config(cfg)
             if p.returncode != 0:
                 return False, "GitHub API failed"
-            
+
             raw = out.decode()
             try:
                 data = json.loads(raw)
@@ -2795,10 +2737,10 @@ class XRay(loader.Module):
             expected = XRAY_CORE_SHA256.get(go_arch, "")
             if not expected:
                 return False, f"No pinned digest for arch={go_arch}"
-            
+
             tmp = os.path.join(self._root, "tmp_install")
             os.makedirs(tmp, exist_ok=True)
-            
+
             dl = os.path.join(tmp, "xray.zip")
             p = await asyncio.create_subprocess_exec(
                 "curl", "-sL", "--max-time", "120", "-o", dl, download_url,
@@ -2806,27 +2748,27 @@ class XRay(loader.Module):
                 stderr=asyncio.subprocess.PIPE,
             )
             await p.communicate()
-            
+
             if not os.path.exists(dl):
                 return False, "Download failed"
 
             got = _sha256_file(dl)
             if got != expected:
                 return False, f"Digest mismatch for arch={go_arch}: {got}"
-            
+
             p = await asyncio.create_subprocess_exec(
                 "python3", "-m", "zipfile", "-e", dl, tmp,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             await p.communicate()
-            
+
             binary = None
             for root_dir, _, files in os.walk(tmp):
                 if "xray" in files:
                     binary = os.path.join(root_dir, "xray")
                     break
-            
+
             if not binary:
                 return False, "Binary not found in archive"
 
@@ -2836,10 +2778,10 @@ class XRay(loader.Module):
                 pass
             shutil.copy2(binary, self._xray_path)
             os.chmod(self._xray_path, 0o755)
-            
+
             version = await self._get_version("xray")
             return True, version
-            
+
         except Exception as e:
             return False, str(e)
         finally:
@@ -2903,10 +2845,10 @@ class XRay(loader.Module):
             )
             out, _ = await p.communicate()
             text = out.decode().strip()
-            
+
             private_key = None
             public_key = None
-            
+
             for line in text.split("\n"):
                 stripped = line.strip()
                 lower = stripped.lower()
@@ -2914,7 +2856,7 @@ class XRay(loader.Module):
                     private_key = stripped.split(":", 1)[1].strip()
                 elif "public" in lower and ":" in lower:
                     public_key = stripped.split(":", 1)[1].strip()
-            
+
             return private_key, public_key
         except:
             return None, None
@@ -2927,15 +2869,15 @@ class XRay(loader.Module):
         if self._sub.get("port"):
             used_ports.add(int(self._sub["port"]))
         port = BASE_PORT
-        
+
         if await self._check_port_available(port) and port not in used_ports:
             return port
-        
+
         for _ in range(100):
             port = random.randint(BASE_PORT, 50000)
             if port not in used_ports and await self._check_port_available(port):
                 return port
-        
+
         return port
 
     async def _check_port_available(self, port: int) -> bool:
@@ -3076,7 +3018,7 @@ class XRay(loader.Module):
 
     def _build_vless_link(self, user: Dict) -> str:
         import urllib.parse
-        
+
         name = user["name"]
         uuid_str = user["uuid"]
         ip = self._external_ip
@@ -3146,21 +3088,21 @@ class XRay(loader.Module):
         unit = self._unit_name(name)
         if name in self._processes or await self._unit_active(unit):
             return False, "already_running"
-        
+
         user = self._users.get(name)
         if not user:
             return False, "user_not_found"
 
         if not self._xray_installed():
             return False, "xray_not_installed"
-        
+
         port_ok = await self._check_port_available(user["port"])
         if not port_ok:
             await self._reattach_processes()
             if name in self._processes:
                 return True, ""
             return False, f"port_busy_{user['port']}"
-        
+
         user_dir = os.path.join(self._root, "users", name)
         os.makedirs(user_dir, exist_ok=True)
 
@@ -3168,11 +3110,11 @@ class XRay(loader.Module):
             ok, error = await self._start_websocket_site(name, user_dir)
             if not ok:
                 return False, error
-        
+
         config = self._build_config(user)
         config_path = os.path.join(user_dir, "config.json")
         _write_private(config_path, json.dumps(config, indent=2))
-        
+
         try:
             start_log = os.path.join(user_dir, "start.log")
             self._write_unit(unit, f"XRay VPN user {name}", [self._xray_path, "run", "-config", config_path], start_log)
@@ -3224,7 +3166,7 @@ class XRay(loader.Module):
         if self._users.get(name, {}).get("transport") == "websocket":
             await self._stop_websocket_tunnel(name)
             await self._stop_websocket_site(name)
-        
+
         if name in self._users:
             self._users[name]["start_time"] = 0
             self._save_users()
@@ -3236,7 +3178,7 @@ class XRay(loader.Module):
                 ),
                 name=name
             )
-        
+
         return True
 
     def _get_active_connections(
@@ -3269,7 +3211,7 @@ class XRay(loader.Module):
                         unique_ips.add(addr.compressed)
                 except ValueError:
                     continue
-            
+
             return len(unique_ips)
         except:
             return 0
@@ -3335,10 +3277,10 @@ class XRay(loader.Module):
                     raise
                 except Exception as e:
                     logger.warning("[XR] monitor cycle failed: %s", e)
-        
+
         if self._monitor_task:
             self._monitor_task.cancel()
-        
+
         self._monitor_task = asyncio.create_task(monitor_loop())
         self._monitor_task.add_done_callback(self._monitor_done)
 
@@ -3357,16 +3299,16 @@ class XRay(loader.Module):
         user = self._users.get(name)
         if not user or name not in self._processes:
             return "offline"
-        
+
         start = user.get("start_time", 0)
         if start == 0:
             return "n/a"
-        
+
         elapsed = int(time.time() - start)
         d, rem = divmod(elapsed, 86400)
         h, rem = divmod(rem, 3600)
         m, s = divmod(rem, 60)
-        
+
         parts = []
         if d:
             parts.append(f"{d}d")
@@ -3375,7 +3317,7 @@ class XRay(loader.Module):
         if m:
             parts.append(f"{m}m")
         parts.append(f"{s}s")
-        
+
         return " ".join(parts)
 
     def _sub_save(self):
@@ -4199,10 +4141,10 @@ class XRay(loader.Module):
     async def _cb_setup_menu(self, call: InlineCall):
         xray_status = await self._get_version("xray") if self._xray_installed() else "Not installed"
         cloudflared_status = await self._get_version("cloudflared") if self._cloudflared_installed() else "Not installed"
-        
+
         gh_token = self._gh_token()
         gh_status = "Authorized" if gh_token else "Not authorized"
-        
+
         text = self.strings["setup_menu"].format(
             xray_status=xray_status,
             cloudflared_status=cloudflared_status,
@@ -4214,9 +4156,9 @@ class XRay(loader.Module):
                 min=XRAY_MIN_TAG,
                 advisory=XRAY_MIN_ADVISORY,
             )
-        
+
         markup = []
-        
+
         if self._xray_installed():
             markup.append([{
                 "text": self.strings["btn_reinstall_xray"],
@@ -4229,7 +4171,7 @@ class XRay(loader.Module):
                 "callback": self._cb_xray_install_menu,
                 "style": "primary",
             }])
-        
+
         if self._cloudflared_installed():
             markup.append([{
                 "text": self.strings["btn_reinstall_cloudflared"],
@@ -4248,20 +4190,52 @@ class XRay(loader.Module):
             "callback": self._gh_device_flow,
             "style": "primary",
         }])
-        
+
         markup.append([{
             "text": self.strings["btn_back"],
             "callback": self._cb_main_menu,
             "style": "primary",
         }])
-        
+
         await call.edit(text, reply_markup=markup)
 
     async def _cb_install_cloudflared(self, call: InlineCall):
-        await call.edit(self.strings["loading"], reply_markup=[])
-        ok, result = await self._install_cloudflared()
+        await call.edit(self.strings["collecting_versions"])
+        current = await self._get_version("cloudflared") if self._cloudflared_installed() else ""
+        current_tag = self._cloudflared_tag(current)
+        releases = await self._cloudflared_releases()
+        tags = [release["tag_name"] for release in releases]
+        if CLOUDFLARED_VERSION not in tags:
+            tags.append(CLOUDFLARED_VERSION)
+        text = self.strings["cf_install_menu"].format(
+            current=_escape(current or self.strings["not_installed"]),
+            min=CLOUDFLARED_MIN_TAG,
+        )
+        if not releases:
+            text += "\n" + self.strings["cf_no_releases"].format(version=CLOUDFLARED_VERSION)
+        markup = []
+        for tag in tags:
+            label = tag
+            if tag == current_tag:
+                label += self.strings["cf_installed_mark"]
+            markup.append([{
+                "text": label,
+                "callback": self._cb_cloudflared_version,
+                "args": (tag,),
+                "style": "primary",
+            }])
+        markup.append([{
+            "text": self.strings["btn_back"],
+            "callback": self._cb_setup_menu,
+            "style": "primary",
+        }])
+        await call.edit(text, reply_markup=markup)
+
+    async def _cb_cloudflared_version(self, call: InlineCall, tag: str):
+        await call.edit(self.strings["cf_installing"].format(version=_escape(tag)), reply_markup=[])
+        ok, result = await self._install_cloudflared(tag)
         if ok:
-            text = "<b>Cloudflared Installed</b>\n<blockquote>{}</blockquote>".format(_escape(result))
+            text = self.strings["cf_installed"].format(version=_escape(result))
         else:
             text = self.strings["setup_fail"].format(error=_escape(result[:200]))
         await call.edit(
@@ -4275,9 +4249,9 @@ class XRay(loader.Module):
 
     async def _cb_xray_install_menu(self, call: InlineCall):
         await call.edit(self.strings["collecting_versions"])
-        
+
         current_version = await self._get_version("xray")
-        
+
         text = self.strings["xray_install_menu"].format(current=current_version)
         if _core_too_old(current_version):
             text += "\n" + self.strings["core_old_warn"].format(
@@ -4285,11 +4259,11 @@ class XRay(loader.Module):
                 min=XRAY_MIN_TAG,
                 advisory=XRAY_MIN_ADVISORY,
             )
-        
+
         releases = await self._gh_get_releases()
-        
+
         markup = []
-        
+
         hidden = 0
         for release in releases:
             tag = release.get("tag_name", "")
@@ -4298,14 +4272,14 @@ class XRay(loader.Module):
             if _core_too_old(tag):
                 hidden += 1
                 continue
-            
+
             markup.append([{
                 "text": f"{tag}",
                 "callback": self._cb_install_xray_version,
                 "args": (tag,),
                 "style": "primary",
             }])
-        
+
         if not markup:
             markup.append([{
                 "text": XRAY_CORE_VERSION,
@@ -4313,16 +4287,18 @@ class XRay(loader.Module):
                 "args": (XRAY_CORE_VERSION,),
                 "style": "primary",
             }])
-        
+
         if hidden:
-            text += "\n" + self.strings["core_old_hidden"].format(count=hidden, min=XRAY_MIN_TAG)
+            text += "\n" + self.strings["core_old_hidden"].format(
+                count=hidden, min=XRAY_MIN_TAG, advisory=XRAY_MIN_ADVISORY
+            )
 
         markup.append([{
             "text": self.strings["btn_back"],
             "callback": self._cb_setup_menu,
             "style": "primary",
         }])
-        
+
         await call.edit(text, reply_markup=markup)
 
     async def _cb_install_xray_version(self, call: InlineCall, tag: str):
@@ -4330,14 +4306,14 @@ class XRay(loader.Module):
             self.strings["xray_installing"].format(version=tag),
             reply_markup=[]
         )
-        
+
         ok, result = await self._install_xray(tag)
-        
+
         if ok:
             text = self.strings["setup_done"].format(version=result)
         else:
             text = self.strings["setup_fail"].format(error=_escape(result[:200]))
-        
+
         await call.edit(
             text,
             reply_markup=[[{
@@ -4351,14 +4327,14 @@ class XRay(loader.Module):
         await self._reattach_processes()
         total = len(self._users)
         active = await self._get_active_count()
-        
+
         text = self.strings["users_menu"].format(
             total=total,
             active=active,
         )
-        
+
         markup = []
-        
+
         for name, user in self._users.items():
             is_run = await self._is_user_running(name)
             status = self.strings["status_online"] if is_run else self.strings["status_offline"]
@@ -4372,19 +4348,19 @@ class XRay(loader.Module):
                 "args": (name,),
                 "style": "primary",
             }])
-        
+
         markup.append([{
             "text": self.strings["btn_add_user"],
             "callback": self._cb_add_user_name,
             "style": "primary",
         }])
-        
+
         markup.append([{
             "text": self.strings["btn_back"],
             "callback": self._cb_main_menu,
             "style": "primary",
         }])
-        
+
         await call.edit(text, reply_markup=markup)
 
     async def _cb_main_menu(self, call: InlineCall):
@@ -4393,14 +4369,14 @@ class XRay(loader.Module):
         active = await self._get_active_count()
         version = await self._get_version("xray")
         cf_version = await self._get_version("cloudflared")
-        
+
         text = self.strings["main_menu"].format(
             total=total,
             active=active,
             version=version,
             cloudflared_version=cf_version,
         )
-        
+
         markup = [
             [{
                 "text": self.strings["btn_users"],
@@ -4423,7 +4399,7 @@ class XRay(loader.Module):
                 "style": "danger",
             }],
         ]
-        
+
         await call.edit(text, reply_markup=markup)
 
     async def _refresh_traffic_now(self) -> None:
@@ -4437,30 +4413,30 @@ class XRay(loader.Module):
     async def _cb_user_menu(self, call: InlineCall, name: str):
         await call.edit(self.strings["loading"])
         await self._refresh_traffic_now()
-        
+
         user = self._users.get(name)
         if not user:
             await call.answer("User not found", show_alert=True)
             return
-        
+
         await self._reattach_processes()
         is_running = await self._is_user_running(name)
         status = "STOPPED AND WAITING FOR RESTART" if user.get("restart_required") else (self.strings["status_online"] if is_running else self.strings["status_offline"])
         transport = user["transport"].upper()
         limit = user.get("device_limit", 0)
         limit_text = "Unlimited" if limit == 0 else str(limit)
-        
+
         active = 0
         if is_running:
             active = self._get_active_connections(
                 user["port"], user.get("transport", ""), user.get("site_port")
             )
         tls_host = user.get("tunnel_host", "n/a") if user.get("transport") == "websocket" else "n/a"
-        
+
         uptime = await self._get_user_uptime_async(name)
         autostart = user.get("autostart", False)
         autostart_text = self.strings["btn_autostart_on"].split(":")[1].strip() if autostart else self.strings["btn_autostart_off"].split(":")[1].strip()
-        
+
         text = self.strings["user_menu"].format(
             name=_escape(name),
             status=status,
@@ -4472,7 +4448,7 @@ class XRay(loader.Module):
             active=active if is_running else "n/a",
             uptime=uptime,
         )
-        
+
         if user.get("transport") == "websocket" and user.get("websocket_mode") == "tls-fallback":
             site_ok = await self._unit_active(self._unit_name(name, "site"))
             tunnel_ok = await self._unit_active(self._unit_name(name, "cf"))
@@ -4484,7 +4460,7 @@ class XRay(loader.Module):
             )
 
         markup = []
-        
+
         if is_running:
             markup.append([
                 {"text": self.strings["btn_stop"], "callback": self._cb_stop_user, "args": (name,), "style": "danger"},
@@ -4494,7 +4470,7 @@ class XRay(loader.Module):
             markup.append([
                 {"text": self.strings["btn_start"], "callback": self._cb_start_user, "args": (name,), "style": "primary"},
             ])
-        
+
         markup.append([
             {
                 "text": self.strings["btn_autostart_on"] if autostart else self.strings["btn_autostart_off"],
@@ -4503,7 +4479,7 @@ class XRay(loader.Module):
                 "style": "success" if autostart else "danger",
             },
         ])
-        
+
         markup.append([
             {"text": self.strings["btn_get_link"], "callback": self._cb_get_user_link, "args": (name,), "style": "primary"},
         ])
@@ -4512,16 +4488,16 @@ class XRay(loader.Module):
             markup.append([
                 {"text": self.strings["btn_sub"], "callback": self._cb_sub_user_link, "args": (name,), "style": "primary"},
             ])
-        
+
         markup.append([
             {"text": "Xray-core logs", "callback": self._cb_logs_menu, "args": (name, "xray"), "style": "primary"},
             {"text": "Daemon logs", "callback": self._cb_logs_menu, "args": (name, "daemon"), "style": "primary"},
         ])
-        
+
         markup.append([
             {"text": self.strings["btn_settings"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"},
         ])
-        
+
         if user.get("transport") == "websocket" and user.get("websocket_mode") == "tls-fallback":
             markup.append([
                 {"text": self.strings["btn_ws_refresh"], "callback": self._cb_refresh_link, "args": (name,), "style": "success"},
@@ -4534,11 +4510,11 @@ class XRay(loader.Module):
         markup.append([
             {"text": self.strings["btn_delete"], "callback": self._cb_delete_user, "args": (name,), "style": "danger"},
         ])
-        
+
         markup.append([
             {"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"},
         ])
-        
+
         await call.edit(text, reply_markup=markup)
 
     async def _cb_toggle_autostart(self, call: InlineCall, name: str):
@@ -4546,17 +4522,17 @@ class XRay(loader.Module):
         if not user:
             await call.answer("User not found", show_alert=True)
             return
-        
+
         user["autostart"] = not user.get("autostart", False)
         self._save_users()
-        
+
         await self._cb_user_menu(call, name)
 
     async def _cb_start_user(self, call: InlineCall, name: str):
         await call.edit(self.strings["loading"])
-        
+
         ok, err = await self._start_user(name)
-        
+
         if ok:
             text = self.strings["user_started"].format(name=_escape(name))
         elif "already_running" in err:
@@ -4566,7 +4542,7 @@ class XRay(loader.Module):
             text = self.strings["err_port_busy"].format(port=port)
         else:
             text = self.strings["setup_fail"].format(error=_escape(err[:200]))
-        
+
         await call.edit(
             text,
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
@@ -4574,14 +4550,14 @@ class XRay(loader.Module):
 
     async def _cb_stop_user(self, call: InlineCall, name: str):
         await call.edit(self.strings["loading"])
-        
+
         ok = await self._stop_user(name)
-        
+
         if ok:
             text = self.strings["user_stopped"].format(name=_escape(name))
         else:
             text = self.strings["err_not_running"]
-        
+
         await call.edit(
             text,
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
@@ -4589,16 +4565,16 @@ class XRay(loader.Module):
 
     async def _cb_restart_user(self, call: InlineCall, name: str):
         await call.edit(self.strings["loading"])
-        
+
         await self._stop_user(name, self.strings["log_reason_restart"])
         await asyncio.sleep(1)
         ok, err = await self._start_user(name)
-        
+
         if ok:
             text = self.strings["user_started"].format(name=_escape(name))
         else:
             text = self.strings["setup_fail"].format(error=_escape(err[:200]))
-        
+
         await call.edit(
             text,
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
@@ -4606,7 +4582,7 @@ class XRay(loader.Module):
 
     async def _cb_delete_user(self, call: InlineCall, name: str):
         await call.edit(self.strings["loading"])
-        
+
         user = self._users.get(name)
         if not user:
             await call.answer("User not found", show_alert=True)
@@ -4625,15 +4601,15 @@ class XRay(loader.Module):
             self.strings["log_user_deleted"].format(**self._log_user_data(user)),
             name=name
         )
-        
+
         user_dir = os.path.join(self._root, "users", name)
         if os.path.exists(user_dir):
             shutil.rmtree(user_dir, ignore_errors=True)
-        
+
         del self._users[name]
         self._save_users()
         self._sub_forget_user(name)
-        
+
         await call.edit(
             self.strings["user_deleted"].format(name=_escape(name)),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
@@ -4896,7 +4872,7 @@ class XRay(loader.Module):
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                 for fpath, label in chosen:
                     zf.write(fpath, arcname=label)
-            
+
             shared_label = "xray_logs.zip"
             state[shared_label] = (0, 0)
             header = f"Uploading Xray-core logs for {_escape(name)}"
@@ -4988,7 +4964,7 @@ class XRay(loader.Module):
         if not user:
             await call.answer("User not found", show_alert=True)
             return
-        
+
         is_socks5 = user["transport"] == "socks5"
         is_websocket = user["transport"] == "websocket"
         transport = self._transport_label(user["transport"])
@@ -5001,7 +4977,7 @@ class XRay(loader.Module):
         restart = "Need restart for updating changes" if user.get("restart_required") else "Not required"
         limit = user.get("device_limit", 0)
         limit_text = "Unlimited" if limit == 0 else str(limit)
-        
+
         text = self.strings["user_settings"].format(
             name=_escape(name),
             transport=transport,
@@ -5014,25 +4990,25 @@ class XRay(loader.Module):
             restart=restart,
             limit=limit_text,
         )
-        
+
         markup = [
             [{"text": self.strings["btn_transport"], "callback": self._cb_transport_menu, "args": (name,), "style": "primary"}],
         ]
-        
+
         if not is_socks5:
             markup.append([{"text": self.strings["btn_encryption"], "callback": self._cb_encryption_menu, "args": (name,), "style": "primary"}])
             markup.append([{"text": self.strings["btn_set_sni"], "input": self.strings["input_sni"], "handler": self._cb_set_sni, "args": (name,), "style": "primary"}])
             markup.append([{"text": self.strings["btn_set_dest"], "input": self.strings["input_dest"], "handler": self._cb_set_dest, "args": (name,), "style": "primary"}])
-            
+
             if user["transport"] == "xhttp":
                 markup.append([{"text": self.strings["btn_set_path"], "input": self.strings["input_path"], "handler": self._cb_set_path, "args": (name,), "style": "primary"}])
                 markup.append([{"text": self.strings["btn_set_padding"], "callback": self._cb_padding_menu, "args": (name,), "style": "primary"}])
-            
+
             markup.append([{"text": self.strings["btn_set_fp"], "callback": self._cb_fp_menu, "args": (name,), "style": "primary"}])
-        
+
         markup.append([{"text": self.strings["btn_set_limit"], "input": self.strings["input_limit"], "handler": self._cb_set_limit, "args": (name,), "style": "primary"}])
         markup.append([{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}])
-        
+
         await call.edit(text, reply_markup=markup)
 
     async def _cb_encryption_menu(self, call: InlineCall, name: str):
@@ -5073,7 +5049,7 @@ class XRay(loader.Module):
         if not user:
             await call.answer("User not found", show_alert=True)
             return
-        
+
         markup = [
             [{"text": self.strings["btn_raw"], "callback": self._cb_set_transport, "args": (name, "tcp"), "style": "primary"}],
             [{"text": self.strings["btn_xhttp"], "callback": self._cb_set_transport, "args": (name, "xhttp"), "style": "primary"}],
@@ -5081,7 +5057,7 @@ class XRay(loader.Module):
             [{"text": self.strings["btn_socks5"], "callback": self._cb_set_transport, "args": (name, "socks5"), "style": "primary"}],
             [{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}],
         ]
-        
+
         await call.edit(
             self.strings["transport_menu"].format(name=_escape(name), current=user["transport"].upper()),
             reply_markup=markup,
@@ -5092,20 +5068,20 @@ class XRay(loader.Module):
         if not user:
             await call.answer("User not found", show_alert=True)
             return
-        
+
         if user["transport"] == transport:
             await self._cb_user_settings(call, name)
             return
-        
+
         await call.edit(self.strings["loading"])
         if name in self._processes:
             await self._stop_user(name, reason="configuration changed")
         user["transport"] = transport
-        
+
         if transport == "socks5" and not user.get("socks_user"):
             user["socks_user"] = _gen_secret(8)
             user["socks_pass"] = _gen_secret(14)
-        
+
         if transport == "websocket":
             user.pop("tunnel_host", None)
             user.pop("site_port", None)
@@ -5114,7 +5090,7 @@ class XRay(loader.Module):
 
         user["restart_required"] = True
         self._save_users()
-        
+
         await call.edit(
             self.strings["transport_set"].format(transport=transport.upper()),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
@@ -5124,10 +5100,10 @@ class XRay(loader.Module):
         user = self._users.get(name)
         if not user:
             return
-        
+
         user["sni"] = _strip_md(sni).strip().lower()
         await self._mark_restart_required(name)
-        
+
         await call.edit(
             self.strings["sni_set"].format(sni=_escape(sni)),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
@@ -5137,14 +5113,14 @@ class XRay(loader.Module):
         user = self._users.get(name)
         if not user:
             return
-        
+
         dest = _strip_md(dest).strip()
         if ":" not in dest:
             dest += ":443"
-        
+
         user["dest"] = dest
         await self._mark_restart_required(name)
-        
+
         await call.edit(
             self.strings["dest_set"].format(dest=_escape(dest)),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
@@ -5154,14 +5130,14 @@ class XRay(loader.Module):
         user = self._users.get(name)
         if not user:
             return
-        
+
         path = path.strip()
         if not path.startswith("/"):
             path = "/" + path
-        
+
         user["path"] = path
         await self._mark_restart_required(name)
-        
+
         await call.edit(
             self.strings["path_set"].format(path=_escape(path)),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
@@ -5171,70 +5147,70 @@ class XRay(loader.Module):
         user = self._users.get(name)
         if not user:
             return
-        
+
         padding = user.get("padding", "100-1000")
         min_p, max_p = padding.split("-")
-        
+
         text = self.strings["padding_menu"].format(
             name=_escape(name),
             min=min_p,
             max=max_p,
         )
-        
+
         markup = [
             [{"text": self.strings["input_padding_min"], "input": self.strings["input_padding_min"], "handler": self._cb_set_padding_min, "args": (name,), "style": "primary"}],
             [{"text": self.strings["input_padding_max"], "input": self.strings["input_padding_max"], "handler": self._cb_set_padding_max, "args": (name,), "style": "primary"}],
             [{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}],
         ]
-        
+
         await call.edit(text, reply_markup=markup)
 
     async def _cb_set_padding_min(self, call: InlineCall, min_str: str, name: str):
         user = self._users.get(name)
         if not user:
             return
-        
+
         try:
             min_val = int(min_str.strip())
         except:
             await call.answer(self.strings["err_invalid_limit"], show_alert=True)
             return
-        
+
         padding = user.get("padding", "100-1000")
         _, max_val = padding.split("-")
         max_val = int(max_val)
-        
+
         if min_val >= max_val:
             await call.answer(self.strings["err_invalid_padding"], show_alert=True)
             return
-        
+
         user["padding"] = f"{min_val}-{max_val}"
         self._save_users()
-        
+
         await self._cb_padding_menu(call, name)
 
     async def _cb_set_padding_max(self, call: InlineCall, max_str: str, name: str):
         user = self._users.get(name)
         if not user:
             return
-        
+
         try:
             max_val = int(max_str.strip())
         except:
             await call.answer(self.strings["err_invalid_limit"], show_alert=True)
             return
-        
+
         padding = user.get("padding", "100-1000")
         min_val, _ = padding.split("-")
         min_val = int(min_val)
-        
+
         if max_val <= min_val:
             await call.answer(self.strings["err_invalid_padding"], show_alert=True)
             return
-        
+
         user["padding"] = f"{min_val}-{max_val}"
         self._save_users()
-        
+
         await self._cb_padding_menu(call, name)
 
     async def _cb_fp_menu(self, call: InlineCall, name: str):
@@ -5244,7 +5220,7 @@ class XRay(loader.Module):
             [{"text": self.strings["btn_safari"], "callback": self._cb_set_fp, "args": (name, "safari"), "style": "primary"}],
             [{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}],
         ]
-        
+
         await call.edit(
             f"<b>Select Fingerprint</b>\n<blockquote>Current: {self._users[name].get('fingerprint', 'firefox')}</blockquote>",
             reply_markup=markup
@@ -5254,10 +5230,10 @@ class XRay(loader.Module):
         user = self._users.get(name)
         if not user:
             return
-        
+
         user["fingerprint"] = fp
         await self._mark_restart_required(name)
-        
+
         await call.edit(
             self.strings["fp_set"].format(fp=fp),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
@@ -5267,7 +5243,7 @@ class XRay(loader.Module):
         user = self._users.get(name)
         if not user:
             return
-        
+
         try:
             limit = int(limit_str.strip())
             if limit < 0:
@@ -5275,12 +5251,12 @@ class XRay(loader.Module):
         except:
             await call.answer(self.strings["err_invalid_limit"], show_alert=True)
             return
-        
+
         user["device_limit"] = limit
         self._save_users()
-        
+
         limit_text = "Unlimited" if limit == 0 else str(limit)
-        
+
         await call.edit(
             self.strings["limit_set"].format(limit=limit_text),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
@@ -5323,18 +5299,18 @@ class XRay(loader.Module):
 
     async def _cb_add_user_transport_choice(self, call: InlineCall, name: str):
         name = name.strip()
-        
+
         if not re.match(r"^[a-zA-Z0-9_-]+$", name):
             await call.answer(self.strings["err_invalid_name"], show_alert=True)
             return
-        
+
         if name in self._users:
             await call.answer(self.strings["err_name_exists"], show_alert=True)
             return
         await self._cleanup_stale_units(name)
-        
+
         text = self.strings["add_user_transport"].format(name=_escape(name))
-        
+
         markup = [
             [{"text": self.strings["btn_xhttp"], "callback": self._cb_add_user_limit_input, "args": (name, "xhttp"), "style": "primary"}],
             [{"text": self.strings["btn_raw"], "callback": self._cb_add_user_limit_input, "args": (name, "tcp"), "style": "primary"}],
@@ -5342,12 +5318,12 @@ class XRay(loader.Module):
             [{"text": self.strings["btn_socks5"], "callback": self._cb_add_user_limit_input, "args": (name, "socks5"), "style": "primary"}],
             [{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}],
         ]
-        
+
         await call.edit(text, reply_markup=markup)
 
     async def _cb_add_user_limit_input(self, call: InlineCall, name: str, transport: str):
         text = self.strings["add_user_limit"].format(name=_escape(name))
-        
+
         await call.edit(
             text,
             reply_markup=[[
@@ -5389,16 +5365,16 @@ class XRay(loader.Module):
         except:
             await call.answer(self.strings["err_invalid_limit"], show_alert=True)
             return
-        
+
         await call.edit(self.strings["loading"])
-        
+
         if not self._xray_installed():
             await call.edit(
                 self.strings["setup_fail"].format(error="XRay not installed. Use Setup menu to install."),
                 reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
             )
             return
-        
+
         private_key, public_key = "", ""
         vless_decryption, vless_encryption = "none", "none"
         if transport != "socks5":
@@ -5417,9 +5393,9 @@ class XRay(loader.Module):
                     reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
                 )
                 return
-        
+
         port = await self._get_next_port()
-        
+
         if transport == "tcp":
             default_sni = "www.cloudflare.com"
             default_dest = "www.cloudflare.com:443"
@@ -5457,12 +5433,12 @@ class XRay(loader.Module):
                 "cf_tunnel": self._unit_name(name, "cf"),
             },
         }
-        
+
         self._users[name] = user
         self._save_users()
-        
+
         limit_text = "Unlimited" if limit == 0 else str(limit)
-        
+
         await call.edit(
             self.strings["user_created"].format(
                 name=_escape(name),
