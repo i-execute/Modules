@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 # meta developer: Execute_forge.t.me
 
 import asyncio
@@ -52,6 +52,25 @@ def _parse_target(raw):
     if USERNAME_RE.match(value):
         return value
     return None
+
+
+def _dump_entity(entity, limit=2500):
+    builder = getattr(entity, "stringify", None)
+    text = ""
+    if callable(builder):
+        try:
+            text = builder() or ""
+        except Exception:
+            text = ""
+    if not text:
+        text = str(entity) or ""
+    if "object at 0x" in text:
+        fields = []
+        for attr in ("id", "username", "first_name", "last_name", "bot", "verified", "scam", "fake"):
+            if hasattr(entity, attr):
+                fields.append(f"\t{attr}={getattr(entity, attr)!r},")
+        text = "User(\n" + "\n".join(fields) + "\n)"
+    return text if len(text) <= limit else text[:limit] + "\n..."
 
 
 def _webhook_status(app_id):
@@ -255,7 +274,7 @@ class ServerlessChecker(loader.Module):
                     verdict=self._verdict_text(verdict),
                     status=code,
                     kind=extra,
-                    entity=self.strings["entity"].format(dump=_escape(repr(entity))),
+                    entity=self.strings["entity"].format(dump=_escape(_dump_entity(entity))),
                 )
             lines.append(
                 self.strings["result_line"].format(
