@@ -95,9 +95,27 @@ def _helpers(*names: str) -> dict[str, object]:
 
 def _class(**extra: object) -> dict[str, object]:
     namespace = _base_namespace()
-    namespace.update(_constants("XRAY_CORE_VERSION", "XRAY_CORE_SHA256", "CLOUDFLARED_VERSION", "CLOUDFLARED_SHA256"))
-    for name in ("_release_allowed", "_sha256_file", "_curl_header_config", "_drop_curl_config", "_write_private"):
-        namespace[name] = _helpers(name)[name]
+    namespace.update(
+        _constants(
+            "XRAY_CORE_VERSION",
+            "XRAY_CORE_SHA256",
+            "XRAY_MIN_VERSION",
+            "XRAY_MIN_TAG",
+            "XRAY_MIN_ADVISORY",
+            "CLOUDFLARED_VERSION",
+            "CLOUDFLARED_SHA256",
+        )
+    )
+    helpers = (
+        "_version_tuple",
+        "_core_too_old",
+        "_release_allowed",
+        "_sha256_file",
+        "_curl_header_config",
+        "_drop_curl_config",
+        "_write_private",
+    )
+    exec("\n\n".join(_sources({name: name for name in helpers})), namespace)
     namespace["_guard_reason"] = lambda: ""
     namespace.update(extra)
     return namespace
@@ -113,6 +131,11 @@ def _bind(namespace: dict[str, object], name: str, **attributes: object) -> obje
 
 class Stub:
     pass
+
+
+def _version_numbers(tag: str) -> tuple:
+    numbers = re.findall(r"[0-9]+", tag)
+    return tuple(int(number) for number in numbers[:3])
 
 
 def test_the_module_keeps_no_root_systemd_branch() -> None:
@@ -247,8 +270,20 @@ def test_the_download_is_hashed_before_it_is_used(tmp_path) -> None:
 
 
 def test_the_engine_pins_are_complete() -> None:
-    pins = _constants("XRAY_CORE_VERSION", "XRAY_CORE_SHA256", "CLOUDFLARED_VERSION", "CLOUDFLARED_SHA256")
-    assert pins["XRAY_CORE_VERSION"] == "v26.10.21"
+    pins = _constants(
+        "XRAY_CORE_VERSION",
+        "XRAY_CORE_SHA256",
+        "XRAY_MIN_VERSION",
+        "XRAY_MIN_TAG",
+        "XRAY_MIN_ADVISORY",
+        "CLOUDFLARED_VERSION",
+        "CLOUDFLARED_SHA256",
+    )
+    assert pins["XRAY_CORE_VERSION"] == "v26.10.31"
+    assert pins["XRAY_MIN_VERSION"] == (26, 10, 31)
+    assert pins["XRAY_MIN_TAG"] == "v26.10.31"
+    assert pins["XRAY_MIN_ADVISORY"] == "CVE-2026-98432"
+    assert pins["XRAY_MIN_VERSION"] <= _version_numbers(pins["XRAY_CORE_VERSION"])
     assert pins["CLOUDFLARED_VERSION"] == "2026.10.5"
     core = pins["XRAY_CORE_SHA256"]
     assert isinstance(core, dict) and {"64", "arm64-v8a"} <= set(core)
@@ -270,7 +305,11 @@ def test_only_the_pinned_core_tag_may_be_installed() -> None:
     owner._install_xray = namespace["_install_xray"].__get__(owner, Stub)
     ok, reason = asyncio.run(owner._install_xray("v1.0.0"))
     assert ok is False
-    assert "v26.10.21" in reason
+    assert "v26.10.31" in reason
+    assert "CVE-2026-98432" in reason
+    ok, reason = asyncio.run(owner._install_xray("v26.10.29"))
+    assert ok is False
+    assert "below v26.10.31" in reason
     body = _source("_install_xray")
     assert body.index("XRAY_CORE_VERSION") < body.index("for name in list(self._processes.keys())")
 
@@ -427,3 +466,25 @@ def test_the_exiftool_download_is_limited_to_known_hosts() -> None:
 def test_the_module_compiles() -> None:
     for name in DAEMON_MODULES:
         compile((ROOT / name).read_text(encoding="utf-8"), name, "exec")
+
+def test_the_mptcp_floor_rejects_the_withdrawn_releases() -> None:
+    namespace = _class()
+    too_old = namespace["_core_too_old"]
+    assert too_old("v26.10.29") is True
+    assert too_old("v26.10.21") is True
+    assert too_old("v26.7.11") is True
+    assert too_old("v26.10.31") is False
+    assert too_old("v26.11.02") is False
+    assert too_old("Xray 26.10.21 (Xray, Penetrates Everything.)") is True
+    assert too_old("not installed") is False
+    assert too_old("v26.9") is True
+
+
+def test_the_install_menu_hides_the_vulnerable_releases() -> None:
+    body = _source("_cb_xray_install_menu")
+    assert "_core_too_old(tag)" in body
+    assert "core_old_hidden" in body
+    assert "_core_too_old(current_version)" in body
+    setup = _source("_cb_setup_menu")
+    assert "_core_too_old(xray_status)" in setup
+    assert "core_old_warn" in setup

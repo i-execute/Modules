@@ -317,7 +317,7 @@ def test_the_websocket_link_carries_the_cdn_friendly_parameters():
     assert query["path"] == ["/xhttps"]
     assert query["host"] == ["retailers-customize-thehun-reading.trycloudflare.com"]
     assert query["sni"] == ["retailers-customize-thehun-reading.trycloudflare.com"]
-    assert query["alpn"] == ["http/1.1"]
+    assert "alpn" not in query
     assert query["encryption"] == ["none"]
     assert link.endswith("#testwshole")
 
@@ -342,3 +342,45 @@ def test_the_subscription_menu_offers_the_https_tunnel():
 
     handler = _grab("_cb_sub_tls")["_cb_sub_tls"]
     assert "_sub_tunnel_start" in handler
+
+def test_the_link_file_is_rebuilt_for_every_retry():
+    body = _grab("_send_ws_link_to_log_topic")["_send_ws_link_to_log_topic"]
+    assert "payload = " in body
+    assert "def link_file()" in body
+    assert "link_file()" in body
+    assert body.count("io.BytesIO(payload)") == 1
+
+
+def test_the_websocket_inbound_stays_on_loopback():
+    body = _grab("_build_config")["_build_config"]
+    ws_branch = body.split("if transport == \"websocket\":", 1)[1].split("elif transport", 1)[0]
+    assert '"listen"] = "127.0.0.1"' in ws_branch
+    assert "fallbacks" not in ws_branch
+
+
+def test_the_traffic_poll_is_quick_and_runs_on_demand():
+    source = _grab("_sub_collect_traffic", "_sub_traffic_loop", "_refresh_traffic_now", "_cb_user_menu", "_cb_sub_menu")
+    assert "SUB_POLL_INTERVAL = 10" in SOURCE
+    assert "_unit_active" in source["_sub_collect_traffic"]
+    assert "_sub_collect_traffic" in source["_refresh_traffic_now"]
+    assert "_refresh_traffic_now" in source["_cb_user_menu"]
+    assert "_refresh_traffic_now" in source["_cb_sub_menu"]
+
+
+def test_the_ws_probe_reports_a_failure_instead_of_raising():
+    owner = _Owner()
+    namespace = _compile("_ws_probe")
+    _bind(owner, namespace, "_ws_probe")
+    ok, detail = asyncio.run(owner._ws_probe("127.0.0.1", 1, "/xhttps", tls=False, timeout=2.0))
+    assert ok is False
+    assert isinstance(detail, str) and detail
+
+
+def test_the_ws_check_button_is_wired():
+    body = _grab("_cb_user_menu")["_cb_user_menu"]
+    assert "btn_ws_check" in body
+    assert "_cb_ws_check" in body
+    handler = _grab("_cb_ws_check", "_diagnose_websocket")
+    assert "_diagnose_websocket" in handler["_cb_ws_check"]
+    assert '"_unit_active"' in handler["_diagnose_websocket"] or "_unit_active" in handler["_diagnose_websocket"]
+    assert "_ws_probe" in handler["_diagnose_websocket"]

@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (5, 2, 0)
+__version__ = (5, 3, 0)
 # meta developer: Execute_forge.t.me 
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
@@ -14,6 +14,7 @@ import io
 import logging
 import signal
 import socket
+import ssl
 import threading
 import time
 import platform
@@ -166,7 +167,7 @@ TUNNEL_PROBE_INTERVAL = 120.0
 TUNNEL_PROBE_RETRY = 10.0
 TUNNEL_PROBE_FAILS = 2
 UNLOAD_WAIT = 5.0
-SUB_POLL_INTERVAL = 30
+SUB_POLL_INTERVAL = 10
 SUB_TOKEN_LEN = 43
 SUB_RATE_LIMIT = 10
 SUB_RATE_WINDOW = 60.0
@@ -179,11 +180,14 @@ SUB_SOCKET_TIMEOUT = 10.0
 SUB_BUCKET_LIMIT = 4096
 GUARD_ROOT = "root"
 GUARD_DOCKER = "docker"
-XRAY_CORE_VERSION = "v26.10.21"
+XRAY_CORE_VERSION = "v26.10.31"
 XRAY_CORE_SHA256 = {
-    "64": "0eec3ed4163c273d8c8bf821f7d219e257921cf584aa3fb970715e458e631978",
-    "arm64-v8a": "d1304946c486d98e6b886e9b931eaaaebb23835b30e217638037b7f2721d4e9c",
+    "64": "e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214",
+    "arm64-v8a": "1811c8f1da0c3b6dc707ebaf1c8390e987ba39859a8f0a7aadd8526157f2ec8d",
 }
+XRAY_MIN_VERSION = (26, 10, 31)
+XRAY_MIN_TAG = "v26.10.31"
+XRAY_MIN_ADVISORY = "CVE-2026-98432"
 CLOUDFLARED_VERSION = "2026.10.5"
 CLOUDFLARED_SHA256 = {
     "cloudflared-linux-amd64": "e1bc0cf084fd9e590554fe769a86b1db46701c3f847a43d902f7b974a4e16298",
@@ -357,6 +361,26 @@ def _guard_reason() -> str:
     if _in_docker():
         return GUARD_DOCKER
     return ""
+
+
+def _version_tuple(text) -> tuple:
+    for token in re.split(r"[^0-9A-Za-z.]+", str(text or "")):
+        parts = token.lstrip("vV").split(".")
+        if len(parts) < 2 or not parts[0].isdigit():
+            continue
+        try:
+            numbers = [int(part) for part in parts[:3]]
+        except ValueError:
+            continue
+        return tuple(numbers + [0] * (3 - len(numbers)))
+    return ()
+
+
+def _core_too_old(tag) -> bool:
+    version = _version_tuple(tag)
+    if not version:
+        return False
+    return version < XRAY_MIN_VERSION
 
 
 def _release_allowed(url: str) -> bool:
@@ -659,11 +683,26 @@ class XRay(loader.Module):
             "<blockquote>User: {name}\nNew link host: <code>{host}</code>\nThe old link stops working, take the fresh one.</blockquote>"
         ),
         "btn_ws_refresh": "Refresh link",
+        "btn_ws_check": "Check WS",
+        "ws_check_title": "<b>WebSocket check</b>\n",
+        "diag_site": "<blockquote><b>Mask site</b> | {state}</blockquote>",
+        "diag_tunnel": "<blockquote><b>Cloudflare tunnel</b> | {state}</blockquote>",
+        "diag_ws_local": "<blockquote><b>WS to the core on loopback</b> | {state}\n<code>{detail}</code></blockquote>",
+        "diag_ws_edge": "<blockquote><b>WS through Cloudflare</b> | {state}\n<code>{detail}</code></blockquote>",
+        "diag_http": "<blockquote><b>Mask page through Cloudflare</b> | {state}</blockquote>",
+        "diag_ws_ok": "<blockquote><b>The tunnel carries WebSocket</b>, the link should connect. If the client still fails, the profile in the client is stale or the client blocks the domain.</blockquote>",
+        "diag_ws_bad": "<blockquote><b>WebSocket does not pass</b>. Press refresh the link: the tunnel is rebuilt and the fresh host is sent to the log topic.</blockquote>",
         "sub_tls_on": "<blockquote><b>Transport</b> | <b>https</b> through <code>{host}</code>\nClients accept the link without complaints</blockquote>",
         "sub_tls_off": "<blockquote><b>Transport</b> | <b>http</b> on <code>{host}</code>\nMany clients refuse plain http, press the https button</blockquote>",
         "btn_sub_tls": "https tunnel",
         "sub_tls_done": "<blockquote><b>The subscription tunnel is up</b>\n<code>{url}</code></blockquote>",
         "sub_tls_fail": "<blockquote><b>The tunnel did not start</b>\n<code>{error}</code>\nThe plain http link keeps working</blockquote>",
+        "core_old_warn": (
+            "<blockquote><b>Vulnerable core</b> | <code>{version}</code>\n"
+            "Anything below <b>{min}</b> keeps MPTCP listeners open and gives a remote root "
+            "through {advisory}, press install to move to the pinned release</blockquote>"
+        ),
+        "core_old_hidden": "<blockquote>{count} releases below <b>{min}</b> are hidden, they are vulnerable to {advisory}</blockquote>",
         "btn_autostart_on": "Autostart: On",
         "btn_autostart_off": "Autostart: Off",
         "btn_chrome": "Chrome",
@@ -1344,11 +1383,26 @@ class XRay(loader.Module):
             "<blockquote>Юзер: {name}\nНовый хост: <code>{host}</code>\nСтарая ссылка больше не работает, возьмите новую.</blockquote>"
         ),
         "btn_ws_refresh": "Обновить ссылку",
+        "btn_ws_check": "Проверить WS",
+        "ws_check_title": "<b>Проверка WebSocket</b>\n",
+        "diag_site": "<blockquote><b>Сайт-маска</b> | {state}</blockquote>",
+        "diag_tunnel": "<blockquote><b>Туннель Cloudflare</b> | {state}</blockquote>",
+        "diag_ws_local": "<blockquote><b>WS до ядра на loopback</b> | {state}\n<code>{detail}</code></blockquote>",
+        "diag_ws_edge": "<blockquote><b>WS через Cloudflare</b> | {state}\n<code>{detail}</code></blockquote>",
+        "diag_http": "<blockquote><b>Страница маски через Cloudflare</b> | {state}</blockquote>",
+        "diag_ws_ok": "<blockquote><b>Туннель проносит WebSocket</b>, ссылка должна подключаться. Если клиент всё равно не может, профиль в клиенте устарел или клиент блокирует домен.</blockquote>",
+        "diag_ws_bad": "<blockquote><b>WebSocket не проходит</b>. Нажмите обновить ссылку: туннель пересоберётся, свежий хост уйдёт в лог-топик.</blockquote>",
         "sub_tls_on": "<blockquote><b>Транспорт</b> | <b>https</b> через <code>{host}</code>\nКлиенты принимают ссылку без ругани</blockquote>",
         "sub_tls_off": "<blockquote><b>Транспорт</b> | <b>http</b> на <code>{host}</code>\nМногие клиенты не принимают http, нажмите кнопку https</blockquote>",
         "btn_sub_tls": "https-туннель",
         "sub_tls_done": "<blockquote><b>Туннель подписки поднят</b>\n<code>{url}</code></blockquote>",
         "sub_tls_fail": "<blockquote><b>Туннель не поднялся</b>\n<code>{error}</code>\nОбычная http-ссылка продолжает работать</blockquote>",
+        "core_old_warn": (
+            "<blockquote><b>Ядро уязвимо</b> | <code>{version}</code>\n"
+            "Всё ниже <b>{min}</b> держит MPTCP-слушатели открытыми и даёт удалённый root "
+            "через {advisory}, нажмите установку, чтобы перейти на пинованную версию</blockquote>"
+        ),
+        "core_old_hidden": "<blockquote>Релизы ниже <b>{min}</b> скрыты ({count}), они уязвимы к {advisory}</blockquote>",
         "btn_autostart_on": "Автозапуск: Вкл",
         "btn_autostart_off": "Автозапуск: Выкл",
 
@@ -2137,6 +2191,77 @@ class XRay(loader.Module):
         except Exception:
             return False
 
+    async def _ws_probe(self, host: str, port: int, path: str, tls: bool, timeout: float = 8.0) -> Tuple[bool, str]:
+        writer = None
+        try:
+            if tls:
+                context = ssl.create_default_context()
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port, ssl=context, server_hostname=host), timeout
+                )
+            else:
+                reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+            key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
+            request = (
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: {host}\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Key: {key}\r\n"
+                "Sec-WebSocket-Version: 13\r\n"
+                "User-Agent: Mozilla/5.0\r\n\r\n"
+            )
+            writer.write(request.encode("ascii"))
+            await writer.drain()
+            head = await asyncio.wait_for(reader.readline(), timeout)
+            status = head.decode("utf-8", "replace").strip() or "no answer"
+            return (" 101 " in status), status[:80]
+        except Exception as e:
+            return False, str(e)[:120]
+        finally:
+            if writer is not None:
+                try:
+                    writer.close()
+                except Exception:
+                    pass
+
+    async def _diagnose_websocket(self, name: str) -> Dict[str, str]:
+        user = self._users.get(name)
+        if not user:
+            return {"verdict": "unknown user"}
+        path = user.get("path") or "/xhttps"
+        if not path.startswith("/"):
+            path = "/" + path
+        site_port = int(user.get("site_port") or user.get("port") or 0)
+        host = user.get("tunnel_host") or ""
+        report = {}
+        report["site"] = (
+            self.strings["ws_up"] if await self._unit_active(self._unit_name(name, "site")) else self.strings["ws_down"]
+        )
+        report["tunnel"] = (
+            self.strings["ws_up"] if await self._unit_active(self._unit_name(name, "cf")) else self.strings["ws_down"]
+        )
+        local_template = self.strings["diag_ws_local"]
+        if site_port:
+            ok, status = await self._ws_probe("127.0.0.1", site_port, path, tls=False)
+            report["local"] = local_template.format(state=self.strings["ws_ok"] if ok else self.strings["ws_dead"], detail=_escape(status))
+        else:
+            report["local"] = local_template.format(state=self.strings["ws_dead"], detail="no site port")
+        edge_template = self.strings["diag_ws_edge"]
+        if host:
+            ok, status = await self._ws_probe(host, 443, path, tls=True)
+            report["edge"] = edge_template.format(state=self.strings["ws_ok"] if ok else self.strings["ws_dead"], detail=_escape(status))
+            http_ok = await self._host_alive(host, "/health")
+            report["http"] = self.strings["diag_http"].format(
+                state=self.strings["ws_ok"] if http_ok else self.strings["ws_dead"]
+            )
+        else:
+            report["edge"] = edge_template.format(state=self.strings["ws_dead"], detail="no tunnel host")
+            report["http"] = self.strings["diag_http"].format(state=self.strings["ws_dead"])
+        edge_ok = host and report.get("edge", "").startswith(edge_template.format(state=self.strings["ws_ok"], detail=""))
+        report["verdict"] = self.strings["diag_ws_ok"] if edge_ok else self.strings["diag_ws_bad"]
+        return report
+
     async def _check_tunnel_health(self, name: str) -> bool:
         user = self._users.get(name)
         if not user or user.get("transport") != "websocket":
@@ -2235,13 +2360,18 @@ class XRay(loader.Module):
             return
         name = str(user.get("name", "user"))
         safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", name)
+        payload = (link + "\n").encode("utf-8")
+
+        def link_file():
+            handle = io.BytesIO(payload)
+            handle.name = f"link_for_{safe_name}.txt"
+            return handle
+
         try:
-            link_file = io.BytesIO((link + "\n").encode("utf-8"))
-            link_file.name = f"link_for_{safe_name}.txt"
             await _retry_topic_send(
                 lambda: self.inline.bot.send_file(
                     int(f"-100{self._asset_channel}"),
-                    link_file,
+                    link_file(),
                     caption=(
                         f"<b>WebSocket TLS link refreshed</b>\n"
                         f"<blockquote>User: <code>{_escape(name)}</code>\n"
@@ -2597,6 +2727,11 @@ class XRay(loader.Module):
         reason = _guard_reason()
         if reason:
             return False, reason
+        if _core_too_old(tag):
+            return False, (
+                f"Refused: {tag} is below {XRAY_MIN_TAG}, it opens MPTCP listeners "
+                f"and allows a remote root through {XRAY_MIN_ADVISORY}, install {XRAY_CORE_VERSION}"
+            )
         if tag != XRAY_CORE_VERSION:
             return False, f"Refused: only {XRAY_CORE_VERSION} is allowed, {tag} is not pinned"
 
@@ -2891,7 +3026,8 @@ class XRay(loader.Module):
             ws_path = user.get("path") or "/xhttps"
             if not ws_path.startswith("/"):
                 ws_path = "/" + ws_path
-            config["inbounds"][0]["settings"]["decryption"] = user.get("vless_decryption", "none")
+            config["inbounds"][0]["listen"] = "127.0.0.1"
+            config["inbounds"][0]["settings"]["decryption"] = "none"
             config["inbounds"][0]["streamSettings"] = {
                 "network": "ws",
                 "security": "none",
@@ -2899,12 +3035,6 @@ class XRay(loader.Module):
                     "path": ws_path,
                 },
             }
-            if user.get("websocket_mode") == "tls-fallback":
-                config["inbounds"][0]["settings"]["decryption"] = "none"
-                config["inbounds"][0]["settings"]["fallbacks"] = [{
-                    "dest": user.get("site_port", 0),
-                    "xver": 0,
-                }]
         elif transport == "xhttp":
             config["inbounds"][0]["streamSettings"] = {
                 "network": "xhttp",
@@ -2970,7 +3100,7 @@ class XRay(loader.Module):
                 "path": path,
                 "host": host_header if fallback else "",
                 "security": "tls" if fallback else "none",
-                **({"sni": host_header, "alpn": "http/1.1", "fp": fp} if fallback else {}),
+                **({"sni": host_header, "fp": fp} if fallback else {}),
             })
             host = user.get("tunnel_host") if fallback else ip
             return f"vless://{uuid_str}@{host}:{443 if fallback else port}?{params}#{urllib.parse.quote(name, safe='')}"
@@ -3921,8 +4051,14 @@ class XRay(loader.Module):
         changed = False
         for name, user in list(self._users.items()):
             port = user.get("api_port")
-            if not port or name not in self._processes:
+            if not port:
                 continue
+            if name not in self._processes:
+                try:
+                    if not await self._unit_active(self._unit_name(name)):
+                        continue
+                except Exception:
+                    continue
             raw = await self._sub_query_stats(port)
             if raw is None:
                 continue
@@ -4072,6 +4208,12 @@ class XRay(loader.Module):
             cloudflared_status=cloudflared_status,
             gh_status=gh_status,
         )
+        if self._xray_installed() and _core_too_old(xray_status):
+            text += "\n" + self.strings["core_old_warn"].format(
+                version=_escape(xray_status),
+                min=XRAY_MIN_TAG,
+                advisory=XRAY_MIN_ADVISORY,
+            )
         
         markup = []
         
@@ -4137,14 +4279,24 @@ class XRay(loader.Module):
         current_version = await self._get_version("xray")
         
         text = self.strings["xray_install_menu"].format(current=current_version)
+        if _core_too_old(current_version):
+            text += "\n" + self.strings["core_old_warn"].format(
+                version=_escape(current_version),
+                min=XRAY_MIN_TAG,
+                advisory=XRAY_MIN_ADVISORY,
+            )
         
         releases = await self._gh_get_releases()
         
         markup = []
         
+        hidden = 0
         for release in releases:
             tag = release.get("tag_name", "")
             if not tag:
+                continue
+            if _core_too_old(tag):
+                hidden += 1
                 continue
             
             markup.append([{
@@ -4162,6 +4314,9 @@ class XRay(loader.Module):
                 "style": "primary",
             }])
         
+        if hidden:
+            text += "\n" + self.strings["core_old_hidden"].format(count=hidden, min=XRAY_MIN_TAG)
+
         markup.append([{
             "text": self.strings["btn_back"],
             "callback": self._cb_setup_menu,
@@ -4271,8 +4426,17 @@ class XRay(loader.Module):
         
         await call.edit(text, reply_markup=markup)
 
+    async def _refresh_traffic_now(self) -> None:
+        if not self._sub.get("enabled") or not self._sub.get("stats"):
+            return
+        try:
+            await self._sub_collect_traffic()
+        except Exception as exc:
+            logger.debug("[XR] the on demand traffic poll failed: %s", exc)
+
     async def _cb_user_menu(self, call: InlineCall, name: str):
         await call.edit(self.strings["loading"])
+        await self._refresh_traffic_now()
         
         user = self._users.get(name)
         if not user:
@@ -4361,6 +4525,7 @@ class XRay(loader.Module):
         if user.get("transport") == "websocket" and user.get("websocket_mode") == "tls-fallback":
             markup.append([
                 {"text": self.strings["btn_ws_refresh"], "callback": self._cb_refresh_link, "args": (name,), "style": "success"},
+                {"text": self.strings["btn_ws_check"], "callback": self._cb_ws_check, "args": (name,), "style": "primary"},
             ])
             markup.append([
                 {"text": self.strings["btn_mask_site"], "callback": self._cb_mask_site_menu, "args": (name,), "style": "primary"},
@@ -4472,6 +4637,33 @@ class XRay(loader.Module):
         await call.edit(
             self.strings["user_deleted"].format(name=_escape(name)),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
+        )
+
+    async def _cb_ws_check(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if not user:
+            await call.answer("User not found", show_alert=True)
+            return
+        if user.get("transport") != "websocket":
+            await call.answer(self.strings["sub_empty"], show_alert=True)
+            return
+        await call.edit(self.strings["loading"])
+        report = await self._diagnose_websocket(name)
+        text = (
+            self.strings["ws_check_title"]
+            + self.strings["diag_site"].format(state=report.get("site", "-"))
+            + self.strings["diag_tunnel"].format(state=report.get("tunnel", "-"))
+            + report.get("local", "")
+            + report.get("edge", "")
+            + report.get("http", "")
+            + report.get("verdict", "")
+        )
+        await call.edit(
+            text,
+            reply_markup=[
+                [{"text": self.strings["btn_ws_refresh"], "callback": self._cb_refresh_link, "args": (name,), "style": "success"}],
+                [{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}],
+            ],
         )
 
     async def _cb_refresh_link(self, call: InlineCall, name: str):
@@ -5283,6 +5475,7 @@ class XRay(loader.Module):
 
     async def _cb_sub_menu(self, call: InlineCall):
         self._sub_ensure()
+        await self._refresh_traffic_now()
         targets = self._sub_targets()
         up, down = self._sub_traffic_for()
         running = bool(self._sub_server)
