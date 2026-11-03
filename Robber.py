@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (3, 1, 0)
+__version__ = (3, 2, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Robber/MetaBanner.jpeg
 
@@ -10,6 +10,7 @@ import asyncio
 import base64
 import ipaddress
 import logging
+import mimetypes
 import os
 import re
 import shutil
@@ -66,6 +67,22 @@ SKIP_MEDIA_TYPES = (
     MessageMediaGeoLive,
     MessageMediaPoll,
 )
+
+IMAGE_CODECS = {
+    "mjpeg", "png", "webp", "apng", "bmp", "tiff", "ppm", "pgm",
+    "pgmyuv", "pam", "qoi", "jpegls", "xbm", "xpm", "avif",
+}
+
+MIME_EXT_MAP = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
+    "audio/ogg": ".ogg",
+}
 
 BATCH_SIZE = 100
 FLOOD_EXTRA = 5
@@ -472,6 +489,44 @@ class Robber(loader.Module):
             except Exception:
                 pass
 
+    def _msg_kind(self, msg):
+        media = getattr(msg, "media", None)
+        if isinstance(media, types.MessageMediaPhoto) and getattr(media, "photo", None):
+            return "photo"
+        doc = getattr(media, "document", None) if isinstance(media, types.MessageMediaDocument) else None
+        if doc is None:
+            return "file"
+        is_sticker = any(isinstance(a, types.DocumentAttributeSticker) for a in doc.attributes or [])
+        for a in doc.attributes or []:
+            if isinstance(a, types.DocumentAttributeVideo):
+                return "video"
+        mime = (doc.mime_type or "").split(";")[0].strip().lower()
+        if mime == "image/gif" or any(
+            getattr(a, "animated", False) for a in doc.attributes or []
+        ):
+            return "video"
+        if mime.startswith("image/") and not is_sticker:
+            return "photo"
+        return "file"
+
+    def _ext_of_msg(self, msg):
+        media = getattr(msg, "media", None)
+        if isinstance(media, types.MessageMediaPhoto) and getattr(media, "photo", None):
+            return ".jpg"
+        doc = getattr(media, "document", None) if isinstance(media, types.MessageMediaDocument) else None
+        if doc is None:
+            return ""
+        for a in doc.attributes or []:
+            if isinstance(a, DocumentAttributeFilename) and a.file_name:
+                ext = os.path.splitext(a.file_name)[1].lower()
+                if re.fullmatch(r"\.[a-z0-9]{1,6}", ext):
+                    return ext
+        mime = (doc.mime_type or "").split(";")[0].strip().lower()
+        if mime in MIME_EXT_MAP:
+            return MIME_EXT_MAP[mime]
+        guessed = mimetypes.guess_extension(mime) if mime else None
+        return guessed or ""
+
     def _tmp_path(self, name):
         return os.path.join(self._temp_dir, name)
 
@@ -682,7 +737,7 @@ class Robber(loader.Module):
                 int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
             )
         video = re.search(r"Stream #\d+:\d+[^\n]*?: Video: (\w+)([^\n]*)", text)
-        if video:
+        if video and video.group(1) not in IMAGE_CODECS:
             info["vcodec"] = video.group(1)
             rest = video.group(2)
             pix = re.search(r"\),\s*(\w+)|^[^,]*,\s*(\w+)", rest)
@@ -1013,8 +1068,10 @@ class Robber(loader.Module):
                 except Exception:
                     pass
 
-    async def _dl(self, media, fname, client=None, progress_cb=None):
+    async def _dl(self, media, fname, client=None, progress_cb=None, ext=""):
         c = client or self._client
+        if ext and not fname.endswith(ext):
+            fname = f"{fname}{ext}"
         path = self._tmp_path(fname)
         try:
             result = await c.download_media(media, file=path, progress_callback=progress_cb)
@@ -1033,10 +1090,11 @@ class Robber(loader.Module):
         as_doc=False,
         client=None,
         state=None,
+        is_photo=False,
     ):
         c = client or self._client
         probe = await self._probe(path)
-        is_video = bool(probe.get("vcodec"))
+        is_video = bool(probe.get("vcodec")) and not is_photo
         norm_path = None
         thumb_path = None
         try:
@@ -1089,7 +1147,7 @@ class Robber(loader.Module):
                 if state:
                     state["ff"] = "skip"
                 fname = os.path.basename(path)
-                attrs = [DocumentAttributeFilename(fname)] if as_doc else None
+                attrs = [DocumentAttributeFilename(fname)]
                 sent = await self._safe(
                     c.send_file(
                         target,
@@ -1132,7 +1190,9 @@ class Robber(loader.Module):
         if media and isinstance(media, MessageMediaWebPage):
             media = None
         if media is not None:
-            fname = f"msg_{msg.id}"
+            msg_kind = self._msg_kind(msg)
+            ext = self._ext_of_msg(msg)
+            fname = f"msg_{msg.id}{ext}"
             if state:
                 state["stage"] = "download"
             dl_cb = self._make_progress_cb(state, "dl") if state else None
@@ -1149,6 +1209,7 @@ class Robber(loader.Module):
                         as_doc=as_doc,
                         client=c,
                         state=state,
+                        is_photo=msg_kind == "photo",
                     )
                 finally:
                     try:
@@ -1168,6 +1229,65 @@ class Robber(loader.Module):
             )
         return None
 
+    async def _send_multi(self, c, target, entries, state):
+        if state:
+            state["stage"] = "upload"
+            state["up_total"] = sum(os.path.getsize(e["path"]) for e in entries)
+        inputs = []
+        for e in entries:
+            up_cb = self._make_progress_cb(state, "up") if state else None
+            fh = await c.upload_file(e["path"], progress_callback=up_cb)
+            caption = (e.get("caption") or "")[:1000]
+            text = ""
+            ents = None
+            if caption:
+                text, ents = await c._parse_message_text(caption, "html")
+            if e["kind"] == "photo":
+                media = types.InputMediaUploadedPhoto(file=fh)
+            else:
+                probe = e.get("probe") or {}
+                attrs = [
+                    DocumentAttributeVideo(
+                        duration=int(probe.get("duration") or 0),
+                        w=probe.get("width") or 0,
+                        h=probe.get("height") or 0,
+                        round_message=False,
+                        supports_streaming=True,
+                    ),
+                    DocumentAttributeFilename(os.path.basename(e["path"])),
+                ]
+                thumb_f = None
+                if e.get("thumb"):
+                    try:
+                        thumb_f = await c.upload_file(e["thumb"])
+                    except Exception:
+                        thumb_f = None
+                media = types.InputMediaUploadedDocument(
+                    file=fh,
+                    thumb=thumb_f,
+                    mime_type="video/mp4",
+                    attributes=attrs,
+                )
+            inputs.append(
+                types.InputSingleMedia(
+                    media=media,
+                    random_id=c._get_random_id(),
+                    message=text,
+                    entities=ents,
+                )
+            )
+        req = functions.messages.SendMultiMediaRequest(
+            peer=tl_utils.get_input_peer(target),
+            multi_media=inputs,
+        )
+        upd = await self._safe(c(req), client=c)
+        msgs = []
+        for u in getattr(upd, "updates", []) or []:
+            m = getattr(u, "message", None)
+            if m is not None and getattr(m, "id", None):
+                msgs.append(m)
+        return msgs
+
     async def _send_album(
         self, target, album_msgs, id_map, as_doc=False, client=None, state=None
     ):
@@ -1176,8 +1296,7 @@ class Robber(loader.Module):
         reply_to = None
         if first.reply_to and hasattr(first.reply_to, "reply_to_msg_id"):
             reply_to = id_map.get(first.reply_to.reply_to_msg_id)
-        paths = []
-        captions = []
+        entries = []
         temp_cleanup = []
         try:
             if state:
@@ -1186,59 +1305,107 @@ class Robber(loader.Module):
                 if am.media and not isinstance(
                     am.media, (MessageMediaWebPage,) + SKIP_MEDIA_TYPES
                 ):
+                    ext = self._ext_of_msg(am)
                     dl_cb = self._make_progress_cb(state, "dl") if state else None
                     path = await self._dl(
-                        am.media, f"alb_{am.id}_{i}", client=c, progress_cb=dl_cb
+                        am.media, f"alb_{am.id}_{i}", client=c, progress_cb=dl_cb, ext=ext
                     )
                     if path:
-                        paths.append(path)
+                        kind = self._msg_kind(am)
+                        entries.append(
+                            {
+                                "msg": am,
+                                "path": path,
+                                "kind": kind,
+                                "caption": (self._get_html(am) or ""),
+                            }
+                        )
                         temp_cleanup.append(path)
-                        captions.append(self._get_html(am) or "")
-            if not paths:
+            if not entries:
                 return []
             if state:
                 state["dl_done"] = True
 
-            use_paths = []
-            for p in paths:
-                probe = await self._probe(p)
-                if probe.get("vcodec") and not as_doc:
-                    if state:
-                        state["stage"] = "ffmpeg"
-                    norm = self._tmp_path(f"alb_norm_{os.path.basename(p)}.mp4")
-                    await self._normalize(p, norm, state)
-                    use_paths.append(norm)
-                    temp_cleanup.append(norm)
-                else:
-                    use_paths.append(p)
-
-            if state:
-                state["stage"] = "upload"
-                state["up_total"] = sum(os.path.getsize(p) for p in use_paths)
-            up_cb = self._make_progress_cb(state, "up") if state else None
-
-            sent = await self._safe(
-                c.send_file(
+            if len(entries) == 1:
+                e = entries[0]
+                sent = await self._send_single_file(
                     target,
-                    use_paths,
-                    caption=captions,
-                    parse_mode="html",
+                    e["path"],
+                    caption=e["caption"] or None,
                     reply_to=reply_to,
-                    force_document=as_doc,
-                    progress_callback=up_cb,
-                ),
-                client=c,
-            )
+                    as_doc=as_doc,
+                    client=c,
+                    state=state,
+                    is_photo=e["kind"] == "photo",
+                )
+                return [sent] if sent else []
+
+            media_entries = [e for e in entries if e["kind"] in ("photo", "video") and not as_doc]
+            doc_entries = [e for e in entries if e not in media_entries]
+
+            for e in media_entries:
+                if e["kind"] == "video":
+                    probe = await self._probe(e["path"])
+                    if probe.get("vcodec"):
+                        if state:
+                            state["stage"] = "ffmpeg"
+                        norm = self._tmp_path(f"alb_norm_{e[chr(39)+chr(39)+chr(39) if False else 'msg'].id}.mp4")
+                        await self._normalize(e["path"], norm, state)
+                        temp_cleanup.append(norm)
+                        probe = await self._probe(norm)
+                        thumb = self._tmp_path(f"alb_th_{e['msg'].id}.jpg")
+                        if await self._make_thumb(norm, thumb, min(1.0, probe.get("duration") or 2)):
+                            e["thumb"] = thumb
+                            temp_cleanup.append(thumb)
+                        else:
+                            try:
+                                os.remove(thumb)
+                            except Exception:
+                                pass
+                        e["path"] = norm
+                    e["probe"] = probe
+
+            sent_msgs = []
+            if media_entries:
+                try:
+                    sent_msgs = await self._send_multi(c, target, media_entries, state)
+                except Exception as exc:
+                    logger.warning(f"[Robber] SendMultiMediaRequest failed: {exc}, fallback to single sends")
+                    sent_msgs = []
+                    for e in media_entries:
+                        s = await self._send_single_file(
+                            target,
+                            e["path"],
+                            caption=e["caption"] or None,
+                            reply_to=None,
+                            as_doc=False,
+                            client=c,
+                            state=state,
+                            is_photo=e["kind"] == "photo",
+                        )
+                        if s:
+                            sent_msgs.append(s)
+            for e in doc_entries:
+                s = await self._send_single_file(
+                    target,
+                    e["path"],
+                    caption=e["caption"] or None,
+                    reply_to=reply_to,
+                    as_doc=True,
+                    client=c,
+                    state=state,
+                    is_photo=False,
+                )
+                if s:
+                    sent_msgs.append(s)
             if state:
                 state["up_done"] = True
-            if not isinstance(sent, list):
-                sent = [sent]
-            return sent
+            return sent_msgs
         finally:
-            for p in temp_cleanup:
-                if p and os.path.exists(p):
+            for pth in temp_cleanup:
+                if pth and os.path.exists(pth):
                     try:
-                        os.remove(p)
+                        os.remove(pth)
                     except Exception:
                         pass
 
