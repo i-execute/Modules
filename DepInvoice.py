@@ -1,0 +1,503 @@
+# CopyLeft 2026 github.com/i-execute
+# Author: I_execute.t.me
+# Licensed under AGPLv3.
+
+__version__ = (1, 3, 0)
+# meta developer: Execute_forge.t.me
+# meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DepInvoice/MetaBanner.jpeg
+
+import re
+import time
+import logging
+import aiohttp
+
+from telethon import events
+from telethon.tl.types import (
+    InputBotInlineResult,
+    InputBotInlineMessageMediaInvoice,
+    InputBotInlineMessageText,
+    InputWebDocument,
+    UpdateBotPrecheckoutQuery,
+    UpdateNewMessage,
+    MessageService,
+    MessageActionPaymentSentMe,
+    Invoice,
+    LabeledPrice,
+    DataJSON,
+    InputMediaWebPage,
+)
+from telethon.tl.functions.messages import EditForumTopicRequest, SetBotPrecheckoutResultsRequest, EditMessageRequest
+
+from .. import loader, utils
+
+logger = logging.getLogger(__name__)
+
+async def _retry_topic_send(send, refresh):
+    try:
+        return await send()
+    except Exception:
+        await refresh()
+        return await send()
+
+
+async def _apply_topic_icon(client, peer, topic, icon_id):
+    if getattr(topic, "icon_emoji_id", None) == icon_id:
+        return
+    try:
+        await client(EditForumTopicRequest(peer=peer, topic_id=topic.id, icon_emoji_id=icon_id))
+    except Exception:
+        pass
+
+
+STARS_PATTERN = re.compile(r'^\s*(\d+)\s*$')
+RELOADING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DepInvoice/Reloading.jpeg"
+GREETING_MEDIA_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/DepInvoice/Greetings.jpeg"
+
+
+@loader.tds
+class DepInvoice(loader.Module):
+    """Create Telegram Stars invoices via inline mode"""
+
+    strings = {
+        "name": "DepInvoice",
+
+        "yes": "configured",
+        "no": "not set",
+        "reloaded": "<blockquote><b>DepInvoice reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nInvoice title: <b>{title_mode}</b>\nInvoice banner: <b>{invoice_banner}</b>\nInline banner: <b>{inline_banner}</b></blockquote>",
+        "greeting": "<blockquote><b>DepInvoice is ready</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nInvoice title: <b>{title_mode}</b>\nInvoice banner: <b>{invoice_banner}</b>\nInline banner: <b>{inline_banner}</b>\nThis topic receives Telegram Stars payment and refund logs.\nUse <code>{prefix}refund</code> to manage payments.</blockquote>",
+        
+        "no_bot": "<blockquote><b>Error:</b> Inline bot not found.</blockquote>",
+        "refund_invalid_args": "<blockquote><b>Error:</b> Invalid arguments. User ID must be a number.</blockquote>",
+        
+        "refund_usage": (
+            "<blockquote><b>Usage:</b> <code>{prefix}refund [user_id] [charge_id]</code></blockquote>\n"
+            "<blockquote>Example: <code>{prefix}refund 123456789 charge_abc123</code></blockquote>"
+        ),
+        
+        "refund_success": "<blockquote><b>Success:</b> Refund completed successfully.</blockquote>",
+        
+        "refund_error": (
+            "<blockquote><b>Refund failed</b></blockquote>\n"
+            "<blockquote><b>Error:</b> <code>{error}</code></blockquote>"
+        ),
+
+        "inline_hint_title": "DepInvoice",
+        "inline_hint_desc": "Enter Stars amount",
+        "inline_hint_msg": "Enter Stars amount",
+        "inline_title": "Payment {stars} Stars",
+        "inline_desc": "Tap to create invoice",
+
+        "invoice_title_default": "Purchase {stars} Stars",
+        "invoice_description_default": "Payment for {stars} Stars",
+
+        "log_payment_received": (
+            "<pre><code class=\"language-depinvoice\">"
+            "PAYMENT RECEIVED\n"
+            "----------------\n"
+            "Amount:    {stars} Stars\n"
+            "User ID:   {user_id}\n"
+            "Charge:    {charge_id}\n"
+            "Provider:  {provider_charge_id}"
+            "</code></pre>"
+        ),
+        "log_refund_success": (
+            "<pre><code class=\"language-depinvoice\">"
+            "REFUND COMPLETED\n"
+            "----------------\n"
+            "User ID:   {user_id}\n"
+            "Charge:    {charge_id}"
+            "</code></pre>"
+        ),
+        "log_refund_error": (
+            "<pre><code class=\"language-depinvoice\">"
+            "REFUND FAILED\n"
+            "----------------\n"
+            "User ID:   {user_id}\n"
+            "Charge:    {charge_id}\n"
+            "Error:     {error}"
+            "</code></pre>"
+        ),
+    }
+
+    strings_ru = {
+        "yes": "настроен",
+        "no": "не задан",
+        "reloaded": "<blockquote><b>DepInvoice перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nЗаголовок счёта: <b>{title_mode}</b>\nБаннер счёта: <b>{invoice_banner}</b>\nИнлайн-баннер: <b>{inline_banner}</b></blockquote>",
+        "greeting": "<blockquote><b>DepInvoice готов к работе</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nЗаголовок счёта: <b>{title_mode}</b>\nБаннер счёта: <b>{invoice_banner}</b>\nИнлайн-баннер: <b>{inline_banner}</b>\nВ этот топик будут приходить логи платежей и возвратов Telegram Stars.\nДля возврата используйте <code>{prefix}refund</code>.</blockquote>",
+        
+        "no_bot": "<blockquote><b>Ошибка:</b> Inline бот не найден.</blockquote>",
+        "refund_invalid_args": "<blockquote><b>Ошибка:</b> Неверные аргументы. ID пользователя должен быть числом.</blockquote>",
+        
+        "refund_usage": (
+            "<blockquote><b>Использование:</b> <code>{prefix}refund [user_id] [charge_id]</code></blockquote>\n"
+            "<blockquote>Пример: <code>{prefix}refund 123456789 charge_abc123</code></blockquote>"
+        ),
+        
+        "refund_success": "<blockquote><b>Успешно:</b> Возврат выполнен успешно.</blockquote>",
+        
+        "refund_error": (
+            "<blockquote><b>Возврат не выполнен</b></blockquote>\n"
+            "<blockquote><b>Ошибка:</b> <code>{error}</code></blockquote>"
+        ),
+
+        "inline_hint_title": "DepInvoice",
+        "inline_hint_desc": "Введите число Stars",
+        "inline_hint_msg": "Введите число Stars",
+        "inline_title": "Оплата {stars} Stars",
+        "inline_desc": "Нажмите для счёта",
+
+        "invoice_title_default": "Покупка {stars} Stars",
+        "invoice_description_default": "Оплата {stars} Stars",
+
+        "log_payment_received": (
+            "<pre><code class=\"language-depinvoice\">"
+            "ПЛАТЁЖ ПОЛУЧЕН\n"
+            "----------------\n"
+            "Сумма:     {stars} Stars\n"
+            "User ID:   {user_id}\n"
+            "Charge:    {charge_id}\n"
+            "Provider:  {provider_charge_id}"
+            "</code></pre>"
+        ),
+        "log_refund_success": (
+            "<pre><code class=\"language-depinvoice\">"
+            "ВОЗВРАТ ВЫПОЛНЕН\n"
+            "----------------\n"
+            "User ID:   {user_id}\n"
+            "Charge:    {charge_id}"
+            "</code></pre>"
+        ),
+        "log_refund_error": (
+            "<pre><code class=\"language-depinvoice\">"
+            "ВОЗВРАТ НЕ ВЫПОЛНЕН\n"
+            "----------------\n"
+            "User ID:   {user_id}\n"
+            "Charge:    {charge_id}\n"
+            "Ошибка:    {error}"
+            "</code></pre>"
+        ),
+    }
+
+    def __init__(self):
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "invoice_title",
+                "",
+                "Invoice title template (use {stars} placeholder). Leave empty for default",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "invoice_description",
+                "",
+                "Invoice description template (use {stars} placeholder). Leave empty for default",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "invoice_banner",
+                None,
+                "Invoice banner image URL (shown in payment form). Set to None for no banner",
+                validator=loader.validators.String(),
+            ),
+            loader.ConfigValue(
+                "inline_banner",
+                None,
+                "Inline preview banner image URL (shown in inline results). Set to None for no preview",
+                validator=loader.validators.String(),
+            ),
+        )
+
+        self._bot_token = None
+        self._client = None
+        self._db = None
+        self._logger_topic = None
+        self._asset_channel = None
+        self._payment_handler = None
+
+    async def client_ready(self, client, db):
+        self._client = client
+        self._db = db
+
+        if hasattr(self, "inline") and hasattr(self.inline, "_bot_client"):
+            try:
+                self._bot_token = getattr(self.inline, "_token", getattr(self.inline.bot, "token", None))
+            except Exception as e:
+                logger.error(f"[DepInvoice] Error getting bot token: {e}")
+
+            self._payment_handler = self._raw_payment_handler
+            self.inline._bot_client.add_event_handler(
+                self._payment_handler,
+                events.Raw(UpdateNewMessage),
+            )
+            logger.info("[DepInvoice] Payment handler registered on bot client")
+
+        self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
+
+        if self._asset_channel:
+            try:
+                self._logger_topic = await utils.asset_forum_topic(
+                    self._client, 
+                    self._db, 
+                    self._asset_channel, 
+                    "DepInvoice",
+                    description="Payment and refund logs",
+                    icon_emoji_id=5386654279341747455,
+                )
+                await _apply_topic_icon(self._client, self._asset_channel, self._logger_topic, 5386654279341747455)
+            except Exception as e:
+                logger.error(f"[DepInvoice] Failed to create/get forum topic: {e}")
+
+        if self._logger_topic and self._asset_channel:
+            chat_id = int(f"-100{self._asset_channel}")
+            greeting_key = f"depinvoice_greeted_{self._asset_channel}_{self._logger_topic.id}"
+            already_greeted = self.get(greeting_key, False)
+            title_mode = self.strings["yes"] if self.config["invoice_title"] else self.strings["no"]
+            values = {
+                "version": ".".join(map(str, __version__)),
+                "title_mode": title_mode,
+                "invoice_banner": self.strings["yes"] if self.config["invoice_banner"] else self.strings["no"],
+                "inline_banner": self.strings["yes"] if self.config["inline_banner"] else self.strings["no"],
+                "prefix": self.get_prefix(),
+            }
+            if already_greeted:
+                await self._send_with_preview(chat_id, self.strings["reloaded"].format(**values))
+            else:
+                self.set(greeting_key, True)
+                await self._send_with_preview(
+                    chat_id,
+                    self.strings["greeting"].format(**values),
+                    is_greeting=True,
+                )
+
+    async def _refresh_invoice_topic(self):
+        self._logger_topic = await utils.asset_forum_topic(
+            self._client,
+            self._db,
+            self._asset_channel,
+            "DepInvoice",
+            description="Payment and refund logs",
+            icon_emoji_id=5386654279341747455,
+        )
+        await _apply_topic_icon(self._client, self._asset_channel, self._logger_topic, 5386654279341747455)
+
+    async def _send_with_preview(self, chat_id, text, is_greeting=False):
+        try:
+            msg_text, entities = await self.inline.bot._parse_message_text(text, "html")
+            msg = await _retry_topic_send(
+                lambda: self.inline.bot.send_message(
+                    chat_id,
+                    msg_text,
+                    parse_mode=None,
+                    entities=entities,
+                    message_thread_id=self._logger_topic.id,
+                ),
+                self._refresh_invoice_topic,
+            )
+            if msg:
+                try:
+                    peer = await self.inline.bot.get_input_entity(chat_id)
+                    current_msg = await self.inline.bot.get_messages(chat_id, ids=msg.id)
+                    reply_markup = current_msg.reply_markup if current_msg else None
+                    await self.inline.bot(EditMessageRequest(
+                        peer=peer,
+                        id=msg.id,
+                        message=msg_text,
+                        media=InputMediaWebPage(
+                            url=GREETING_MEDIA_URL if is_greeting else RELOADING_MEDIA_URL,
+                            optional=True,
+                            force_large_media=True,
+                        ),
+                        invert_media=True,
+                        reply_markup=reply_markup,
+                        entities=entities,
+                        no_webpage=False,
+                    ))
+                except Exception as e:
+                    logger.error(f"[DepInvoice] Failed to add preview: {e}")
+        except Exception as e:
+            logger.error(f"[DepInvoice] Failed to send message with preview: {e}")
+
+    async def on_unload(self):
+        if self._payment_handler and hasattr(self, "inline") and hasattr(self.inline, "_bot_client"):
+            try:
+                self.inline._bot_client.remove_event_handler(self._payment_handler)
+                logger.info("[DepInvoice] Payment handler removed from bot client")
+            except Exception as e:
+                logger.error(f"[DepInvoice] Error removing payment handler: {e}")
+
+    async def _raw_payment_handler(self, update):
+        msg = getattr(update, "message", None)
+        if not isinstance(msg, MessageService):
+            return
+        if not isinstance(getattr(msg, "action", None), MessageActionPaymentSentMe):
+            return
+        try:
+            action = msg.action
+            stars = action.total_amount
+            charge_id = action.charge.id if action.charge else "unknown"
+            provider_charge_id = action.charge.provider_charge_id if action.charge else "unknown"
+            user_id = getattr(getattr(msg, "peer_id", None), "user_id", None)
+
+            await self._send_log(self.strings["log_payment_received"].format(
+                stars=stars,
+                user_id=user_id,
+                charge_id=charge_id,
+                provider_charge_id=provider_charge_id,
+            ))
+            logger.info(f"[DepInvoice] Payment: {stars} stars from {user_id}, charge_id={charge_id}")
+        except Exception as e:
+            logger.error(f"[DepInvoice] Payment handler error: {e}", exc_info=True)
+
+    @loader.need_update("pre_checkout_query")
+    async def _on_precheckout(self, update: UpdateBotPrecheckoutQuery):
+        try:
+            await self.inline._bot_client(
+                SetBotPrecheckoutResultsRequest(query_id=update.query_id, success=True, error=None)
+            )
+        except Exception as e:
+            logger.error(f"[DepInvoice] Pre-checkout error: {e}", exc_info=True)
+
+    async def _send_log(self, text: str):
+        if not self._logger_topic or not self._asset_channel:
+            return
+        try:
+            await _retry_topic_send(
+                lambda: self.inline.bot.send_message(
+                    int(f"-100{self._asset_channel}"),
+                    text,
+                    disable_web_page_preview=True,
+                    parse_mode="HTML",
+                    message_thread_id=self._logger_topic.id,
+                ),
+                self._refresh_invoice_topic,
+            )
+        except Exception as e:
+            logger.error(f"[DepInvoice] Failed to send log: {e}", exc_info=True)
+
+    async def _refund_via_api(self, user_id: int, charge_id: str) -> tuple:
+        if not self._bot_token:
+            return False, "Bot token not found"
+        url = f"https://api.telegram.org/bot{self._bot_token}/refundStarPayment"
+        payload = {"user_id": user_id, "telegram_payment_charge_id": charge_id}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    data = await resp.json()
+                    if data.get("ok"):
+                        return True, None
+                    return False, data.get("description", "Unknown error")
+        except Exception as e:
+            return False, str(e)
+
+    @loader.command(
+        ru_doc="[user_id] [charge_id] - Refund Stars to user", 
+        en_doc="[user_id] [charge_id] - Refund Stars to user"
+    )
+    async def refund(self, message):
+        """[user_id] [charge_id] - Refund Stars to user"""
+        if not self._bot_token:
+            await utils.answer(message, self.strings["no_bot"])
+            return
+        args = utils.get_args_raw(message).strip().split()
+        if len(args) != 2:
+            await utils.answer(message, self.strings["refund_usage"].format(prefix=utils.escape_html(self.get_prefix())))
+            return
+        try:
+            user_id = int(args[0])
+        except ValueError:
+            await utils.answer(message, self.strings["refund_invalid_args"])
+            return
+        charge_id = args[1].strip()
+        status_msg = await utils.answer(message, "<blockquote><b>Processing refund...</b></blockquote>")
+        success, error = await self._refund_via_api(user_id, charge_id)
+        if success:
+            await utils.answer(status_msg, self.strings["refund_success"])
+            await self._send_log(self.strings["log_refund_success"].format(user_id=user_id, charge_id=charge_id))
+        else:
+            await utils.answer(status_msg, self.strings["refund_error"].format(error=utils.escape_html(str(error))))
+            await self._send_log(self.strings["log_refund_error"].format(
+                user_id=user_id, charge_id=charge_id, error=utils.escape_html(str(error))
+            ))
+
+    def _get_invoice_text(self, field: str, stars: int) -> str:
+        custom = self.config[f"invoice_{field}"]
+        template = custom if custom else self.strings[f"invoice_{field}_default"]
+        try:
+            return template.format(stars=stars)
+        except Exception:
+            return template
+
+    def _make_web_document(self, url: str, mime_type: str = "image/jpeg"):
+        if not url:
+            return None
+        return InputWebDocument(url=url, size=0, mime_type=mime_type, attributes=[])
+
+
+    @loader.inline_handler(
+        ru_doc="Создать инвойс на звезды",
+        en_doc="Create Stars invoice",
+    )
+    async def dep_inline_handler(self, query):
+        """Create Stars invoice"""
+        text = query.query.strip()
+        if text.lower().startswith("dep"):
+            text = text[3:].strip()
+        if not text:
+            await self._answer_hint(query)
+            return
+        match = STARS_PATTERN.match(text)
+        if not match:
+            await self._answer_hint(query)
+            return
+        stars = int(match.group(1))
+        if stars <= 0 or stars > 100000:
+            await self._answer_hint(query)
+            return
+        await self._answer_invoice(query, stars)
+
+    async def _answer_hint(self, query):
+        try:
+            thumb = self._make_web_document(self.config["inline_banner"])
+            result = InputBotInlineResult(
+                id=f"hint_{int(time.time())}",
+                type="article",
+                title=self.strings["inline_hint_title"],
+                description=self.strings["inline_hint_desc"],
+                thumb=thumb,
+                send_message=InputBotInlineMessageText(message=self.strings["inline_hint_msg"], no_webpage=True),
+            )
+            await query.answer(results=[result], cache_time=0, private=True)
+        except Exception as e:
+            logger.error(f"[DepInvoice] Hint error: {e}", exc_info=True)
+
+    async def _answer_invoice(self, query, stars: int):
+        try:
+            title = self._get_invoice_text("title", stars)
+            description = self._get_invoice_text("description", stars)
+            photo = self._make_web_document(self.config["invoice_banner"])
+            thumb = self._make_web_document(self.config["inline_banner"])
+
+            invoice = Invoice(
+                currency="XTR",
+                prices=[LabeledPrice(label=f"{stars} Stars", amount=stars)],
+                test=False,
+            )
+
+            result = InputBotInlineResult(
+                id=f"inv_{stars}_{int(time.time())}",
+                type="article",
+                title=self.strings["inline_title"].format(stars=stars),
+                description=self.strings["inline_desc"],
+                thumb=thumb,
+                send_message=InputBotInlineMessageMediaInvoice(
+                    title=title,
+                    description=description,
+                    photo=photo,
+                    invoice=invoice,
+                    payload=f"dep_{stars}_{int(time.time())}".encode("UTF-8"),
+                    provider="",
+                    provider_data=DataJSON(data="{}"),
+                ),
+            )
+            await query.answer(results=[result], cache_time=0, private=True)
+        except Exception as e:
+            logger.error(f"[DepInvoice] Invoice error: {e}", exc_info=True)
