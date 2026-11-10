@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (5, 4, 0)
+__version__ = (6, 0, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
@@ -10,11 +10,8 @@ import os
 import hashlib
 import asyncio
 import base64
-import io
 import logging
-import signal
 import socket
-import ssl
 import threading
 import time
 import platform
@@ -22,7 +19,6 @@ import json
 import subprocess
 import shutil
 import uuid
-import sys
 import ipaddress
 import tempfile
 import re
@@ -32,7 +28,7 @@ import string
 import urllib.error
 import urllib.request
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional, Dict, List, Tuple
 
@@ -42,77 +38,9 @@ from telethon.tl.types import InputMediaWebPage
 from .. import loader, utils
 from ..inline.types import InlineCall
 
-ASSET_HOSTS = {"raw.githubusercontent.com", "github.com", "objects.githubusercontent.com"}
 ASSET_BASE = os.environ.get("XRAY_ASSET_BASE", "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/XRay")
 RELOADING_MEDIA_URL = ASSET_BASE.rstrip("/") + "/Reloading.jpeg"
 GREETING_MEDIA_URL = ASSET_BASE.rstrip("/") + "/Greetings.jpeg"
-HOLE_BASE = ASSET_BASE.rstrip("/") + "/WEB/hole"
-HOLE_FILES = {
-    "index.html": "895134c4fe5b25cf73ce6c12b778f9c27d08340dbee9d3cb0ada9e4c07926203",
-    "assets/index-CwNTv7CE.js": "d855e2e471488439237763d5198644cbbf9c4a5c4b7a65675758e47fb80c42c3",
-    "assets/index-KqaZQrrj.css": "b84a4219c8354281b395a9b9231c083b47644d04e2178326684f1bf35cb54043",
-}
-GATE_FILES = {
-    "gate": "0a6da4aca63c23df57c159e3a46199e6ce2438a5fc226cbb7dfa9ded8d582162",
-    "loading": "73b06164fd50869859495155f017a325cd35e111e0e0e05cd0fa045fc12fb85f",
-}
-SITE_SCRIPT_SHA256 = "9b973766aa8a3706e74ed635a43c2ab4b3b26f8fa26249b61d947d82ff6d0cb9"
-
-MINIMAL_SITE_TEMPLATE = r"""import asyncio
-from aiohttp import web, ClientSession, WSMsgType
-
-PATH = "__PATH__"
-BACKEND = "ws://127.0.0.1:__BACKEND_PORT__" + PATH
-PAGE = (
-    "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-    "<title>Downloads</title><style>html,body{margin:0;height:100%;background:#0b0d10;"
-    "color:#e7e7e8;font:16px system-ui,sans-serif}main{height:100%;display:grid;place-items:center}"
-    "b{font-weight:600;font-size:22px;letter-spacing:.4px}</style></head>"
-    "<body><main><b>Downloads</b></main></body></html>"
-)
-
-
-async def index(request):
-    return web.Response(text=PAGE, content_type="text/html", headers={"Cache-Control": "no-store"})
-
-
-async def health(request):
-    return web.Response(text="ok\n")
-
-
-async def proxy(request):
-    client_ws = web.WebSocketResponse(autoping=False, heartbeat=30)
-    await client_ws.prepare(request)
-    try:
-        async with ClientSession() as session:
-            async with session.ws_connect(BACKEND, autoping=False, heartbeat=30) as backend_ws:
-                async def forward(source, target):
-                    async for message in source:
-                        if message.type == WSMsgType.BINARY:
-                            await target.send_bytes(message.data)
-                        elif message.type == WSMsgType.TEXT:
-                            await target.send_str(message.data)
-                        elif message.type == WSMsgType.PING:
-                            await target.ping()
-                        elif message.type == WSMsgType.PONG:
-                            await target.pong()
-                        elif message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
-                            break
-                await asyncio.gather(forward(client_ws, backend_ws), forward(backend_ws, client_ws), return_exceptions=True)
-    except Exception:
-        if not client_ws.closed:
-            await client_ws.close(code=1011, message=b"backend unavailable")
-    return client_ws
-
-
-app = web.Application()
-app.router.add_get(PATH, proxy)
-app.router.add_get("/", index)
-app.router.add_get("/health", health)
-web.run_app(app, host="127.0.0.1", port=__SITE_PORT__)
-"""
-
 logger = logging.getLogger(__name__)
 
 async def _retry_topic_send(send, refresh):
@@ -156,13 +84,8 @@ class _SubServer(ThreadingHTTPServer):
 LOG_TRIM_SIZE = 10 * 1024 * 1024
 BASE_PORT = 8443
 AUTOSTART_INTERVAL = 10
-HEAL_COOLDOWN = 300
 SUB_PORT_CANDIDATES = (2096, 2097, 8443, 2053, 2083, 2087, 9443)
 SUB_TUNNEL_UNIT = "xray-sub-tunnel.service"
-TUNNEL_PROBE_TIMEOUT = 6.0
-TUNNEL_PROBE_INTERVAL = 120.0
-TUNNEL_PROBE_RETRY = 10.0
-TUNNEL_PROBE_FAILS = 2
 UNLOAD_WAIT = 5.0
 SUB_POLL_INTERVAL = 10
 SUB_TOKEN_LEN = 43
@@ -443,11 +366,10 @@ def _in_docker():
 
 @loader.tds
 class XRay(loader.Module):
-    """Multi-user VPN with VLESS+Reality (XHTTP/TCP(RAW)+Vision/WebSocket and post-quantum encryption)"""
+    """Multi-user VPN with VLESS+Reality (XHTTP/TCP(RAW)+Vision and post-quantum encryption)"""
 
     strings = {
         "name": "XRay",
-        "tunnel_moved": "<b>The tunnel link changed</b>\n<blockquote>User: {name}\nBefore: <code>{previous}</code>\nNow: <code>{host}</code>\nThe subscription and the config were rebuilt with the new host.</blockquote>",
         "guard_title": "<b>XRay is disabled on this server</b>",
         "guard_root": "The userbot is running as root (uid 0). XRay refuses to start in this mode.",
         "guard_docker": "The userbot is running inside a container (Docker, Podman, LXC or Kubernetes). XRay refuses to start in this mode.",
@@ -502,7 +424,6 @@ class XRay(loader.Module):
             "<blockquote>"
             "Status: {status}\n"
             "Transport: {transport}\n"
-            "TLS: {tls}\n"
             "Port: {port}\n"
             "Autostart: {autostart}\n"
             "Device limit: {limit}\n"
@@ -510,8 +431,6 @@ class XRay(loader.Module):
             "Uptime: {uptime}"
             "</blockquote>"
         ),
-        "btn_mask_site": "Mask Site",
-        "mask_site_menu": "<b>WebSocket Mask Site</b>\n<blockquote>Current: <code>{current}</code></blockquote>",
 
         "user_settings": (
             "<b>Settings: {name}</b>\n"
@@ -625,7 +544,6 @@ class XRay(loader.Module):
         "btn_delete": "Delete User",
         "btn_xhttp": "XHTTP",
         "btn_raw": "RAW",
-        "btn_websocket": "WebSocket",
         "btn_set_sni": "Set SNI",
         "btn_set_dest": "Set Dest",
         "btn_set_path": "Set Path",
@@ -635,31 +553,6 @@ class XRay(loader.Module):
         "btn_encryption": "Encryption",
         "btn_socks5": "SOCKS5",
         "btn_transport": "Transport",
-        "ws_status": (
-            "<blockquote>"
-            "<b>Tunnel health</b> | {health}\n"
-            "<b>Mask site</b> | {site}\n"
-            "<b>Cloudflare tunnel</b> | {tunnel}"
-            "</blockquote>"
-        ),
-        "ws_ok": "<b>alive</b>",
-        "ws_dead": "<b>dead</b>",
-        "ws_up": "<b>running</b>",
-        "ws_down": "<b>stopped</b>",
-        "tunnel_restarted": (
-            "<b>The tunnel was rebuilt</b>\n"
-            "<blockquote>User: {name}\nNew link host: <code>{host}</code>\nThe old link stops working, take the fresh one.</blockquote>"
-        ),
-        "btn_ws_refresh": "Refresh link",
-        "btn_ws_check": "Check WS",
-        "ws_check_title": "<b>WebSocket check</b>\n",
-        "diag_site": "<blockquote><b>Mask site</b> | {state}</blockquote>",
-        "diag_tunnel": "<blockquote><b>Cloudflare tunnel</b> | {state}</blockquote>",
-        "diag_ws_local": "<blockquote><b>WS to the core on loopback</b> | {state}\n<code>{detail}</code></blockquote>",
-        "diag_ws_edge": "<blockquote><b>WS through Cloudflare</b> | {state}\n<code>{detail}</code></blockquote>",
-        "diag_http": "<blockquote><b>Mask page through Cloudflare</b> | {state}</blockquote>",
-        "diag_ws_ok": "<blockquote><b>The tunnel carries WebSocket</b>, the link should connect. If the client still fails, the profile in the client is stale or the client blocks the domain.</blockquote>",
-        "diag_ws_bad": "<blockquote><b>WebSocket does not pass</b>. Press refresh the link: the tunnel is rebuilt and the fresh host is sent to the log topic.</blockquote>",
         "sub_tls_on": "<blockquote><b>Transport</b> | <b>https</b> through <code>{host}</code>\nClients accept the link without complaints</blockquote>",
         "sub_tls_off": "<blockquote><b>Transport</b> | <b>http</b> on <code>{host}</code>\nMany clients refuse plain http, press the https button</blockquote>",
         "btn_sub_tls": "https tunnel",
@@ -957,7 +850,6 @@ class XRay(loader.Module):
 
     strings_ru = {
         "name": "XRay",
-        "tunnel_moved": "<b>Ссылка туннеля изменилась</b>\n<blockquote>Юзер: {name}\nБыло: <code>{previous}</code>\nСтало: <code>{host}</code>\nПодписка и конфиг пересобраны с новым хостом.</blockquote>",
         "guard_title": "<b>XRay отключён на этом сервере</b>",
         "guard_root": "Юзербот запущен от root (uid 0). XRay в таком режиме работать отказывается.",
         "guard_docker": "Юзербот запущен внутри контейнера (Docker, Podman, LXC или Kubernetes). XRay в таком режиме работать отказывается.",
@@ -1011,7 +903,6 @@ class XRay(loader.Module):
             "<blockquote>"
             "Статус: {status}\n"
             "Транспорт: {transport}\n"
-            "TLS: {tls}\n"
             "Порт: {port}\n"
             "Автозапуск: {autostart}\n"
             "Лимит устройств: {limit}\n"
@@ -1019,8 +910,6 @@ class XRay(loader.Module):
             "Аптайм: {uptime}"
             "</blockquote>"
         ),
-        "btn_mask_site": "Сайт-маска",
-        "mask_site_menu": "<b>Сайт-маска WebSocket</b>\n<blockquote>Текущий: <code>{current}</code></blockquote>",
 
         "user_settings": (
             "<b>Настройки: {name}</b>\n"
@@ -1124,7 +1013,6 @@ class XRay(loader.Module):
         "btn_delete": "Удалить",
         "btn_xhttp": "XHTTP",
         "btn_raw": "RAW",
-        "btn_websocket": "WebSocket",
         "btn_set_sni": "SNI",
         "btn_set_dest": "Dest",
         "btn_set_path": "Путь",
@@ -1268,31 +1156,6 @@ class XRay(loader.Module):
 
         "btn_socks5": "SOCKS5",
         "btn_transport": "Транспорт",
-        "ws_status": (
-            "<blockquote>"
-            "<b>Состояние туннеля</b> | {health}\n"
-            "<b>Сайт-маска</b> | {site}\n"
-            "<b>Туннель Cloudflare</b> | {tunnel}"
-            "</blockquote>"
-        ),
-        "ws_ok": "<b>живой</b>",
-        "ws_dead": "<b>мёртвый</b>",
-        "ws_up": "<b>работает</b>",
-        "ws_down": "<b>остановлен</b>",
-        "tunnel_restarted": (
-            "<b>Туннель пересобран</b>\n"
-            "<blockquote>Юзер: {name}\nНовый хост: <code>{host}</code>\nСтарая ссылка больше не работает, возьмите новую.</blockquote>"
-        ),
-        "btn_ws_refresh": "Обновить ссылку",
-        "btn_ws_check": "Проверить WS",
-        "ws_check_title": "<b>Проверка WebSocket</b>\n",
-        "diag_site": "<blockquote><b>Сайт-маска</b> | {state}</blockquote>",
-        "diag_tunnel": "<blockquote><b>Туннель Cloudflare</b> | {state}</blockquote>",
-        "diag_ws_local": "<blockquote><b>WS до ядра на loopback</b> | {state}\n<code>{detail}</code></blockquote>",
-        "diag_ws_edge": "<blockquote><b>WS через Cloudflare</b> | {state}\n<code>{detail}</code></blockquote>",
-        "diag_http": "<blockquote><b>Страница маски через Cloudflare</b> | {state}</blockquote>",
-        "diag_ws_ok": "<blockquote><b>Туннель проносит WebSocket</b>, ссылка должна подключаться. Если клиент всё равно не может, профиль в клиенте устарел или клиент блокирует домен.</blockquote>",
-        "diag_ws_bad": "<blockquote><b>WebSocket не проходит</b>. Нажмите обновить ссылку: туннель пересоберётся, свежий хост уйдёт в лог-топик.</blockquote>",
         "sub_tls_on": "<blockquote><b>Транспорт</b> | <b>https</b> через <code>{host}</code>\nКлиенты принимают ссылку без ругани</blockquote>",
         "sub_tls_off": "<blockquote><b>Транспорт</b> | <b>http</b> на <code>{host}</code>\nМногие клиенты не принимают http, нажмите кнопку https</blockquote>",
         "btn_sub_tls": "https-туннель",
@@ -1481,17 +1344,8 @@ class XRay(loader.Module):
         self._processes: Dict[str, str] = {}
         self._monitor_task = None
         self._closing = False
-        self._heal_attempts = {}
-        self._tunnel_fails = {}
-        self._tunnel_probe = {}
         self._external_ip = ""
         self._link_cache: Dict[str, str] = {}
-        self._tunnels: Dict[str, str] = {}
-        self._site_processes: Dict[str, str] = {}
-        self._mask_sites = {
-            "Evil Cat": ("jsx", ASSET_BASE.rstrip("/") + "/WEB/Evil_Cat.jsx"),
-            "Black Hole": ("hole", HOLE_BASE),
-        }
         self._logger_topic = None
         self._asset_channel = None
         self._sub: Dict = {}
@@ -1554,19 +1408,16 @@ class XRay(loader.Module):
         for name, user in self._users.items():
             if user.pop("resume_on_module_load", False) and not user.get("restart_required"):
                 await self._start_user(name)
-        for name, user in self._users.items():
-            if (user.get("transport") != "websocket" or user.get("websocket_mode") != "tls-fallback"
-                    or name not in self._processes):
-                continue
-            user_dir = os.path.join(self._root, "users", name)
-            await self._stop_websocket_site(name)
-            await self._stop_websocket_tunnel(name)
-            ok, error = await self._start_websocket_site(name, user_dir)
-            if ok:
-                await self._stop_user(name, reason="restart")
-                ok, error = await self._start_user(name)
-            if not ok:
-                logger.error(f"[XR] WebSocket recovery failed for {name}: {error}")
+        for name in [n for n, u in self._users.items() if u.get("transport") not in ("tcp", "xhttp", "socks5")]:
+            for kind in ("xray", "site", "cf"):
+                try:
+                    await self._stop_unit(self._unit_name(name, kind))
+                except Exception:
+                    pass
+            self._users.pop(name, None)
+            shutil.rmtree(os.path.join(self._root, "users", name), ignore_errors=True)
+            logger.info("[XR] dropped outdated user %s", name)
+            await self._cleanup_stale_units(name)
         self._start_monitor()
         await self._sub_autostart()
         self._sub_start_task()
@@ -1698,16 +1549,6 @@ class XRay(loader.Module):
                 await self._stop_user(name)
             except Exception as e:
                 logger.warning("[XR] the user %s was not stopped: %s", name, e)
-        for name in list(self._tunnels.keys()):
-            try:
-                await self._stop_websocket_tunnel(name)
-            except Exception as e:
-                logger.warning("[XR] the tunnel of %s was not stopped: %s", name, e)
-        for name in list(self._site_processes.keys()):
-            try:
-                await self._stop_websocket_site(name)
-            except Exception as e:
-                logger.warning("[XR] the site of %s was not stopped: %s", name, e)
         try:
             self._save_users()
         except Exception as e:
@@ -1733,7 +1574,6 @@ class XRay(loader.Module):
             "tcp": "RAW",
             "xhttp": "XHTTP",
             "socks5": "SOCKS5",
-            "websocket": "WebSocket",
         }
         return labels.get(transport, str(transport).upper())
 
@@ -1829,439 +1669,6 @@ class XRay(loader.Module):
         user["restart_required"] = True
         self._save_users()
 
-    _WEBSOCKET_SITE_SCRIPT_URL = ASSET_BASE.rstrip("/") + "/WEB/websocket_site.py"
-
-    def _fetch_site_script(self) -> str:
-        parsed = urllib.parse.urlsplit(self._WEBSOCKET_SITE_SCRIPT_URL)
-        if parsed.scheme != "https" or not parsed.hostname:
-            return ""
-        if parsed.hostname not in ASSET_HOSTS:
-            return ""
-        request = urllib.request.Request(self._WEBSOCKET_SITE_SCRIPT_URL, headers={"User-Agent": "curl/8.5.0"})
-        with urllib.request.urlopen(request, timeout=15) as response:
-            body = response.read(256 * 1024 + 1)
-        if len(body) > 256 * 1024:
-            return ""
-        expected = os.environ.get("XRAY_SITE_SCRIPT_SHA256", "").strip().lower() or SITE_SCRIPT_SHA256
-        got = hashlib.sha256(body).hexdigest()
-        if got != expected:
-            logger.warning("[XR] the site template digest is %s instead of %s, the minimal one is used", got, expected)
-            return ""
-        text = body.decode("utf-8")
-        for token in ("__PATH__", "__SITE_PORT__", "__MASK_FILES__"):
-            if token not in text:
-                logger.warning("[XR] the site template has no %s placeholder, the minimal one is used", token)
-                return ""
-        return text
-
-    def _websocket_site_script(
-        self, path: str, backend_port: int, site_port: int, mask_kind: str, mask_url: str, mask_files: Dict[str, str]
-    ) -> str:
-        template = ""
-        for _ in range(2):
-            try:
-                template = self._fetch_site_script()
-            except Exception as e:
-                logger.warning("[XR] the site template was not fetched: %s", e)
-                template = ""
-            if template:
-                break
-        if not template:
-            template = MINIMAL_SITE_TEMPLATE
-        return (
-            template.replace("__PATH__", path)
-            .replace("__BACKEND_PORT__", str(backend_port))
-            .replace("__SITE_PORT__", str(site_port))
-            .replace("__MASK_KIND__", mask_kind or "jsx")
-            .replace("__MASK_URL__", mask_url)
-            .replace("__MASK_FILES__", repr(dict(mask_files or {})))
-            .replace("__LOADING_URL__", ASSET_BASE.rstrip("/") + "/WEB/Loading.html")
-        )
-
-    async def _start_websocket_site(self, name: str, user_dir: str) -> Tuple[bool, str]:
-        reason = _guard_reason()
-        if reason:
-            return False, reason
-        unit = self._unit_name(name, "site")
-        if await self._unit_active(unit):
-            return True, ""
-        self._site_processes.pop(name, None)
-        user = self._users[name]
-        site_port = self._find_free_loopback_port()
-        path = user.get("path") or "/xhttps"
-        if not path.startswith("/"):
-            path = "/" + path
-        user["path"] = path
-        user["site_port"] = site_port
-        mask_name = user.get("mask_site", "Evil Cat")
-        if mask_name not in self._mask_sites:
-            mask_name = "Evil Cat"
-        mask_kind, mask_url = self._mask_sites[mask_name]
-        user["mask_site"] = mask_name
-        mask_files = GATE_FILES if mask_kind == "jsx" else HOLE_FILES
-        script_path = os.path.join(user_dir, "websocket_site.py")
-        try:
-            os.makedirs(user_dir, mode=0o700, exist_ok=True)
-        except OSError as e:
-            return False, f"user_dir_unavailable: {e}"
-        try:
-            p = await asyncio.create_subprocess_exec(
-                sys.executable, "-c", "import aiohttp",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await p.communicate()
-            if p.returncode != 0:
-                p2 = await asyncio.create_subprocess_exec(
-                    sys.executable, "-m", "pip", "install", "--quiet", "aiohttp",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                await p2.communicate()
-        except Exception:
-            pass
-        try:
-            script_content = self._websocket_site_script(path, user["port"], site_port, mask_kind, mask_url, mask_files)
-        except Exception as e:
-            return False, f"site_script_fetch_failed: {e}"
-        try:
-            _write_private(script_path, script_content)
-        except OSError as e:
-            return False, f"site_script_write_failed: {e}"
-        log_path = os.path.join(user_dir, "daemon.log")
-        try:
-            self._write_unit(unit, f"XRay WebSocket site for {name}", [sys.executable, script_path], log_path)
-            ok, output = await self._start_unit(unit)
-            if not ok:
-                return False, output
-            deadline = time.time() + 10
-            while time.time() < deadline:
-                await asyncio.sleep(0.25)
-                if not await self._unit_active(unit):
-                    tail = open(log_path, "r", errors="replace").read()[-500:] if os.path.exists(log_path) else ""
-                    return False, tail or "site_start_failed"
-                try:
-                    with socket.create_connection(("127.0.0.1", site_port), timeout=0.5):
-                        break
-                except OSError:
-                    continue
-            else:
-                await self._stop_unit(unit)
-                return False, "site_healthcheck_timeout"
-            self._site_processes[name] = unit
-            self._save_users()
-            return True, ""
-        except Exception as e:
-            return False, str(e)
-
-    async def _stop_websocket_site(self, name: str):
-        self._site_processes.pop(name, None)
-        await self._stop_unit(self._unit_name(name, "site"))
-
-    async def _start_websocket_tunnel(self, name: str, user_dir: str) -> Tuple[bool, str]:
-        reason = _guard_reason()
-        if reason:
-            return False, reason
-        unit = self._unit_name(name, "cf")
-        if await self._unit_active(unit):
-            return True, ""
-        self._tunnels.pop(name, None)
-        user = self._users[name]
-        site_port = user.get("site_port")
-        if not site_port:
-            return False, "site_not_running"
-        cloudflared = self._cloudflared_path
-        if not self._cloudflared_installed():
-            return False, "cloudflared_not_installed"
-        log_path = os.path.join(user_dir, "daemon.log")
-        start_size = os.path.getsize(log_path) if os.path.exists(log_path) else 0
-        try:
-            self._write_unit(unit, f"XRay CF Tunnel for {name}", [cloudflared, "tunnel", "--protocol", "http2", "--url", f"http://127.0.0.1:{site_port}", "--no-autoupdate"], log_path)
-            ok, output = await self._start_unit(unit)
-            if not ok:
-                return False, output
-            deadline = time.time() + 40
-            hostname = ""
-            while time.time() < deadline:
-                await asyncio.sleep(1)
-                try:
-                    with open(log_path, "r", errors="replace") as f:
-                        f.seek(start_size)
-                        text = f.read()
-                except OSError:
-                    text = ""
-                matches = re.findall(r"https://([a-z0-9-]+\.trycloudflare\.com)", text, re.I)
-                if matches:
-                    hostname = matches[-1]
-                    break
-                if not await self._unit_active(unit):
-                    break
-            if not hostname:
-                await self._stop_unit(unit)
-                return False, "cloudflared_tunnel_failed"
-            self._tunnels[name] = unit
-            user["tunnel_host"] = hostname
-            self._save_users()
-            await self._send_ws_link_to_log_topic(user)
-            return True, ""
-        except Exception as e:
-            return False, str(e)
-
-    def _read_tunnel_host(self, log_path: str, start_size: int = 0) -> str:
-        try:
-            with open(log_path, "r", errors="replace") as f:
-                if start_size:
-                    f.seek(start_size)
-                text = f.read()
-        except OSError:
-            return ""
-        matches = re.findall(r"https://([a-z0-9-]+\.trycloudflare\.com)", text, re.I)
-        return matches[-1] if matches else ""
-
-    async def _refresh_tunnel_host(self, name: str) -> str:
-        user = self._users.get(name)
-        if not user or user.get("transport") != "websocket":
-            return ""
-        user_dir = os.path.join(self._root, "users", name)
-        host = self._read_tunnel_host(os.path.join(user_dir, "daemon.log"))
-        if not host or host == user.get("tunnel_host"):
-            return ""
-        previous = user.get("tunnel_host") or ""
-        user["tunnel_host"] = host
-        self._save_users()
-        logger.info("[XR] the tunnel of %s moved from %s to %s", name, previous or "none", host)
-        await self._send_log(
-            self.strings["tunnel_moved"].format(
-                name=_escape(name),
-                previous=_escape(previous or "none"),
-                host=_escape(host),
-            ),
-            name=name,
-        )
-        await self._send_ws_link_to_log_topic(user)
-        return host
-
-    def _probe_host(self, host: str, path: str = "/") -> bool:
-        if not host:
-            return False
-        url = f"https://{host}{path or '/'}"
-        request = urllib.request.Request(url, headers={"User-Agent": "curl/8.5.0"})
-        try:
-            with urllib.request.urlopen(request, timeout=TUNNEL_PROBE_TIMEOUT) as response:
-                response.read(64)
-                return True
-        except urllib.error.HTTPError:
-            return True
-        except Exception:
-            return False
-
-    async def _host_alive(self, host: str, path: str = "/") -> bool:
-        if not host:
-            return False
-        try:
-            return await asyncio.wait_for(
-                asyncio.to_thread(self._probe_host, host, path),
-                timeout=TUNNEL_PROBE_TIMEOUT + 2,
-            )
-        except Exception:
-            return False
-
-    async def _ws_probe(self, host: str, port: int, path: str, tls: bool, timeout: float = 8.0) -> Tuple[bool, str]:
-        writer = None
-        try:
-            if tls:
-                context = ssl.create_default_context()
-                reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(host, port, ssl=context, server_hostname=host), timeout
-                )
-            else:
-                reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
-            key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
-            request = (
-                f"GET {path} HTTP/1.1\r\n"
-                f"Host: {host}\r\n"
-                "Upgrade: websocket\r\n"
-                "Connection: Upgrade\r\n"
-                f"Sec-WebSocket-Key: {key}\r\n"
-                "Sec-WebSocket-Version: 13\r\n"
-                "User-Agent: Mozilla/5.0\r\n\r\n"
-            )
-            writer.write(request.encode("ascii"))
-            await writer.drain()
-            head = await asyncio.wait_for(reader.readline(), timeout)
-            status = head.decode("utf-8", "replace").strip() or "no answer"
-            return (" 101 " in status), status[:80]
-        except Exception as e:
-            return False, str(e)[:120]
-        finally:
-            if writer is not None:
-                try:
-                    writer.close()
-                except Exception:
-                    pass
-
-    async def _diagnose_websocket(self, name: str) -> Dict[str, str]:
-        user = self._users.get(name)
-        if not user:
-            return {"verdict": "unknown user"}
-        path = user.get("path") or "/xhttps"
-        if not path.startswith("/"):
-            path = "/" + path
-        site_port = int(user.get("site_port") or user.get("port") or 0)
-        host = user.get("tunnel_host") or ""
-        report = {}
-        report["site"] = (
-            self.strings["ws_up"] if await self._unit_active(self._unit_name(name, "site")) else self.strings["ws_down"]
-        )
-        report["tunnel"] = (
-            self.strings["ws_up"] if await self._unit_active(self._unit_name(name, "cf")) else self.strings["ws_down"]
-        )
-        local_template = self.strings["diag_ws_local"]
-        if site_port:
-            ok, status = await self._ws_probe("127.0.0.1", site_port, path, tls=False)
-            report["local"] = local_template.format(state=self.strings["ws_ok"] if ok else self.strings["ws_dead"], detail=_escape(status))
-        else:
-            report["local"] = local_template.format(state=self.strings["ws_dead"], detail="no site port")
-        edge_template = self.strings["diag_ws_edge"]
-        if host:
-            ok, status = await self._ws_probe(host, 443, path, tls=True)
-            report["edge"] = edge_template.format(state=self.strings["ws_ok"] if ok else self.strings["ws_dead"], detail=_escape(status))
-            http_ok = await self._host_alive(host, "/health")
-            report["http"] = self.strings["diag_http"].format(
-                state=self.strings["ws_ok"] if http_ok else self.strings["ws_dead"]
-            )
-        else:
-            report["edge"] = edge_template.format(state=self.strings["ws_dead"], detail="no tunnel host")
-            report["http"] = self.strings["diag_http"].format(state=self.strings["ws_dead"])
-        edge_ok = host and report.get("edge", "").startswith(edge_template.format(state=self.strings["ws_ok"], detail=""))
-        report["verdict"] = self.strings["diag_ws_ok"] if edge_ok else self.strings["diag_ws_bad"]
-        return report
-
-    async def _check_tunnel_health(self, name: str) -> bool:
-        user = self._users.get(name)
-        if not user or user.get("transport") != "websocket":
-            return False
-        host = user.get("tunnel_host") or ""
-        if not host:
-            return False
-        now = time.time()
-        stamps = self._tunnel_probe
-        failures = self._tunnel_fails.get(name, 0)
-        gap = TUNNEL_PROBE_RETRY if failures else TUNNEL_PROBE_INTERVAL
-        last = stamps.get(name, 0.0)
-        if last and now - last < gap:
-            return not failures
-        stamps[name] = now
-        path = user.get("path") or "/xhttps"
-        alive = await self._host_alive(host, path)
-        if alive:
-            self._tunnel_fails.pop(name, None)
-            return True
-        fails = self._tunnel_fails.get(name, 0) + 1
-        self._tunnel_fails[name] = fails
-        logger.warning("[XR] the tunnel of %s looks dead (%s/%s)", name, fails, TUNNEL_PROBE_FAILS)
-        return fails < TUNNEL_PROBE_FAILS
-
-    async def _restart_tunnel(self, name: str) -> bool:
-        user = self._users.get(name)
-        if not user:
-            return False
-        user_dir = os.path.join(self._root, "users", name)
-        await self._stop_websocket_tunnel(name)
-        ok, error = await self._start_websocket_tunnel(name, user_dir)
-        self._tunnel_fails.pop(name, None)
-        if not ok:
-            logger.warning("[XR] the tunnel of %s was not restarted: %s", name, error)
-            return False
-        host = user.get("tunnel_host") or ""
-        await self._send_log(
-            self.strings["tunnel_restarted"].format(name=_escape(name), host=_escape(host)),
-            name=name,
-        )
-        await self._send_ws_link_to_log_topic(user)
-        return True
-
-    async def _heal_websocket_stack(self, name: str) -> None:
-        if self._closing:
-            return
-        user = self._users.get(name)
-        if not user or user.get("transport") != "websocket":
-            return
-        if user.get("websocket_mode") != "tls-fallback":
-            return
-        user_dir = os.path.join(self._root, "users", name)
-        site_unit = self._unit_name(name, "site")
-        cf_unit = self._unit_name(name, "cf")
-        site_up = await self._unit_active(site_unit)
-        cf_up = await self._unit_active(cf_unit)
-        if site_up and cf_up:
-            self._heal_attempts.pop(name, None)
-            await self._refresh_tunnel_host(name)
-            if not await self._check_tunnel_health(name):
-                now = time.time()
-                last = self._heal_attempts.get(name, 0.0)
-                if now - last < HEAL_COOLDOWN:
-                    return
-                self._heal_attempts[name] = now
-                await self._restart_tunnel(name)
-            return
-        now = time.time()
-        last = self._heal_attempts.get(name, 0.0)
-        if now - last < HEAL_COOLDOWN:
-            return
-        self._heal_attempts[name] = now
-        if not await self._unit_active(site_unit):
-            ok, error = await self._start_websocket_site(name, user_dir)
-            if not ok:
-                logger.warning("[XR] the mask site of %s did not come back: %s", name, error)
-                return
-        if not await self._unit_active(cf_unit):
-            ok, error = await self._start_websocket_tunnel(name, user_dir)
-            if not ok:
-                logger.warning("[XR] the tunnel of %s did not come back: %s", name, error)
-                return
-        self._heal_attempts.pop(name, None)
-        await self._refresh_tunnel_host(name)
-
-    async def _stop_websocket_tunnel(self, name: str):
-        self._tunnels.pop(name, None)
-        await self._stop_unit(self._unit_name(name, "cf"))
-
-    async def _send_ws_link_to_log_topic(self, user: Dict):
-        if not self._logger_topic or not self._asset_channel:
-            return
-        link = self._build_vless_link(user)
-        if not link:
-            return
-        name = str(user.get("name", "user"))
-        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", name)
-        payload = (link + "\n").encode("utf-8")
-
-        def link_file():
-            handle = io.BytesIO(payload)
-            handle.name = f"link_for_{safe_name}.txt"
-            return handle
-
-        try:
-            await _retry_topic_send(
-                lambda: self.inline.bot.send_file(
-                    int(f"-100{self._asset_channel}"),
-                    link_file(),
-                    caption=(
-                        f"<b>WebSocket TLS link refreshed</b>\n"
-                        f"<blockquote>User: <code>{_escape(name)}</code>\n"
-                        f"TLS: <code>{_escape(user.get('tunnel_host', '?'))}</code></blockquote>"
-                    ),
-                    parse_mode="html",
-                    message_thread_id=self._logger_topic.id,
-                    force_document=True,
-                ),
-                self._ensure_logger_topic,
-            )
-        except Exception as e:
-            logger.error(f"[XR] Failed to send WebSocket link file: {e}")
-
-    @staticmethod
     def _html_to_plain(text: str) -> str:
         """Strip HTML tags and unescape entities for plain-text log files."""
         text = re.sub(r"<[^>]+>", "", text)
@@ -2315,12 +1722,6 @@ class XRay(loader.Module):
             unit = self._unit_name(name)
             if await self._unit_active(unit):
                 self._processes[name] = unit
-            if user.get("transport") == "websocket":
-                if await self._unit_active(self._unit_name(name, "site")):
-                    self._site_processes[name] = self._unit_name(name, "site")
-                if await self._unit_active(self._unit_name(name, "cf")):
-                    self._tunnels[name] = self._unit_name(name, "cf")
-                    await self._refresh_tunnel_host(name)
 
     async def _is_user_running(self, name: str) -> bool:
         if name in self._processes:
@@ -2964,20 +2365,7 @@ class XRay(loader.Module):
             ],
         }
 
-        if transport == "websocket":
-            ws_path = user.get("path") or "/xhttps"
-            if not ws_path.startswith("/"):
-                ws_path = "/" + ws_path
-            config["inbounds"][0]["listen"] = "127.0.0.1"
-            config["inbounds"][0]["settings"]["decryption"] = "none"
-            config["inbounds"][0]["streamSettings"] = {
-                "network": "ws",
-                "security": "none",
-                "wsSettings": {
-                    "path": ws_path,
-                },
-            }
-        elif transport == "xhttp":
+        if transport == "xhttp":
             config["inbounds"][0]["streamSettings"] = {
                 "network": "xhttp",
                 "security": "reality",
@@ -3027,25 +2415,6 @@ class XRay(loader.Module):
         public_key = user["public_key"]
         short_id = user["short_id"]
         fp = user.get("fingerprint", "firefox")
-
-        import json as _json
-
-        if transport == "websocket":
-            path = user.get("path") or "/xhttps"
-            if not path.startswith("/"):
-                path = "/" + path
-            fallback = user.get("websocket_mode") == "tls-fallback"
-            host_header = user.get("tunnel_host", "")
-            params = urllib.parse.urlencode({
-                "type": "ws",
-                "encryption": "none" if fallback else user.get("vless_encryption", "none"),
-                "path": path,
-                "host": host_header if fallback else "",
-                "security": "tls" if fallback else "none",
-                **({"sni": host_header, "fp": fp} if fallback else {}),
-            })
-            host = user.get("tunnel_host") if fallback else ip
-            return f"vless://{uuid_str}@{host}:{443 if fallback else port}?{params}#{urllib.parse.quote(name, safe='')}"
 
         if transport == "xhttp":
             sni = user.get("sni", "www.cloudflare.com")
@@ -3106,11 +2475,6 @@ class XRay(loader.Module):
         user_dir = os.path.join(self._root, "users", name)
         os.makedirs(user_dir, exist_ok=True)
 
-        if user["transport"] == "websocket" and user.get("websocket_mode") == "tls-fallback":
-            ok, error = await self._start_websocket_site(name, user_dir)
-            if not ok:
-                return False, error
-
         config = self._build_config(user)
         config_path = os.path.join(user_dir, "config.json")
         _write_private(config_path, json.dumps(config, indent=2))
@@ -3137,14 +2501,6 @@ class XRay(loader.Module):
             user["start_time"] = time.time()
             user["restart_required"] = False
 
-            if user["transport"] == "websocket" and user.get("websocket_mode") == "tls-fallback":
-                ok, error = await self._start_websocket_tunnel(name, user_dir)
-                if not ok:
-                    await self._stop_unit(unit)
-                    self._processes.pop(name, None)
-                    await self._stop_websocket_site(name)
-                    return False, error
-
             self._save_users()
             await self._send_log(
                 self.strings["log_user_started"].format(**self._log_user_data(user)),
@@ -3163,10 +2519,6 @@ class XRay(loader.Module):
         await self._stop_unit(unit)
         self._processes.pop(name, None)
 
-        if self._users.get(name, {}).get("transport") == "websocket":
-            await self._stop_websocket_tunnel(name)
-            await self._stop_websocket_site(name)
-
         if name in self._users:
             self._users[name]["start_time"] = 0
             self._save_users()
@@ -3181,13 +2533,10 @@ class XRay(loader.Module):
 
         return True
 
-    def _get_active_connections(
-        self, port: int, transport: str = "", site_port: Optional[int] = None
-    ) -> int:
+    def _get_active_connections(self, port: int) -> int:
         try:
-            watch_port = site_port if transport == "websocket" and site_port else port
             proc = subprocess.run(
-                ["ss", "-Htn", "state", "established", f"sport = :{watch_port}"],
+                ["ss", "-Htn", "state", "established", f"sport = :{port}"],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -3229,9 +2578,7 @@ class XRay(loader.Module):
             if limit == 0:
                 continue
 
-            active = self._get_active_connections(
-                user["port"], user.get("transport", ""), user.get("site_port")
-            )
+            active = self._get_active_connections(user["port"])
 
             if active > limit:
                 user["autostart"] = False
@@ -3248,12 +2595,6 @@ class XRay(loader.Module):
 
         if self._closing or not self._xray_installed():
             return
-
-        for name, user in list(self._users.items()):
-            if self._closing:
-                return
-            if user.get("transport") == "websocket":
-                await self._heal_websocket_stack(name)
 
         for name, user in list(self._users.items()):
             if self._closing:
@@ -3377,7 +2718,7 @@ class XRay(loader.Module):
     def _sub_taken_ports(self) -> set:
         taken = set()
         for user in self._users.values():
-            for key in ("port", "site_port", "api_port"):
+            for key in ("port", "api_port"):
                 value = user.get(key)
                 if value:
                     try:
@@ -3538,28 +2879,6 @@ class XRay(loader.Module):
             "email": name,
         }
         settings = {"vnext": [{"address": address, "port": port, "users": [vnext_user]}]}
-
-        if transport == "websocket":
-            path = user.get("path") or "/xhttps"
-            if not path.startswith("/"):
-                path = "/" + path
-            fallback = user.get("websocket_mode") == "tls-fallback"
-            host = (user.get("tunnel_host") or address) if fallback else address
-            target_port = 443 if fallback else port
-            settings["vnext"][0]["address"] = host
-            settings["vnext"][0]["port"] = target_port
-            stream = {"network": "ws", "wsSettings": {"path": path}}
-            if fallback:
-                stream["security"] = "tls"
-                stream["tlsSettings"] = {"serverName": host}
-            else:
-                stream["security"] = "none"
-            return {
-                "tag": "proxy",
-                "protocol": "vless",
-                "settings": settings,
-                "streamSettings": stream,
-            }
 
         if transport == "xhttp":
             path = user.get("path") or "/xhttps"
@@ -3818,6 +3137,17 @@ class XRay(loader.Module):
     def _sub_tunnel_log(self) -> str:
         root = self._root or os.path.expanduser("~")
         return os.path.join(root, "sub-tunnel.log")
+
+    def _read_tunnel_host(self, log_path: str, start_size: int = 0) -> str:
+        try:
+            with open(log_path, "r", errors="replace") as f:
+                if start_size:
+                    f.seek(start_size)
+                text = f.read()
+        except OSError:
+            return ""
+        matches = re.findall(r"https://([a-z0-9-]+\.trycloudflare\.com)", text, re.I)
+        return matches[-1] if matches else ""
 
     async def _sub_tunnel_start(self) -> Tuple[bool, str]:
         self._sub_ensure()
@@ -4428,10 +3758,7 @@ class XRay(loader.Module):
 
         active = 0
         if is_running:
-            active = self._get_active_connections(
-                user["port"], user.get("transport", ""), user.get("site_port")
-            )
-        tls_host = user.get("tunnel_host", "n/a") if user.get("transport") == "websocket" else "n/a"
+            active = self._get_active_connections(user["port"])
 
         uptime = await self._get_user_uptime_async(name)
         autostart = user.get("autostart", False)
@@ -4441,23 +3768,12 @@ class XRay(loader.Module):
             name=_escape(name),
             status=status,
             transport=transport,
-            tls=_escape(tls_host),
             port=user["port"],
             autostart=autostart_text,
             limit=limit_text,
             active=active if is_running else "n/a",
             uptime=uptime,
         )
-
-        if user.get("transport") == "websocket" and user.get("websocket_mode") == "tls-fallback":
-            site_ok = await self._unit_active(self._unit_name(name, "site"))
-            tunnel_ok = await self._unit_active(self._unit_name(name, "cf"))
-            health_ok = bool(user.get("tunnel_host")) and self._tunnel_fails.get(name, 0) < TUNNEL_PROBE_FAILS
-            text += "\n" + self.strings["ws_status"].format(
-                health=self.strings["ws_ok"] if health_ok else self.strings["ws_dead"],
-                site=self.strings["ws_up"] if site_ok else self.strings["ws_down"],
-                tunnel=self.strings["ws_up"] if tunnel_ok else self.strings["ws_down"],
-            )
 
         markup = []
 
@@ -4497,15 +3813,6 @@ class XRay(loader.Module):
         markup.append([
             {"text": self.strings["btn_settings"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"},
         ])
-
-        if user.get("transport") == "websocket" and user.get("websocket_mode") == "tls-fallback":
-            markup.append([
-                {"text": self.strings["btn_ws_refresh"], "callback": self._cb_refresh_link, "args": (name,), "style": "success"},
-                {"text": self.strings["btn_ws_check"], "callback": self._cb_ws_check, "args": (name,), "style": "primary"},
-            ])
-            markup.append([
-                {"text": self.strings["btn_mask_site"], "callback": self._cb_mask_site_menu, "args": (name,), "style": "primary"},
-            ])
 
         markup.append([
             {"text": self.strings["btn_delete"], "callback": self._cb_delete_user, "args": (name,), "style": "danger"},
@@ -4614,65 +3921,6 @@ class XRay(loader.Module):
             self.strings["user_deleted"].format(name=_escape(name)),
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
         )
-
-    async def _cb_ws_check(self, call: InlineCall, name: str):
-        user = self._users.get(name)
-        if not user:
-            await call.answer("User not found", show_alert=True)
-            return
-        if user.get("transport") != "websocket":
-            await call.answer(self.strings["sub_empty"], show_alert=True)
-            return
-        await call.edit(self.strings["loading"])
-        report = await self._diagnose_websocket(name)
-        text = (
-            self.strings["ws_check_title"]
-            + self.strings["diag_site"].format(state=report.get("site", "-"))
-            + self.strings["diag_tunnel"].format(state=report.get("tunnel", "-"))
-            + report.get("local", "")
-            + report.get("edge", "")
-            + report.get("http", "")
-            + report.get("verdict", "")
-        )
-        await call.edit(
-            text,
-            reply_markup=[
-                [{"text": self.strings["btn_ws_refresh"], "callback": self._cb_refresh_link, "args": (name,), "style": "success"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}],
-            ],
-        )
-
-    async def _cb_refresh_link(self, call: InlineCall, name: str):
-        user = self._users.get(name)
-        if not user:
-            await call.answer("User not found", show_alert=True)
-            return
-        if user.get("transport") != "websocket" or user.get("websocket_mode") != "tls-fallback":
-            await self._cb_get_user_link(call, name)
-            return
-        await call.edit(self.strings["loading"])
-        user_dir = os.path.join(self._root, "users", name)
-        site_unit = self._unit_name(name, "site")
-        cf_unit = self._unit_name(name, "cf")
-        if not await self._unit_active(site_unit):
-            ok, error = await self._start_websocket_site(name, user_dir)
-            if not ok:
-                logger.warning("[XR] the mask site of %s did not start: %s", name, error)
-        if not await self._unit_active(cf_unit):
-            await self._start_websocket_tunnel(name, user_dir)
-        host = user.get("tunnel_host") or ""
-        if host and not await self._host_alive(host, user.get("path") or "/xhttps"):
-            await self._restart_tunnel(name)
-            host = user.get("tunnel_host") or ""
-        self._tunnel_fails.pop(name, None)
-        await self._send_ws_link_to_log_topic(user)
-        if not host:
-            await call.edit(
-                self.strings["setup_fail"].format(error="tunnel is not running"),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]],
-            )
-            return
-        await self._cb_get_user_link(call, name)
 
     async def _cb_get_user_link(self, call: InlineCall, name: str):
         await call.edit(self.strings["loading"])
@@ -4928,37 +4176,6 @@ class XRay(loader.Module):
             reply_markup=back_markup,
         )
 
-    async def _cb_mask_site_menu(self, call: InlineCall, name: str):
-        user = self._users.get(name)
-        if not user or user.get("transport") != "websocket":
-            await call.answer("WebSocket user not found", show_alert=True)
-            return
-        current = user.get("mask_site", "Evil Cat")
-        if current not in self._mask_sites:
-            current = "Evil Cat"
-        markup = []
-        for mask in self._mask_sites:
-            markup.append([{
-                "text": f"{mask} (current)" if mask == current else mask,
-                "callback": self._cb_set_mask_site,
-                "args": (name, mask),
-                "style": "success" if mask == current else "primary",
-            }])
-        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}])
-        await call.edit(
-            self.strings["mask_site_menu"].format(current=_escape(current)),
-            reply_markup=markup,
-        )
-
-    async def _cb_set_mask_site(self, call: InlineCall, name: str, mask: str):
-        user = self._users.get(name)
-        if not user or mask not in self._mask_sites:
-            await call.answer("Mask site not found", show_alert=True)
-            return
-        user["mask_site"] = mask
-        await self._mark_restart_required(name)
-        await self._cb_user_menu(call, name)
-
     async def _cb_user_settings(self, call: InlineCall, name: str):
         user = self._users.get(name)
         if not user:
@@ -4966,13 +4183,12 @@ class XRay(loader.Module):
             return
 
         is_socks5 = user["transport"] == "socks5"
-        is_websocket = user["transport"] == "websocket"
         transport = self._transport_label(user["transport"])
-        sni = user.get("sni", "www.cloudflare.com") if not is_socks5 and not is_websocket else "n/a"
-        dest = user.get("dest", "www.cloudflare.com:443") if not is_socks5 and not is_websocket else "n/a"
-        path = user.get("path", "/xhttps") if user["transport"] in {"xhttp", "websocket"} else "n/a"
+        sni = user.get("sni", "www.cloudflare.com") if not is_socks5 else "n/a"
+        dest = user.get("dest", "www.cloudflare.com:443") if not is_socks5 else "n/a"
+        path = user.get("path", "/xhttps") if user["transport"] == "xhttp" else "n/a"
         padding = user.get("padding", "100-1000") if user["transport"] == "xhttp" else "n/a"
-        fp = user.get("fingerprint", "firefox") if not is_socks5 and not is_websocket else "n/a"
+        fp = user.get("fingerprint", "firefox") if not is_socks5 else "n/a"
         encryption = user.get("encryption_mode", "none")
         restart = "Need restart for updating changes" if user.get("restart_required") else "Not required"
         limit = user.get("device_limit", 0)
@@ -5017,8 +4233,7 @@ class XRay(loader.Module):
             return
         await call.edit(
             f"<b>VLESS encryption: {_escape(user.get('encryption_mode', 'none'))}</b>\n"
-            "<blockquote>ML-KEM-768 is generated by the installed Xray core. "
-            "Fallback mode is available only for WebSocket.</blockquote>",
+            "<blockquote>ML-KEM-768 is generated by the installed Xray core.</blockquote>",
             reply_markup=[
                 [{"text": "ML-KEM-768", "callback": self._cb_set_encryption, "args": (name, "ml-kem-768"), "style": "primary"}],
                 [{"text": "None", "callback": self._cb_set_encryption, "args": (name, "none"), "style": "primary"}],
@@ -5039,8 +4254,6 @@ class XRay(loader.Module):
         else:
             user["vless_decryption"], user["vless_encryption"] = "none", "none"
         user["encryption_mode"] = mode
-        if user.get("transport") == "websocket":
-            user["websocket_mode"] = "ml-kem-768" if mode == "ml-kem-768" else "tls-fallback"
         await self._mark_restart_required(name)
         await self._cb_user_settings(call, name)
 
@@ -5053,7 +4266,6 @@ class XRay(loader.Module):
         markup = [
             [{"text": self.strings["btn_raw"], "callback": self._cb_set_transport, "args": (name, "tcp"), "style": "primary"}],
             [{"text": self.strings["btn_xhttp"], "callback": self._cb_set_transport, "args": (name, "xhttp"), "style": "primary"}],
-            [{"text": self.strings["btn_websocket"], "callback": self._cb_set_transport, "args": (name, "websocket"), "style": "primary"}],
             [{"text": self.strings["btn_socks5"], "callback": self._cb_set_transport, "args": (name, "socks5"), "style": "primary"}],
             [{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}],
         ]
@@ -5081,12 +4293,6 @@ class XRay(loader.Module):
         if transport == "socks5" and not user.get("socks_user"):
             user["socks_user"] = _gen_secret(8)
             user["socks_pass"] = _gen_secret(14)
-
-        if transport == "websocket":
-            user.pop("tunnel_host", None)
-            user.pop("site_port", None)
-            if not user.get("path"):
-                user["path"] = "/xhttps"
 
         user["restart_required"] = True
         self._save_users()
@@ -5314,7 +4520,6 @@ class XRay(loader.Module):
         markup = [
             [{"text": self.strings["btn_xhttp"], "callback": self._cb_add_user_limit_input, "args": (name, "xhttp"), "style": "primary"}],
             [{"text": self.strings["btn_raw"], "callback": self._cb_add_user_limit_input, "args": (name, "tcp"), "style": "primary"}],
-            [{"text": self.strings["btn_websocket"], "callback": self._cb_add_user_limit_input, "args": (name, "websocket"), "style": "primary"}],
             [{"text": self.strings["btn_socks5"], "callback": self._cb_add_user_limit_input, "args": (name, "socks5"), "style": "primary"}],
             [{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}],
         ]
@@ -5330,34 +4535,14 @@ class XRay(loader.Module):
                 {
                     "text": self.strings["input_limit"],
                     "input": self.strings["input_limit"],
-                    "handler": self._cb_add_user_encryption_choice,
+                    "handler": self._cb_create_user_final,
                     "args": (name, transport),
                     "style": "primary",
                 }
             ]]
         )
 
-    async def _cb_add_user_encryption_choice(self, call: InlineCall, limit_str: str, name: str, transport: str):
-        try:
-            limit = int(limit_str.strip())
-            if limit < 0:
-                raise ValueError
-        except Exception:
-            await call.answer(self.strings["err_invalid_limit"], show_alert=True)
-            return
-        if transport != "websocket":
-            await self._cb_create_user_final(call, str(limit), name, transport, "ml-kem-768")
-            return
-        await call.edit(
-            "<b>WebSocket security</b>\n<blockquote>Select an endpoint mode:</blockquote>",
-            reply_markup=[
-                [{"text": "Use TLS with fallback", "callback": self._cb_create_user_final, "args": (str(limit), name, transport, "tls-fallback"), "style": "primary"}],
-                [{"text": "Use post-quantum encryption", "callback": self._cb_create_user_final, "args": (str(limit), name, transport, "ml-kem-768"), "style": "primary"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_add_user_transport_choice, "args": (name,), "style": "primary"}],
-            ],
-        )
-
-    async def _cb_create_user_final(self, call: InlineCall, limit_str: str, name: str, transport: str, encryption_mode: str = "ml-kem-768"):
+    async def _cb_create_user_final(self, call: InlineCall, limit_str: str, name: str, transport: str):
         try:
             limit = int(limit_str.strip())
             if limit < 0:
@@ -5385,9 +4570,8 @@ class XRay(loader.Module):
                     reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
                 )
                 return
-            if encryption_mode == "ml-kem-768":
-                vless_decryption, vless_encryption = await self._generate_vless_encryption()
-            if encryption_mode == "ml-kem-768" and (not vless_decryption or not vless_encryption):
+            vless_decryption, vless_encryption = await self._generate_vless_encryption()
+            if not vless_decryption or not vless_encryption:
                 await call.edit(
                     self.strings["setup_fail"].format(error="ML-KEM-768 VLESS encryption generation failed"),
                     reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
@@ -5414,9 +4598,7 @@ class XRay(loader.Module):
             "short_id": self._generate_short_id(),
             "vless_decryption": vless_decryption,
             "vless_encryption": vless_encryption,
-            "encryption_mode": "none" if transport == "socks5" else encryption_mode,
-            "websocket_mode": encryption_mode if transport == "websocket" else "",
-            "mask_site": "Evil Cat",
+            "encryption_mode": "none" if transport == "socks5" else "ml-kem-768",
             "sni": default_sni,
             "dest": default_dest,
             "path": "/xhttps",
@@ -5429,8 +4611,6 @@ class XRay(loader.Module):
             "start_time": 0,
             "services": {
                 "xray": self._unit_name(name),
-                "site": self._unit_name(name, "site"),
-                "cf_tunnel": self._unit_name(name, "cf"),
             },
         }
 

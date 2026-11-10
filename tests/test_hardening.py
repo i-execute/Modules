@@ -175,7 +175,7 @@ def test_the_guard_reports_root_first_and_container_second() -> None:
 
 
 def test_the_guard_is_asked_before_anything_starts() -> None:
-    for name in ("_start_user", "_start_websocket_site", "_start_websocket_tunnel", "_sub_start_server"):
+    for name in ("_start_user", "_sub_start_server"):
         assert "_guard_reason()" in _source(name), name
     assert "_guard_deny(message)" in _source("xr")
     body = _source("_start_user")
