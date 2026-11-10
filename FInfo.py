@@ -280,7 +280,6 @@ class FInfo(loader.Module):
             ("prefix", self.get_pfx, "Command prefix"),
             ("upd", self.get_upd, "Update status"),
             ("uptime", self.get_uptime, "Feroku process uptime"),
-            ("ping", self.get_ping, "Response latency in ms"),
             ("time", self.get_time, "Time"),
             ("date", self.get_date, "Date"),
             ("day_of_the_week", self.get_day_of_the_week, "Day of week"),
@@ -655,16 +654,6 @@ class FInfo(loader.Module):
         if isinstance(data, dict) and "uptime" in data and data["uptime"] not in (None, ""):
             return str(data["uptime"])
         return utils.formatted_uptime()
-
-    async def get_ping(self, data=None) -> str:
-        if isinstance(data, dict) and "ping" in data and data["ping"] not in (None, ""):
-            return str(data["ping"])
-        start = time.perf_counter()
-        try:
-            await self._client.get_me()
-            return f"{round((time.perf_counter() - start) * 1000, 2)}"
-        except Exception:
-            return "1"
 
     async def get_time(self, data=None) -> str:
         return datetime.now().strftime("%H:%M:%S")
