@@ -1536,11 +1536,11 @@ class YNDXMusic(loader.Module):
             await utils.answer(msg, text)
 
     @loader.command(
-        ru_doc="Поиск трека. Без аргументов открывает форму выбора",
-        en_doc="Search track. Without args opens selection form",
+        ru_doc="Поиск трека. Без аргументов открывает форму выбора. Ссылка в аргументах сразу скачивает трек",
+        en_doc="Search track. Without args opens selection form. A link in args downloads the track immediately",
     )
     async def yms(self, message: Message):
-        """Search track. Without args opens selection form"""
+        """Search track. Without args opens selection form. A link in args downloads the track immediately"""
         prefix = self.get_prefix()
         if not await self._ensure_ym():
             await utils.answer(message, self.strings["no_token"].format(prefix=prefix))
@@ -1912,11 +1912,11 @@ class YNDXMusic(loader.Module):
         await call.delete()
 
     @loader.command(
-        ru_doc="Скачать плейлист. Можно передать ссылку аргументом",
-        en_doc="Download playlist. Can pass link as argument",
+        ru_doc="Скачать плейлист. Можно передать ссылку аргументом. Ссылка в аргументах сразу скачивает плейлист",
+        en_doc="Download playlist. Can pass link as argument. A link in args downloads the playlist immediately",
     )
     async def ymp(self, message: Message):
-        """Download playlist. Can pass link as argument"""
+        """Download playlist. Can pass link as argument. A link in args downloads the playlist immediately"""
         prefix = self.get_prefix()
         if not await self._ensure_ym():
             await utils.answer(message, self.strings["no_token"].format(prefix=prefix))
@@ -2323,11 +2323,11 @@ class YNDXMusic(loader.Module):
         await call.delete()
 
     @loader.command(
-        ru_doc="Скачать аудиокнигу. Без аргументов открывает форму выбора",
-        en_doc="Download audiobook. Without args opens selection form",
+        ru_doc="Скачать аудиокнигу. Без аргументов открывает форму выбора. Ссылка в аргументах сразу скачивает книгу",
+        en_doc="Download audiobook. Without args opens selection form. A link in args downloads the audiobook immediately",
     )
     async def ymb(self, message: Message):
-        """Download audiobook. Without args opens selection form"""
+        """Download audiobook. Without args opens selection form. A link in args downloads the audiobook immediately"""
         prefix = self.get_prefix()
         if not await self._ensure_ym():
             await utils.answer(message, self.strings["no_token"].format(prefix=prefix))
@@ -2629,11 +2629,11 @@ class YNDXMusic(loader.Module):
         await call.delete()
 
     @loader.command(
-        ru_doc="Скачать альбом. Можно передать ссылку аргументом",
-        en_doc="Download album. Can pass link as argument",
+        ru_doc="Скачать альбом. Можно передать ссылку аргументом. Ссылка в аргументах сразу скачивает альбом",
+        en_doc="Download album. Can pass link as argument. A link in args downloads the album immediately",
     )
     async def yma(self, message: Message):
-        """Download album. Can pass link as argument"""
+        """Download album. Can pass link as argument. A link in args downloads the album immediately"""
         prefix = self.get_prefix()
         if not await self._ensure_ym():
             await utils.answer(message, self.strings["no_token"].format(prefix=prefix))
