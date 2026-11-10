@@ -8,6 +8,7 @@ Deleter
 DepInvoce
 DevTool
 EmojiClone
+FInfo
 GRAMScanner
 Gift
 Gift2Sticker
