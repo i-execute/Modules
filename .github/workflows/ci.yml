@@ -137,4 +137,3 @@ jobs:
                       sys.exit(1)
           print("guard strings are in place")
           PY
-                PY
