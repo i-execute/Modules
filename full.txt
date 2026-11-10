@@ -53,6 +53,7 @@ Token
 Twin
 Uploader
 VKCalls
+Voice2Text
 Voices
 WebDeployer
 XRay
