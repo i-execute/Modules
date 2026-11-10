@@ -68,7 +68,7 @@ class AsyncTTLCache:
 
 @loader.tds
 class FInfo(loader.Module):
-    """Feroku Info & Status bar module with advanced asynchronous placeholder engine."""
+    """Feroku Info module with placeholder rendering."""
 
     strings = {
         "name": "FInfo",
@@ -118,24 +118,16 @@ class FInfo(loader.Module):
         "city_doc": "City for weather placeholder (e.g. 'Berlin', 'Moscow').",
         "github_user_doc": "Default GitHub username for repos and followers placeholders.",
         "lastfm_user_doc": "Default Last.FM username for music placeholders.",
-        "phtest_usage": "<b>Usage:</b> <code>.phtest Hello, {name}! Today is {date} ({weather})</code>",
-        "phlist_title": "<b>Placeholders list</b>\n<blockquote>Available tokens by category:</blockquote>",
-        "btn_back": "Back",
-        "btn_close": "Close",
         "no_val": "N/A",
         "no_bio": "No bio",
         "no_premium": "No Premium",
-        "premium_active": "Premium active (until {})",
         "up_to_date": "Up-to-date",
-        "update_required": "Update required",
         "clean": "clean",
     }
 
     strings_ru = {
         "_cls_doc": "Модуль информации и статус-бара Feroku с поддержкой плейсхолдеров.",
-        "_cmd_doc_finfo": "Показать статус-бар или системную информацию Feroku.",
-        "_cmd_doc_phtest": "<шаблон> - Отрендерить произвольный текст с плейсхолдерами.",
-        "_cmd_doc_phlist": "Список всех доступных плейсхолдеров по категориям.",
+        "_cmd_doc_info": "Показать статус-бар или системную информацию Feroku.",
         "custom_message_doc": "Пользовательский шаблон. Оставьте пустым для стандартного.",
         "banner_url_doc": "Ссылка на баннер для шапки.",
         "city_doc": "Город для погоды.",
@@ -144,9 +136,7 @@ class FInfo(loader.Module):
         "no_val": "Н/Д",
         "no_bio": "Нет описания",
         "no_premium": "Нет Premium",
-        "premium_active": "Premium активен (до {})",
         "up_to_date": "Актуально",
-        "update_required": "Требуется обновление",
         "clean": "чисто",
     }
 
@@ -231,7 +221,6 @@ class FInfo(loader.Module):
             ),
         )
         self._cache = AsyncTTLCache(max_size=256, default_ttl=300)
-        self._rates_cache: dict[str, float] = {}
 
     @staticmethod
     def _os_pretty_name() -> str:
@@ -625,8 +614,8 @@ class FInfo(loader.Module):
 
         return re.sub(r"\{([a-zA-Z0-9_]+)\}", repl, template)
 
-    @loader.command(aliases=["info"])
-    async def finfo(self, message: Message):
+    @loader.command()
+    async def info(self, message: Message):
         """Show Feroku runtime, status bar and placeholders."""
         start = time.monotonic()
         banner = str(self.config["banner_url"]).strip() or FEROKU_IMAGE_URL
@@ -671,67 +660,3 @@ class FInfo(loader.Module):
             quote=bool(self.config["quote_media"]),
             invert_media=bool(self.config["invert_media"]),
         )
-
-    @loader.command()
-    async def phtest(self, message: Message):
-        """<template> - Render text containing any placeholder tokens."""
-        args = utils.get_args_raw(message).strip()
-        if not args:
-            reply = await message.get_reply_message()
-            args = reply.raw_text.strip() if reply and reply.raw_text else ""
-        if not args:
-            await utils.answer(message, self.strings["phtest_usage"])
-            return
-
-        start = time.monotonic()
-        placeholders = await self._build_placeholders(start)
-        rendered = self._render_template(args, placeholders)
-        await utils.answer(message, rendered)
-
-    @loader.command()
-    async def phlist(self, message: Message):
-        """List all available placeholder tokens."""
-        categories = {
-            "Profile": [
-                "username", "name", "surname", "bio_description", "user_id",
-                "phone_number", "dc_id", "amount_stars", "premium_check", "me",
-            ],
-            "Currency & Crypto": [
-                "dollars_in_rub", "rub_in_dollars", "euros_in_rub", "rub_in_euros",
-                "yuan_in_rub", "tenge_in_rub", "rub_in_tenge", "usdt_in_rub",
-                "rub_in_usdt", "ton_in_rub", "rub_in_ton", "btc_in_rub", "eth_in_rub",
-                "stars_in_rub", "stars_in_ton", "stars_in_usdt",
-            ],
-            "System & Network": [
-                "host", "user", "kernel", "os", "os_uptime", "cpu_usage", "ram_usage",
-                "disk", "gpu", "shell", "battery", "local_ip", "public_ip", "ip_info",
-                "internet_usage", "speedtest", "user_and_hostname",
-            ],
-            "Software & Git": [
-                "py_ver", "htl_ver", "layer", "ver", "build", "git_branch",
-                "git_status", "pfx", "upd", "uptime", "ping",
-            ],
-            "Date, Time & Astro": [
-                "time", "date", "day_of_the_week", "data_and_time",
-                "data_and_time_and_day_of_the_week", "moon_phase", "zodiac_sign",
-            ],
-            "Weather": [
-                "weather", "outdoor_temperature", "weather_and_temperature",
-                "weather_emoji", "feels_like", "humidity", "pressure", "wind_speed",
-            ],
-            "Personal": [
-                "my_crypto_address", "my_card_number", "my_donate_site",
-                "my_channel", "my_social_network",
-            ],
-            "Music & GitHub & Fun": [
-                "now_playing", "last_fm_user", "github_repos", "github_followers",
-                "random_fact", "quote", "joke", "advice", "cat_fact", "kanye_quote", "affirmation",
-            ],
-        }
-
-        lines = [self.strings["phlist_title"]]
-        for cat, tokens in categories.items():
-            formatted_tokens = ", ".join(f"<code>{{{t}}}</code>" for t in tokens)
-            lines.append(f"<b>{cat}:</b>\n<blockquote>{formatted_tokens}</blockquote>")
-
-        await utils.answer(message, "\n".join(lines))
