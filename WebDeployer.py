@@ -456,8 +456,8 @@ const server = http.createServer((req, res) => {
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server listening on 0.0.0.0:${PORT}`);
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`Server listening on 127.0.0.1:${PORT}`);
 });
 
 process.on('SIGTERM', () => {
@@ -945,6 +945,20 @@ class WebDeployer(loader.Module):
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", site_id)
         return f"wd-{safe}-{kind}.service"
 
+    LOOPBACK_JS = "'use strict';\nconst net = require('net');\nconst LOOP = '127.0.0.1';\nconst original = net.Server.prototype.listen;\nfunction isPort(v) {\n  return typeof v === 'number' || (typeof v === 'string' && /^\\d+$/.test(v));\n}\nnet.Server.prototype.listen = function (...args) {\n  const first = args[0];\n  if (first !== null && typeof first === 'object') {\n    if (first.path === undefined && first.fd === undefined && first.handle === undefined && first._handle === undefined) {\n      const opts = Object.assign({}, first, { host: LOOP });\n      delete opts.ipv6Only;\n      args[0] = opts;\n    }\n  } else if (first === undefined || first === null || typeof first === 'function' || isPort(first)) {\n    if (first === undefined || first === null) {\n      args[0] = 0;\n    } else if (typeof first === 'function') {\n      args.unshift(0);\n    }\n    if (args.length < 2 || args[1] === undefined || typeof args[1] === 'string') {\n      args[1] = LOOP;\n    } else {\n      args.splice(1, 0, LOOP);\n    }\n  }\n  return original.apply(this, args);\n};\n"
+
+    def _ensure_loopback_preload(self) -> str:
+        path = os.path.join(self._root, "force_loopback.js")
+        current = None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                current = f.read()
+        except OSError:
+            pass
+        if current != self.LOOPBACK_JS:
+            _write_private(path, self.LOOPBACK_JS)
+        return path
+
     def _write_unit(
         self,
         unit: str,
@@ -961,9 +975,12 @@ class WebDeployer(loader.Module):
             if resolved:
                 command[0] = resolved
         quoted = " ".join(self._systemd_quote(part) for part in command)
-        merged_env = {"PATH": self._get_full_path(), "HOME": os.path.expanduser("~")}
+        merged_env = {"PATH": self._get_full_path(), "HOME": os.path.expanduser("~"), "HOST": "127.0.0.1", "BIND_ADDRESS": "127.0.0.1"}
         if env_vars:
             merged_env.update({k: str(v) for k, v in env_vars.items()})
+        preload = self._ensure_loopback_preload()
+        preload_opt = f'--require="{preload}"' if " " in preload else f"--require={preload}"
+        merged_env["NODE_OPTIONS"] = (merged_env.get("NODE_OPTIONS", "") + " " + preload_opt).strip()
         env_lines = ""
         for k, v in merged_env.items():
             safe = str(v).replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$")
@@ -1352,22 +1369,83 @@ class WebDeployer(loader.Module):
         self._releases_cache = None
         return True, tag
 
-    def _build_html_from_js(self, js_path: str, filename: str, ext: str = "jsx") -> str:
+    VENDOR_ASSETS = {
+        "react.development.js": [
+            "https://unpkg.com/react@18/umd/react.development.js",
+            "https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js",
+        ],
+        "react-dom.development.js": [
+            "https://unpkg.com/react-dom@18/umd/react-dom.development.js",
+            "https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js",
+        ],
+        "babel.min.js": [
+            "https://unpkg.com/@babel/standalone/babel.min.js",
+            "https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js",
+        ],
+        "telegram-web-app.js": [
+            "https://telegram.org/js/telegram-web-app.js",
+        ],
+    }
+
+    async def _vendor_assets(self, site_dir: str, only: tuple = None) -> set:
+        cache_dir = os.path.join(self._root, "vendor")
+        os.makedirs(cache_dir, exist_ok=True)
+        target_dir = os.path.join(site_dir, "_vendor")
+        os.makedirs(target_dir, exist_ok=True)
+        ready = set()
+        for name, urls in self.VENDOR_ASSETS.items():
+            if only is not None and name not in only:
+                continue
+            cached = os.path.join(cache_dir, name)
+            ok = os.path.exists(cached) and os.path.getsize(cached) > 1000
+            if not ok:
+                for url in urls:
+                    tmp = cached + ".part"
+                    try:
+                        rc, _, _ = await self._curl("-f", "-o", tmp, url, timeout=60)
+                    except Exception:
+                        rc = 1
+                    if rc == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 1000:
+                        with open(tmp, "rb") as f:
+                            head = f.read(64).lstrip().lower()
+                        if not head.startswith(b"<"):
+                            os.replace(tmp, cached)
+                            ok = True
+                            break
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+            if ok:
+                shutil.copy2(cached, os.path.join(target_dir, name))
+                ready.add(name)
+        return ready
+
+    def _build_html_from_js(self, js_path: str, filename: str, ext: str = "jsx", vendored: set = None) -> str:
         with open(js_path, "r", encoding="utf-8", errors="replace") as f:
             js_code = f.read()
+        vendored = vendored or set()
         is_ts = ext in ("ts", "tsx")
         presets = "typescript,react" if is_ts else "react"
         script_type = "text/babel"
+
+        def src(name, remote):
+            return f"_vendor/{name}" if name in vendored else remote
+
+        tg = src("telegram-web-app.js", "https://telegram.org/js/telegram-web-app.js")
+        react = src("react.development.js", "https://unpkg.com/react@18/umd/react.development.js")
+        react_dom = src("react-dom.development.js", "https://unpkg.com/react-dom@18/umd/react-dom.development.js")
+        babel = src("babel.min.js", "https://unpkg.com/@babel/standalone/babel.min.js")
         return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>{_escape(filename)}</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="{tg}"></script>
+<script src="{react}"></script>
+<script src="{react_dom}"></script>
+<script src="{babel}"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -1381,6 +1459,155 @@ if (typeof App !== 'undefined') {{
 </script>
 </body>
 </html>"""
+
+    BUNDLE_SKIP_PKGS = {"react", "react-dom"}
+    BUNDLE_SHIM = (
+        "import React from 'react';\n"
+        "import ReactDOM from 'react-dom';\n"
+        "import ReactDOMClient from 'react-dom/client';\n"
+        "globalThis.React = React;\n"
+        "globalThis.ReactDOM = Object.assign({}, ReactDOM, ReactDOMClient);\n"
+    )
+    BUNDLE_ENTRY = (
+        "import './shim';\n"
+        "import ReactDOMClient from 'react-dom/client';\n"
+        "import * as mod from './user';\n"
+        "const AUTO = __AUTO__;\n"
+        "if (AUTO) {\n"
+        "  let Comp = mod.default || mod.App;\n"
+        "  if (!Comp) {\n"
+        "    for (const k of Object.keys(mod)) {\n"
+        "      if (typeof mod[k] === 'function' && /^[A-Z]/.test(k)) { Comp = mod[k]; break; }\n"
+        "    }\n"
+        "  }\n"
+        "  if (Comp) {\n"
+        "    ReactDOMClient.createRoot(document.getElementById('root')).render(globalThis.React.createElement(Comp));\n"
+        "  }\n"
+        "}\n"
+    )
+
+    @staticmethod
+    def _bundle_pkg_names(src: str) -> list:
+        names = []
+        pattern = r"""(?:\bfrom|\bimport)\s*\(?\s*['"]([^'"./][^'"]*)['"]"""
+        for spec in re.findall(pattern, src):
+            parts = spec.split("/")
+            name = "/".join(parts[:2]) if spec.startswith("@") else parts[0]
+            if name.startswith("node:") or name in WebDeployer.BUNDLE_SKIP_PKGS:
+                continue
+            if not re.fullmatch(r"(@[a-z0-9._-]+/)?[a-z0-9._-]+", name):
+                continue
+            if name not in names:
+                names.append(name)
+        return names
+
+    async def _bundle_tools(self, extra_pkgs: list):
+        if not hasattr(self, "_bundle_lock"):
+            self._bundle_lock = asyncio.Lock()
+        tools_dir = os.path.join(self._root, "build_tools")
+        async with self._bundle_lock:
+            os.makedirs(tools_dir, exist_ok=True)
+            pkg_json = os.path.join(tools_dir, "package.json")
+            if not os.path.exists(pkg_json):
+                with open(pkg_json, "w", encoding="utf-8") as f:
+                    json.dump({"name": "wd-build-tools", "private": True, "version": "1.0.0"}, f)
+            nm = os.path.join(tools_dir, "node_modules")
+            need = []
+            if not os.path.exists(os.path.join(nm, ".bin", "esbuild")):
+                need.append("esbuild")
+            for base, spec in (("react", "react@18"), ("react-dom", "react-dom@18")):
+                if not os.path.isdir(os.path.join(nm, base)):
+                    need.append(spec)
+            if need:
+                rc, out = await self._run_command(
+                    ["npm", "install", "--no-audit", "--no-fund", "--legacy-peer-deps", *need], tools_dir
+                )
+                if rc != 0:
+                    raise RuntimeError(f"npm install failed:\n{out[-400:]}")
+            extra = [n for n in extra_pkgs if not os.path.isdir(os.path.join(nm, *n.split("/")))]
+            if extra:
+                rc, out = await self._run_command(
+                    ["npm", "install", "--no-audit", "--no-fund", "--legacy-peer-deps", *extra], tools_dir
+                )
+                if rc != 0:
+                    logger.warning("[WD] extra packages install failed: %s", out[-300:])
+        esbuild = os.path.join(nm, ".bin", "esbuild")
+        if not os.path.exists(esbuild):
+            raise RuntimeError("esbuild missing after install")
+        return tools_dir, esbuild
+
+    async def _bundle_js(self, file_path: str, site_dir: str, filename: str, ext: str) -> bool:
+        work_dir = None
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                src = f.read()
+            tools_dir, esbuild = await self._bundle_tools(self._bundle_pkg_names(src))
+
+            has_default = bool(
+                re.search(r"^\s*export\s+default\b", src, re.M)
+                or re.search(r"export\s*\{[^}]*\bas\s+default\b", src)
+            )
+            declares_app = bool(re.search(r"\b(?:function|const|let|var|class)\s+App\b", src))
+            if not has_default and declares_app:
+                src = src.rstrip() + "\nexport { App as default };\n"
+            self_renders = bool(re.search(r"\bcreateRoot\s*\(|\bhydrateRoot\s*\(|ReactDOM\.render\s*\(", src))
+
+            work_dir = os.path.join(tools_dir, "work", os.path.basename(site_dir.rstrip("/")) or "site")
+            shutil.rmtree(work_dir, ignore_errors=True)
+            os.makedirs(work_dir, exist_ok=True)
+            user_name = f"user.{ext}"
+            with open(os.path.join(work_dir, user_name), "w", encoding="utf-8") as f:
+                f.write(src)
+            with open(os.path.join(work_dir, "shim.js"), "w", encoding="utf-8") as f:
+                f.write(self.BUNDLE_SHIM)
+            with open(os.path.join(work_dir, "entry.js"), "w", encoding="utf-8") as f:
+                f.write(self.BUNDLE_ENTRY.replace("__AUTO__", "false" if self_renders else "true").replace("./user", f"./user.{ext}"))
+
+            for stale in ("app.js", "app.css"):
+                try:
+                    os.remove(os.path.join(site_dir, stale))
+                except OSError:
+                    pass
+            rc, out = await self._run_command(
+                [
+                    esbuild, "entry.js", "--bundle", "--minify", "--format=iife", "--target=es2019",
+                    f"--outfile={os.path.join(site_dir, 'app.js')}",
+                    "--jsx=transform", "--loader:.js=jsx", "--legal-comments=none", "--log-level=error",
+                    '--define:process.env.NODE_ENV="production"',
+                ],
+                work_dir,
+                timeout=300,
+            )
+            if rc != 0 or not os.path.exists(os.path.join(site_dir, "app.js")):
+                raise RuntimeError(f"esbuild failed:\n{out[-600:]}")
+
+            vendored = await self._vendor_assets(site_dir, only=("telegram-web-app.js",))
+            tg = (
+                '<script src="_vendor/telegram-web-app.js"></script>'
+                if "telegram-web-app.js" in vendored
+                else '<script async src="https://telegram.org/js/telegram-web-app.js"></script>'
+            )
+            css = '<link rel="stylesheet" href="app.css">' if os.path.exists(os.path.join(site_dir, "app.css")) else ""
+            html = (
+                "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\"/>\n"
+                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"/>\n"
+                f"<title>{_escape(filename)}</title>\n{css}\n{tg}\n"
+                "</head>\n<body>\n<div id=\"root\"></div>\n"
+                "<script>window.addEventListener('error',function(e){var r=document.getElementById('root');"
+                "if(r&&!r.childNodes.length){var p=document.createElement('pre');"
+                "p.style.cssText='color:#f66;padding:16px;white-space:pre-wrap;font:13px monospace';"
+                "p.textContent=String(e.message||e.error);r.appendChild(p);}});</script>\n"
+                "<script src=\"app.js\"></script>\n</body>\n</html>"
+            )
+            with open(os.path.join(site_dir, "index.html"), "w", encoding="utf-8") as f:
+                f.write(html)
+            return True
+        except Exception:
+            logger.exception("[WD] bundle failed, falling back to in-browser babel")
+            return False
+        finally:
+            if work_dir:
+                shutil.rmtree(work_dir, ignore_errors=True)
 
     @staticmethod
     def _npm_install_args(p_dir: str):
@@ -1505,7 +1732,7 @@ if (typeof App !== 'undefined') {{
                 for cand in ("dist", "build", "out", "public"):
                     cd = os.path.join(p_dir, cand)
                     if os.path.isdir(cd) and os.path.exists(os.path.join(cd, "index.html")):
-                        return [sys.executable, "-m", "http.server", str(port), "--directory", cd], cd, {}
+                        return [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", cd], cd, {}
 
             if "start" in scripts:
                 return [npm_bin, "start"], p_dir, {"PORT": str(port)}
@@ -1521,7 +1748,7 @@ if (typeof App !== 'undefined') {{
             return None, None, None
 
         serve_dir = os.path.dirname(index_path)
-        return [sys.executable, "-m", "http.server", str(port), "--directory", serve_dir], serve_dir, {}
+        return [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", serve_dir], serve_dir, {}
 
     @staticmethod
     def _backend_entry(backend_dir: str) -> str:
@@ -1860,17 +2087,19 @@ if (typeof App !== 'undefined') {{
                     await m.edit(self.strings["no_index"], parse_mode="html")
                     return
             elif ext in ("js", "jsx", "ts", "tsx"):
-                html = self._build_html_from_js(file_path, filename, ext)
-                with open(os.path.join(site_dir, "index.html"), "w", encoding="utf-8") as f:
-                    f.write(html)
+                if not await self._bundle_js(file_path, site_dir, filename, ext):
+                    vendored = await self._vendor_assets(site_dir)
+                    html = self._build_html_from_js(file_path, filename, ext, vendored)
+                    with open(os.path.join(site_dir, "index.html"), "w", encoding="utf-8") as f:
+                        f.write(html)
                 work_dir = site_dir
-                cmd = [sys.executable, "-m", "http.server", str(port), "--directory", site_dir]
+                cmd = [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", site_dir]
             else:
                 dest = os.path.join(site_dir, "index.html")
                 if file_path != dest:
                     shutil.copy2(file_path, dest)
                 work_dir = site_dir
-                cmd = [sys.executable, "-m", "http.server", str(port), "--directory", site_dir]
+                cmd = [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", site_dir]
 
             await m.edit(
                 self.strings["deploying"].format(name=_escape(filename)),
@@ -1912,7 +2141,7 @@ if (typeof App !== 'undefined') {{
         self._write_unit(
             cf_unit,
             f"WebDeployer cloudflared tunnel {site_id}",
-            [self._cf_bin, "tunnel", "--url", f"http://localhost:{port}", "--no-autoupdate"],
+            [self._cf_bin, "tunnel", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"],
             self._root,
             cf_log,
         )
