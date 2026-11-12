@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (1, 4, 0)
+__version__ = (1, 5, 0)
 # meta developer: Execute_forge.t.me
 
 import asyncio
@@ -37,7 +37,7 @@ class TW(loader.Module):
         "_cfg_doc_blacklist_users": "User IDs not to notify",
         "_cfg_doc_custom_notif_text": "Custom HTML. Fields: {title}, {chat_id}, {name}, {user_id}, {msg_content}, {reply_content}, {link}",
         "panel": (
-            "<b>Tag Watcher</b>\n"
+            "<b>Tag Watcher</b> <code>v{version}</code>\n"
             "<blockquote>"
             "<b>Mentions:</b> {mentions}\n"
             "<b>Auto-read DMs:</b> {pm}</blockquote>"
@@ -91,7 +91,7 @@ class TW(loader.Module):
         "_cfg_doc_blacklist_users": "ID пользователей без уведомлений",
         "_cfg_doc_custom_notif_text": "Пользовательский HTML. Поля: {title}, {chat_id}, {name}, {user_id}, {msg_content}, {reply_content}, {link}",
         "panel": (
-            "<b>Tag Watcher</b>\n"
+            "<b>Tag Watcher</b> <code>v{version}</code>\n"
             "<blockquote>"
             "<b>Упоминания:</b> {mentions}\n"
             "<b>Авто-прочтение ЛС:</b> {pm}</blockquote>"
@@ -263,6 +263,7 @@ class TW(loader.Module):
         return self.strings["panel"].format(
             mentions=self._state("notify_tags"),
             pm=self._state("pm_autoread"),
+            version=".".join(map(str, __version__)),
         )
 
     def _toggle_button(self, key, label_key):
