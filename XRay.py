@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (6, 0, 0)
+__version__ = (6, 1, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
@@ -10,8 +10,11 @@ import os
 import hashlib
 import asyncio
 import base64
+import io
 import logging
+import signal
 import socket
+import ssl
 import threading
 import time
 import platform
@@ -19,6 +22,7 @@ import json
 import subprocess
 import shutil
 import uuid
+import sys
 import ipaddress
 import tempfile
 import re
@@ -28,7 +32,7 @@ import string
 import urllib.error
 import urllib.request
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional, Dict, List, Tuple
 
@@ -558,6 +562,7 @@ class XRay(loader.Module):
         "btn_sub_tls": "https tunnel",
         "sub_tls_done": "<blockquote><b>The subscription tunnel is up</b>\n<code>{url}</code></blockquote>",
         "sub_tls_fail": "<blockquote><b>The tunnel did not start</b>\n<code>{error}</code>\nThe plain http link keeps working</blockquote>",
+        "sub_link_moved": "<b>Subscription link updated</b>\n<blockquote>The tunnel was rebuilt and the public hostname changed.\nNew link: <code>{url}</code></blockquote>",
         "core_old_warn": (
             "<blockquote><b>Vulnerable core</b> | <code>{version}</code>\n"
             "Anything below <b>{min}</b> keeps MPTCP listeners open and gives a remote root "
@@ -1161,6 +1166,7 @@ class XRay(loader.Module):
         "btn_sub_tls": "https-туннель",
         "sub_tls_done": "<blockquote><b>Туннель подписки поднят</b>\n<code>{url}</code></blockquote>",
         "sub_tls_fail": "<blockquote><b>Туннель не поднялся</b>\n<code>{error}</code>\nОбычная http-ссылка продолжает работать</blockquote>",
+        "sub_link_moved": "<b>Ссылка на подписку обновлена</b>\n<blockquote>Туннель пересобран, публичный hostname сменился.\nНовая ссылка: <code>{url}</code></blockquote>",
         "core_old_warn": (
             "<blockquote><b>Ядро уязвимо</b> | <code>{version}</code>\n"
             "Всё ниже <b>{min}</b> держит MPTCP-слушатели открытыми и даёт удалённый root "
@@ -1356,6 +1362,7 @@ class XRay(loader.Module):
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
+        self._db.set("XR", "load_ts", time.time())
         self._me = await client.get_me()
 
         tg_user_id = self._me.id
@@ -1507,6 +1514,11 @@ class XRay(loader.Module):
     async def on_unload(self):
         self._closing = True
         try:
+            self._db.set("XR", "unload_ts", time.time())
+            asyncio.get_event_loop().create_task(self._deadman_sub_tunnel())
+        except Exception:
+            pass
+        try:
             await self._stop_monitor()
         except Exception as e:
             logger.warning("[XR] the monitor loop was not stopped cleanly: %s", e)
@@ -1521,6 +1533,18 @@ class XRay(loader.Module):
                     await result
             except Exception as e:
                 logger.warning("[XR] unload step %s failed: %s", getattr(step, "__name__", step), e)
+
+    async def _deadman_sub_tunnel(self):
+        try:
+            await asyncio.sleep(90)
+            unloaded_at = self._db.get("XR", "unload_ts", 0.0) or 0.0
+            if (self._db.get("XR", "load_ts", 0.0) or 0.0) > unloaded_at:
+                return
+            if await self._unit_active(SUB_TUNNEL_UNIT):
+                await self._stop_unit(SUB_TUNNEL_UNIT)
+                logger.info("[XR] subscription tunnel stopped after a real module unload")
+        except Exception:
+            pass
 
     async def _stop_monitor(self):
         task = self._monitor_task
@@ -1538,10 +1562,6 @@ class XRay(loader.Module):
             logger.warning("[XR] the monitor loop ended with an error: %s", e)
 
     async def _stop_all_units(self):
-        try:
-            await self._sub_tunnel_stop()
-        except Exception as e:
-            logger.warning("[XR] the subscription tunnel was not stopped: %s", e)
         for name in list(self._processes.keys()):
             if name in self._users:
                 self._users[name]["resume_on_module_load"] = True
@@ -3149,6 +3169,18 @@ class XRay(loader.Module):
         matches = re.findall(r"https://([a-z0-9-]+\.trycloudflare\.com)", text, re.I)
         return matches[-1] if matches else ""
 
+    async def _announce_sub_link(self, host: str) -> None:
+        if not host or not self._logger_topic or not self._asset_channel:
+            return
+        try:
+            url = self._sub_url(self._sub.get("token") or "") or f"https://{host}"
+        except Exception:
+            url = f"https://{host}"
+        try:
+            await self._send_log(self.strings["sub_link_moved"].format(url=_escape(url)))
+        except Exception as e:
+            logger.warning("[XR] the subscription announcement was not sent: %s", e)
+
     async def _sub_tunnel_start(self) -> Tuple[bool, str]:
         self._sub_ensure()
         if not self._sub.get("enabled"):
@@ -3193,6 +3225,7 @@ class XRay(loader.Module):
             self._sub["tunnel_host"] = hostname
             self._sub_save()
             logger.info("[XR] subscription tunnel is %s", hostname)
+            await self._announce_sub_link(hostname)
             return True, ""
         except Exception as e:
             return False, str(e)
@@ -3208,6 +3241,7 @@ class XRay(loader.Module):
         self._sub["tunnel_host"] = host
         self._sub_save()
         logger.info("[XR] subscription tunnel moved to %s", host)
+        await self._announce_sub_link(host)
         return host
 
     async def _sub_tunnel_stop(self):
