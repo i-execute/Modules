@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (6, 1, 0)
+__version__ = (7, 0, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://github.com/i-execute/Modules/raw/main/Storage/XRay/MetaBanner.jpeg
 
@@ -15,7 +15,6 @@ import logging
 import signal
 import socket
 import ssl
-import threading
 import time
 import platform
 import json
@@ -33,7 +32,6 @@ import urllib.error
 import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional, Dict, List, Tuple
 
 from telethon.tl.functions.messages import EditMessageRequest, EditForumTopicRequest
@@ -54,54 +52,70 @@ async def _retry_topic_send(send, refresh):
         await refresh()
         return await send()
 
-class _SubServer(ThreadingHTTPServer):
-    daemon_threads = True
-    request_queue_size = 64
-    allow_reuse_address = True
-
-    def get_request(self):
-        sock, address = super().get_request()
-        sock.settimeout(SUB_SOCKET_TIMEOUT)
-        return sock, address
-
-    def process_request(self, request, client_address):
-        if not SUB_SLOTS.acquire(blocking=False):
-            _sub_security(client_address[0], "sub_busy", "deny", "too many connections")
-            try:
-                request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-            except OSError:
-                pass
-            self.shutdown_request(request)
-            return
-        try:
-            super().process_request(request, client_address)
-        except OSError:
-            SUB_SLOTS.release()
-            raise
-
-    def process_request_thread(self, request, client_address):
-        try:
-            super().process_request_thread(request, client_address)
-        finally:
-            SUB_SLOTS.release()
-
 LOG_TRIM_SIZE = 10 * 1024 * 1024
 BASE_PORT = 8443
 AUTOSTART_INTERVAL = 10
-SUB_PORT_CANDIDATES = (2096, 2097, 8443, 2053, 2083, 2087, 9443)
-SUB_TUNNEL_UNIT = "xray-sub-tunnel.service"
 UNLOAD_WAIT = 5.0
-SUB_POLL_INTERVAL = 10
-SUB_TOKEN_LEN = 43
-SUB_RATE_LIMIT = 10
-SUB_RATE_WINDOW = 60.0
-SUB_BLOCK_STEP = 60.0
-SUB_BLOCK_MAX = 3600.0
-SUB_NOT_FOUND_STEP = 10
-SUB_MAX_CLIENTS = 32
-SUB_MAX_LINE = 2048
-SUB_SOCKET_TIMEOUT = 10.0
-SUB_BUCKET_LIMIT = 4096
+SOCKS_EVENT_GAP = 300.0
+
+GATE_TEMPLATE = r"""import asyncio
+import ipaddress
+
+ALLOWED = __ALLOWED__
+BACKEND_PORT = __BACKEND_PORT__
+LISTEN_PORT = __LISTEN_PORT__
+BUFFER = 65536
+
+nets = [ipaddress.ip_network(a, strict=False) for a in ALLOWED]
+
+def allowed(peer):
+    try:
+        addr = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    return any(peer_net.supernet_of(ipaddress.ip_network(addr)) if False else addr in peer_net for peer_net in nets)
+
+async def pump(reader, writer):
+    try:
+        while True:
+            chunk = await reader.read(BUFFER)
+            if not chunk:
+                break
+            writer.write(chunk)
+            await writer.drain()
+    except Exception:
+        pass
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
+
+async def handle(reader, writer):
+    peer = writer.get_extra_info("peername")
+    ip = peer[0] if peer else ""
+    if not ip or not allowed(ip):
+        print("gate block " + (ip or "?"), flush=True)
+        try:
+            writer.close()
+        except Exception:
+            pass
+        return
+    print("gate allow " + ip, flush=True)
+    try:
+        back_reader, back_writer = await asyncio.open_connection("127.0.0.1", BACKEND_PORT)
+    except Exception:
+        writer.close()
+        return
+    await asyncio.gather(pump(reader, back_writer), pump(back_reader, writer))
+
+async def main():
+    server = await asyncio.start_server(handle, "0.0.0.0", LISTEN_PORT)
+    async with server:
+        await server.serve_forever()
+
+asyncio.run(main())
+"""
 GUARD_ROOT = "root"
 GUARD_DOCKER = "docker"
 XRAY_CORE_VERSION = "v26.10.31"
@@ -112,28 +126,7 @@ XRAY_CORE_SHA256 = {
 XRAY_MIN_VERSION = (26, 10, 31)
 XRAY_MIN_TAG = "v26.10.31"
 XRAY_MIN_ADVISORY = "CVE-2026-98432"
-CLOUDFLARED_VERSION = "2026.10.5"
-CLOUDFLARED_SHA256 = {
-    "cloudflared-linux-amd64": "e1bc0cf084fd9e590554fe769a86b1db46701c3f847a43d902f7b974a4e16298",
-    "cloudflared-linux-arm64": "72e0d05a67e09da87cf495e409a28c3cc5994dd23fc66a982eebea6a55923b7d",
-}
-CLOUDFLARED_REPO = "cloudflare/cloudflared"
-CLOUDFLARED_MIN = (2026, 10, 5)
-CLOUDFLARED_MIN_TAG = "2026.10.5"
-CLOUDFLARED_PINNED = {CLOUDFLARED_VERSION: dict(CLOUDFLARED_SHA256)}
-CLOUDFLARED_RELEASE_LIMIT = 8
-CLOUDFLARED_RELEASES_TTL = 600
 RELEASE_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com", "api.github.com")
-SUB_BIND = os.environ.get("XRAY_SUB_BIND", "0.0.0.0")
-SUB_SECLOG = os.environ.get("OBHOD_SECURITY_LOG", "/var/log/obhod/security.log")
-SUB_SECLOG_ON = os.environ.get("OBHOD_SECLOG", "1").strip().lower() not in {"0", "no", "off", "false", "disabled"}
-SUB_LOCK = threading.Lock()
-SUB_BUCKETS = {}
-SUB_LOG_SEEN = {}
-SUB_LOG_GAP = 2.0
-SUB_SLOTS = threading.BoundedSemaphore(SUB_MAX_CLIENTS)
-SUB_OFF_TEXT = {"0", "no", "off", "false", "disabled", "none", ""}
-SUB_XRAY_CALL_TIMEOUT = 8
 
 def _escape(text):
     if not text:
@@ -147,120 +140,6 @@ def _strip_md(text: str) -> str:
 def _gen_secret(length: int) -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
-
-def _sub_flag(value, default: bool) -> bool:
-    if value is None:
-        return bool(default)
-    if value is True:
-        return True
-    if value is False:
-        return False
-    return str(value).strip().lower() not in SUB_OFF_TEXT
-
-def _sub_clean(value, limit: int) -> str:
-    text = re.sub(r"[^ -~]", "", str(value or ""))
-    return re.sub(r"\s+", "_", text.strip())[:limit]
-
-def _sub_security(ip: str, event: str, outcome: str, detail: str = "") -> bool:
-    if not SUB_SECLOG_ON:
-        return False
-    line = "security ip=%s event=%s outcome=%s actor=0 detail=%s\n" % (
-        _sub_clean(ip, 64) or "-",
-        _sub_clean(event, 32) or "-",
-        _sub_clean(outcome, 16) or "-",
-        _sub_clean(detail, 120) or "-",
-    )
-    now = time.monotonic()
-    key = (ip, event, detail)
-    with SUB_LOCK:
-        last = SUB_LOG_SEEN.get(key)
-        if last is not None and now - last < SUB_LOG_GAP:
-            return False
-        SUB_LOG_SEEN[key] = now
-        if len(SUB_LOG_SEEN) > SUB_BUCKET_LIMIT:
-            for stale in sorted(SUB_LOG_SEEN, key=SUB_LOG_SEEN.get)[: len(SUB_LOG_SEEN) - SUB_BUCKET_LIMIT]:
-                SUB_LOG_SEEN.pop(stale, None)
-    try:
-        folder = os.path.dirname(SUB_SECLOG)
-        if folder and not os.path.isdir(folder):
-            os.makedirs(folder, mode=0o700, exist_ok=True)
-        with SUB_LOCK:
-            if os.path.islink(SUB_SECLOG):
-                return False
-            handle = os.open(SUB_SECLOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-            try:
-                os.write(handle, line.encode("utf-8", "replace"))
-            finally:
-                os.close(handle)
-        return True
-    except OSError:
-        return False
-
-class _SubBucket:
-    __slots__ = ("window", "count", "seen", "blocked", "misses", "offences")
-
-    def __init__(self, now: float):
-        self.window = now
-        self.count = 0
-        self.seen = now
-        self.blocked = 0.0
-        self.misses = 0
-        self.offences = 0
-
-def _sub_entry(ip: str, now: float) -> "_SubBucket":
-    entry = SUB_BUCKETS.get(ip)
-    if entry is None:
-        entry = _SubBucket(now)
-        SUB_BUCKETS[ip] = entry
-    entry.seen = now
-    if now - entry.window >= SUB_RATE_WINDOW:
-        entry.window = now
-        entry.count = 0
-    entry.count += 1
-    return entry
-
-def _sub_sweep(now: float) -> None:
-    stale = [key for key, value in SUB_BUCKETS.items() if now - value.seen > SUB_RATE_WINDOW * 2]
-    for key in stale:
-        SUB_BUCKETS.pop(key, None)
-    if len(SUB_BUCKETS) > SUB_BUCKET_LIMIT:
-        ordered = sorted(SUB_BUCKETS.items(), key=lambda pair: pair[1].seen)
-        for key, _value in ordered[: len(SUB_BUCKETS) - SUB_BUCKET_LIMIT]:
-            SUB_BUCKETS.pop(key, None)
-
-def _sub_allowed(ip: str) -> tuple:
-    now = time.monotonic()
-    reason = ""
-    with SUB_LOCK:
-        entry = _sub_entry(ip, now)
-        if now < entry.blocked:
-            _sub_sweep(now)
-            return False, ""
-        if entry.count > SUB_RATE_LIMIT:
-            reason = "requests over the limit"
-            entry.offences = min(8, entry.offences + 1)
-            entry.blocked = now + min(SUB_BLOCK_MAX, SUB_BLOCK_STEP * (2 ** (entry.offences - 1)))
-        elif entry.misses >= SUB_NOT_FOUND_STEP:
-            reason = "repeated misses"
-            entry.offences = min(8, entry.offences + 1)
-            entry.blocked = now + min(SUB_BLOCK_MAX, SUB_BLOCK_STEP * (2 ** (entry.offences - 1)))
-            entry.misses = 0
-        _sub_sweep(now)
-    return (not reason), reason
-
-def _sub_record(ip: str, missing: bool) -> None:
-    now = time.monotonic()
-    with SUB_LOCK:
-        entry = SUB_BUCKETS.get(ip)
-        if entry is None:
-            entry = _SubBucket(now)
-            SUB_BUCKETS[ip] = entry
-        entry.seen = now
-        if missing:
-            entry.misses += 1
-        else:
-            entry.misses = 0
-            entry.offences = 0
 
 def _fmt_bytes(value: int) -> str:
     try:
@@ -370,7 +249,7 @@ def _in_docker():
 
 @loader.tds
 class XRay(loader.Module):
-    """Multi-user VPN with VLESS+Reality (XHTTP/TCP(RAW)+Vision and post-quantum encryption)"""
+    """Multi-user VPN: VLESS+Reality (XHTTP/TCP(RAW)+Vision, post-quantum encryption) and SOCKS5 with an IP-whitelist firewall"""
 
     strings = {
         "name": "XRay",
@@ -379,22 +258,21 @@ class XRay(loader.Module):
         "guard_docker": "The userbot is running inside a container (Docker, Podman, LXC or Kubernetes). XRay refuses to start in this mode.",
         "guard_why": "Why: this module starts long living daemons and holds VPN keys. Under root a single bug is a full server takeover, and inside a container the listeners escape the isolation the container promises. A userbot is not a system service.",
         "guard_how": "What to do: run the userbot as a regular user with a working <code>systemctl --user</code> session, the module creates only user units. Keep root off limits and do not run it in Docker.",
-        "reloaded": "<blockquote><b>XRay reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nUsers: <b>{users}</b>\nSubscriptions: <b>{subscriptions}</b>\nLog file limit: <b>{log_size} MB</b></blockquote>",
-        "greeting": "<blockquote><b>XRay is ready</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nConfigured users: <b>{users}</b>\nSubscriptions: <b>{subscriptions}</b>\nLog file limit: <b>{log_size} MB</b>\nUse <code>{prefix}xray</code> to manage the service.</blockquote>",
+        "reloaded": "<blockquote><b>XRay reloaded</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nUsers: <b>{users}</b>\nLog file limit: <b>{log_size} MB</b></blockquote>",
+        "greeting": "<blockquote><b>XRay is ready</b></blockquote>\n<blockquote>Version: <b>{version}</b>\nConfigured users: <b>{users}</b>\nLog file limit: <b>{log_size} MB</b>\nUse <code>{prefix}xray</code> to manage the service.</blockquote>",
 
         "main_menu": (
             "<b>XRay Multi-User VPN</b>\n"
             "<blockquote>Total users: {total}\n"
             "Active: {active}\n"
             "XRay version: {version}\n"
-            "Cloudflared version: {cloudflared_version}</blockquote>"
+            "</blockquote>"
         ),
 
         "setup_menu": (
             "<b>Setup & Installation</b>\n"
             "<blockquote>"
             "XRay Core: {xray_status}\n"
-            "Cloudflared: {cloudflared_status}\n"
             "GitHub API: {gh_status}"
             "</blockquote>"
         ),
@@ -544,6 +422,22 @@ class XRay(loader.Module):
         "btn_stop": "Stop",
         "btn_restart": "Restart",
         "btn_get_link": "Get Link",
+        "btn_firewall": "Firewall",
+        "fw_menu": "<b>Firewall: {name}</b>\n<blockquote>Whitelist mode: <b>{state}</b>\nWhen it is on, the proxy works without a password and only the addresses below can connect. Everyone else is dropped.\n\n{ips}</blockquote>",
+        "fw_state_on": "on",
+        "fw_state_off": "off",
+        "fw_empty_hint": "the list is empty, nobody passes",
+        "btn_fw_toggle_on": "Whitelist: ON",
+        "btn_fw_toggle_off": "Whitelist: OFF",
+        "btn_fw_add": "Add addresses",
+        "btn_fw_del": "Remove",
+        "input_fw_add": "Send IPv4/IPv6 or CIDR, several separated by spaces",
+        "fw_bad_ip": "Bad address: {value}",
+        "log_socks_conn": "<b>SOCKS5 connection</b>\n<blockquote>User: <code>{name}</code>\nClient: <code>{ip}</code>\nTarget: <code>{target}</code></blockquote>",
+        "log_socks_gate": "<b>SOCKS5 firewall</b>\n<blockquote>User: <code>{name}</code>\nClient: <code>{ip}</code>\nVerdict: {action}</blockquote>",
+        "log_socks_allowed": "<b>allowed</b>",
+        "log_socks_blocked": "<b>blocked</b>",
+        "socks5_sent_fw": "<b>SOCKS5: {name}</b>\n<blockquote>Host: {ip}\nPort: {port}\nLogin: none needed\n\nURL: <code>socks5://{ip}:{port}</code>\nWhitelist: {ips}</blockquote>",
         "btn_settings": "Settings",
         "btn_delete": "Delete User",
         "btn_xhttp": "XHTTP",
@@ -557,12 +451,6 @@ class XRay(loader.Module):
         "btn_encryption": "Encryption",
         "btn_socks5": "SOCKS5",
         "btn_transport": "Transport",
-        "sub_tls_on": "<blockquote><b>Transport</b> | <b>https</b> through <code>{host}</code>\nClients accept the link without complaints</blockquote>",
-        "sub_tls_off": "<blockquote><b>Transport</b> | <b>http</b> on <code>{host}</code>\nMany clients refuse plain http, press the https button</blockquote>",
-        "btn_sub_tls": "https tunnel",
-        "sub_tls_done": "<blockquote><b>The subscription tunnel is up</b>\n<code>{url}</code></blockquote>",
-        "sub_tls_fail": "<blockquote><b>The tunnel did not start</b>\n<code>{error}</code>\nThe plain http link keeps working</blockquote>",
-        "sub_link_moved": "<b>Subscription link updated</b>\n<blockquote>The tunnel was rebuilt and the public hostname changed.\nNew link: <code>{url}</code></blockquote>",
         "core_old_warn": (
             "<blockquote><b>Vulnerable core</b> | <code>{version}</code>\n"
             "Anything below <b>{min}</b> keeps MPTCP listeners open and gives a remote root "
@@ -576,14 +464,9 @@ class XRay(loader.Module):
         "btn_safari": "Safari",
         "btn_install_xray": "Install XRay Core",
         "btn_reinstall_xray": "Reinstall XRay Core",
-        "btn_install_cloudflared": "Install Cloudflared",
-        "cf_install_menu": "<b>Cloudflared</b>\n<blockquote>Installed: {current}\nMinimum allowed: {min}\nEvery binary is checked against the digest published in its release notes</blockquote>",
         "cf_no_releases": "<blockquote>The release list is unreachable, only the pinned {version} is offered</blockquote>",
         "cf_installed_mark": " (installed)",
-        "cf_installing": "<b>Installing Cloudflared {version}</b>\n<blockquote>Downloading and checking the digest</blockquote>",
-        "cf_installed": "<b>Cloudflared Installed</b>\n<blockquote>{version}</blockquote>",
         "not_installed": "Not installed",
-        "btn_reinstall_cloudflared": "Reinstall Cloudflared",
 
         "input_name": "Enter username:",
         "input_limit": "Enter device limit:",
@@ -715,142 +598,25 @@ class XRay(loader.Module):
             "<blockquote>{transport}</blockquote>"
         ),
 
-        "sub_on": "enabled",
-        "sub_off": "disabled",
 
-        "btn_sub": "Subscriptions",
-        "btn_sub_toggle": "Enable / Disable",
-        "btn_sub_port": "Change port",
-        "btn_sub_path": "Rotate path",
-        "btn_sub_url": "Link",
-        "btn_sub_users": "Tokens",
-        "btn_sub_stats": "Stats API",
-        "btn_sub_apply": "Rebuild configs",
-        "btn_sub_reset": "Reset counters",
-        "btn_sub_interval": "Interval",
-        "btn_sub_title": "Title",
-        "btn_sub_regen": "New token",
 
-        "sub_menu": (
-            "<b>Subscriptions</b>\n"
-            "<blockquote>"
-            "Status: {status}\n"
-            "Port: {port}\n"
-            "Path: <code>{path}</code>\n"
-            "Connections: {links}\n"
-            "Traffic: {traffic}\n"
-            "Stats API: {stats}\n"
-            "Interval: {interval} h\n"
-            "Title: {title}"
-            "</blockquote>"
-        ),
 
-        "sub_url_msg": (
-            "<b>Subscription link</b>\n"
-            "<blockquote>"
-            "Shared, all connections:\n"
-            "<code>{url}</code>\n\n"
-            "JSON: <code>{url_json}</code>\n\n"
-            "The link always reports unlimited traffic, "
-            "traffic is only counted."
-            "</blockquote>"
-        ),
 
-        "sub_users_menu": (
-            "<b>Subscription tokens</b>\n"
-            "<blockquote>"
-            "A separate link per connection. "
-            "SOCKS5 is not included."
-            "</blockquote>"
-        ),
 
-        "sub_user_msg": (
-            "<b>Subscription: {name}</b>\n"
-            "<blockquote>"
-            "Transport: {transport}\n"
-            "Port: {port}\n"
-            "Traffic: {traffic}\n\n"
-            "<code>{url}</code>"
-            "</blockquote>"
-        ),
 
-        "sub_empty": (
-            "<b>Subscriptions</b>\n"
-            "<blockquote>"
-            "No connections to serve. "
-            "SOCKS5 is not included."
-            "</blockquote>"
-        ),
 
-        "sub_started": (
-            "<b>Subscriptions enabled</b>\n"
-            "<blockquote>"
-            "Port: {port}\n"
-            "Path: <code>{path}</code>\n\n"
-            "{hint}"
-            "</blockquote>"
-        ),
 
-        "sub_stopped": (
-            "<b>Subscriptions disabled</b>\n"
-            "<blockquote>Server stopped, port released.</blockquote>"
-        ),
 
-        "sub_reset_done": (
-            "<b>Counters reset</b>\n"
-            "<blockquote>Accumulated traffic cleared.</blockquote>"
-        ),
 
-        "sub_apply_done": (
-            "<b>Configs rebuilt</b>\n"
-            "<blockquote>"
-            "Restarted: {restarted}\n"
-            "Waiting: {pending}"
-            "</blockquote>"
-        ),
 
-        "sub_apply_hint": (
-            "The stats API was added to the configs. "
-            "Press rebuild to apply it to running connections."
-        ),
 
-        "sub_docker_warn": (
-            "\n\nDocker detected. The port is only reachable "
-            "when it is published by the container."
-        ),
 
-        "sub_no_ip": (
-            "<b>Error</b>\n"
-            "<blockquote>Could not detect the external IP.</blockquote>"
-        ),
 
-        "sub_err_start": (
-            "<b>Start error</b>\n"
-            "<blockquote>{error}</blockquote>"
-        ),
 
-        "sub_input_interval": "Enter update interval in hours (1-168):",
-        "sub_input_title": "Enter profile title:",
 
-        "sub_interval_set": (
-            "<b>Interval updated</b>\n"
-            "<blockquote>{interval} h</blockquote>"
-        ),
 
-        "sub_title_set": (
-            "<b>Title updated</b>\n"
-            "<blockquote>{title}</blockquote>"
-        ),
 
-        "sub_port_done": (
-            "<b>Port updated</b>\n"
-            "<blockquote>New port: {port}</blockquote>"
-        ),
 
-        "sub_path_done": (
-            "<b>Path rotated</b>\n"
-            "<blockquote><code>{path}</code></blockquote>"
-        ),
     }
 
     strings_ru = {
@@ -860,21 +626,20 @@ class XRay(loader.Module):
         "guard_docker": "Юзербот запущен внутри контейнера (Docker, Podman, LXC или Kubernetes). XRay в таком режиме работать отказывается.",
         "guard_why": "Почему: модуль поднимает долгоживущие демоны и держит ключи VPN. Под root одна ошибка это полный захват сервера, а внутри контейнера слушающие порты выходят за границы обещанной изоляции. Юзербот не является системной службой.",
         "guard_how": "Что делать: запустите юзербот обычным пользователем с рабочей сессией <code>systemctl --user</code>, модуль создаёт только пользовательские юниты. Root не использовать, в Docker не запускать.",
-        "reloaded": "<blockquote><b>XRay перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nПользователей: <b>{users}</b>\nПодписок: <b>{subscriptions}</b>\nЛимит файла лога: <b>{log_size} MB</b></blockquote>",
-        "greeting": "<blockquote><b>XRay готов к работе</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nНастроено пользователей: <b>{users}</b>\nПодписок: <b>{subscriptions}</b>\nЛимит файла лога: <b>{log_size} MB</b>\nДля управления используйте <code>{prefix}xray</code>.</blockquote>",
+        "reloaded": "<blockquote><b>XRay перезагружен</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nПользователей: <b>{users}</b>\nЛимит файла лога: <b>{log_size} MB</b></blockquote>",
+        "greeting": "<blockquote><b>XRay готов к работе</b></blockquote>\n<blockquote>Версия: <b>{version}</b>\nНастроено пользователей: <b>{users}</b>\nЛимит файла лога: <b>{log_size} MB</b>\nДля управления используйте <code>{prefix}xray</code>.</blockquote>",
         "main_menu": (
             "<b>XRay Мультиюзерный VPN</b>\n"
             "<blockquote>Всего юзеров: {total}\n"
             "Активных: {active}\n"
             "Версия XRay: {version}\n"
-            "Версия Cloudflared: {cloudflared_version}</blockquote>"
+            "</blockquote>"
         ),
 
         "setup_menu": (
             "<b>Установка и настройка</b>\n"
             "<blockquote>"
             "XRay Core: {xray_status}\n"
-            "Cloudflared: {cloudflared_status}\n"
             "GitHub API: {gh_status}"
             "</blockquote>"
         ),
@@ -1014,6 +779,22 @@ class XRay(loader.Module):
         "btn_stop": "Остановить",
         "btn_restart": "Перезапустить",
         "btn_get_link": "Получить ссылку",
+        "btn_firewall": "Файервол",
+        "fw_menu": "<b>Файервол: {name}</b>\n<blockquote>Белый список: <b>{state}</b>\nКогда включён, прокси работает без пароля, и подключиться могут только адреса из списка. Остальные отбрасываются.\n\n{ips}</blockquote>",
+        "fw_state_on": "включён",
+        "fw_state_off": "выключен",
+        "fw_empty_hint": "список пуст, никто не проходит",
+        "btn_fw_toggle_on": "Белый список: ВКЛ",
+        "btn_fw_toggle_off": "Белый список: ВЫКЛ",
+        "btn_fw_add": "Добавить адреса",
+        "btn_fw_del": "Убрать",
+        "input_fw_add": "Пришлите IPv4/IPv6 или CIDR, несколько через пробел",
+        "fw_bad_ip": "Неверный адрес: {value}",
+        "log_socks_conn": "<b>Подключение SOCKS5</b>\n<blockquote>Юзер: <code>{name}</code>\nКлиент: <code>{ip}</code>\nЦель: <code>{target}</code></blockquote>",
+        "log_socks_gate": "<b>Файервол SOCKS5</b>\n<blockquote>Юзер: <code>{name}</code>\nКлиент: <code>{ip}</code>\nРешение: {action}</blockquote>",
+        "log_socks_allowed": "<b>пропущен</b>",
+        "log_socks_blocked": "<b>отброшен</b>",
+        "socks5_sent_fw": "<b>SOCKS5: {name}</b>\n<blockquote>Хост: {ip}\nПорт: {port}\nЛогин: не нужен\n\nURL: <code>socks5://{ip}:{port}</code>\nБелый список: {ips}</blockquote>",
         "btn_settings": "Настройки",
         "btn_delete": "Удалить",
         "btn_xhttp": "XHTTP",
@@ -1030,14 +811,9 @@ class XRay(loader.Module):
         "btn_safari": "Safari",
         "btn_install_xray": "Установить XRay Core",
         "btn_reinstall_xray": "Переустановить XRay Core",
-        "btn_install_cloudflared": "Установить Cloudflared",
-        "cf_install_menu": "<b>Cloudflared</b>\n<blockquote>Установлено: {current}\nМинимум: {min}\nКаждый бинарник сверяется с дайджестом из заметок к релизу</blockquote>",
         "cf_no_releases": "<blockquote>Список релизов недоступен, предлагается только запиненный {version}</blockquote>",
         "cf_installed_mark": " (установлена)",
-        "cf_installing": "<b>Установка Cloudflared {version}</b>\n<blockquote>Скачивание и проверка дайджеста</blockquote>",
-        "cf_installed": "<b>Cloudflared установлен</b>\n<blockquote>{version}</blockquote>",
         "not_installed": "Не установлен",
-        "btn_reinstall_cloudflared": "Переустановить Cloudflared",
 
         "input_name": "Введите имя:",
         "input_limit": "Введите лимит:",
@@ -1161,12 +937,6 @@ class XRay(loader.Module):
 
         "btn_socks5": "SOCKS5",
         "btn_transport": "Транспорт",
-        "sub_tls_on": "<blockquote><b>Транспорт</b> | <b>https</b> через <code>{host}</code>\nКлиенты принимают ссылку без ругани</blockquote>",
-        "sub_tls_off": "<blockquote><b>Транспорт</b> | <b>http</b> на <code>{host}</code>\nМногие клиенты не принимают http, нажмите кнопку https</blockquote>",
-        "btn_sub_tls": "https-туннель",
-        "sub_tls_done": "<blockquote><b>Туннель подписки поднят</b>\n<code>{url}</code></blockquote>",
-        "sub_tls_fail": "<blockquote><b>Туннель не поднялся</b>\n<code>{error}</code>\nОбычная http-ссылка продолжает работать</blockquote>",
-        "sub_link_moved": "<b>Ссылка на подписку обновлена</b>\n<blockquote>Туннель пересобран, публичный hostname сменился.\nНовая ссылка: <code>{url}</code></blockquote>",
         "core_old_warn": (
             "<blockquote><b>Ядро уязвимо</b> | <code>{version}</code>\n"
             "Всё ниже <b>{min}</b> держит MPTCP-слушатели открытыми и даёт удалённый root "
@@ -1198,142 +968,25 @@ class XRay(loader.Module):
             "</blockquote>"
         ),
 
-        "sub_on": "включено",
-        "sub_off": "выключено",
 
-        "btn_sub": "Подписки",
-        "btn_sub_toggle": "Включить / Выключить",
-        "btn_sub_port": "Сменить порт",
-        "btn_sub_path": "Обновить путь",
-        "btn_sub_url": "Ссылка",
-        "btn_sub_users": "Токены",
-        "btn_sub_stats": "API статистики",
-        "btn_sub_apply": "Пересобрать конфиги",
-        "btn_sub_reset": "Сбросить счётчики",
-        "btn_sub_interval": "Интервал",
-        "btn_sub_title": "Название",
-        "btn_sub_regen": "Новый токен",
 
-        "sub_menu": (
-            "<b>Подписки</b>\n"
-            "<blockquote>"
-            "Статус: {status}\n"
-            "Порт: {port}\n"
-            "Путь: <code>{path}</code>\n"
-            "Подключений: {links}\n"
-            "Трафик: {traffic}\n"
-            "API статистики: {stats}\n"
-            "Интервал: {interval} ч\n"
-            "Название: {title}"
-            "</blockquote>"
-        ),
 
-        "sub_url_msg": (
-            "<b>Ссылка подписки</b>\n"
-            "<blockquote>"
-            "Общая, все подключения:\n"
-            "<code>{url}</code>\n\n"
-            "JSON: <code>{url_json}</code>\n\n"
-            "Лимит в ссылке всегда безлимитный, "
-            "трафик только учитывается."
-            "</blockquote>"
-        ),
 
-        "sub_users_menu": (
-            "<b>Токены подписки</b>\n"
-            "<blockquote>"
-            "Отдельная ссылка на каждое подключение. "
-            "SOCKS5 в подписку не входит."
-            "</blockquote>"
-        ),
 
-        "sub_user_msg": (
-            "<b>Подписка: {name}</b>\n"
-            "<blockquote>"
-            "Транспорт: {transport}\n"
-            "Порт: {port}\n"
-            "Трафик: {traffic}\n\n"
-            "<code>{url}</code>"
-            "</blockquote>"
-        ),
 
-        "sub_empty": (
-            "<b>Подписки</b>\n"
-            "<blockquote>"
-            "Нет подключений для выдачи. "
-            "SOCKS5 в подписку не входит."
-            "</blockquote>"
-        ),
 
-        "sub_started": (
-            "<b>Подписки включены</b>\n"
-            "<blockquote>"
-            "Порт: {port}\n"
-            "Путь: <code>{path}</code>\n\n"
-            "{hint}"
-            "</blockquote>"
-        ),
 
-        "sub_stopped": (
-            "<b>Подписки выключены</b>\n"
-            "<blockquote>Сервер остановлен, порт освобождён.</blockquote>"
-        ),
 
-        "sub_reset_done": (
-            "<b>Счётчики сброшены</b>\n"
-            "<blockquote>Накопленный трафик обнулён.</blockquote>"
-        ),
 
-        "sub_apply_done": (
-            "<b>Конфиги пересобраны</b>\n"
-            "<blockquote>"
-            "Перезапущено: {restarted}\n"
-            "Ожидают запуска: {pending}"
-            "</blockquote>"
-        ),
 
-        "sub_apply_hint": (
-            "API статистики добавлен в конфиги. "
-            "Нажмите пересборку, чтобы применить к работающим подключениям."
-        ),
 
-        "sub_docker_warn": (
-            "\n\nОбнаружен Docker. Порт доступен только "
-            "если он проброшен контейнером."
-        ),
 
-        "sub_no_ip": (
-            "<b>Ошибка</b>\n"
-            "<blockquote>Не удалось определить внешний IP.</blockquote>"
-        ),
 
-        "sub_err_start": (
-            "<b>Ошибка запуска</b>\n"
-            "<blockquote>{error}</blockquote>"
-        ),
 
-        "sub_input_interval": "Введите интервал обновления в часах (1-168):",
-        "sub_input_title": "Введите название профиля:",
 
-        "sub_interval_set": (
-            "<b>Интервал обновлён</b>\n"
-            "<blockquote>{interval} ч</blockquote>"
-        ),
 
-        "sub_title_set": (
-            "<b>Название обновлено</b>\n"
-            "<blockquote>{title}</blockquote>"
-        ),
 
-        "sub_port_done": (
-            "<b>Порт обновлён</b>\n"
-            "<blockquote>Новый порт: {port}</blockquote>"
-        ),
 
-        "sub_path_done": (
-            "<b>Путь обновлён</b>\n"
-            "<blockquote><code>{path}</code></blockquote>"
-        ),
     }
 
     def __init__(self):
@@ -1354,10 +1007,8 @@ class XRay(loader.Module):
         self._link_cache: Dict[str, str] = {}
         self._logger_topic = None
         self._asset_channel = None
-        self._sub: Dict = {}
-        self._sub_server = None
-        self._sub_thread = None
-        self._sub_task = None
+        self._event_offsets: Dict[str, int] = {}
+        self._socks_seen: Dict[str, float] = {}
 
     async def client_ready(self, client, db):
         self._client = client
@@ -1368,7 +1019,6 @@ class XRay(loader.Module):
         tg_user_id = self._me.id
         self._root = os.path.join(os.path.expanduser("~"), ".xray_on_userbot", str(tg_user_id))
         self._xray_path = os.path.join(self._root, "xray")
-        self._cloudflared_path = os.path.join(self._root, "cloudflared")
 
         os.makedirs(self._root, mode=0o700, exist_ok=True)
         os.chmod(self._root, 0o700)
@@ -1381,8 +1031,6 @@ class XRay(loader.Module):
         self._users = self._db.get("XR", "users", {})
         self._external_ip = await self._detect_external_ip()
         self._asset_channel = self._db.get("heroku.forums", "channel_id", None)
-        self._sub = self._db.get("XR", "sub", {}) or {}
-        self._sub_ensure()
 
         if self._asset_channel:
             await self._ensure_logger_topic()
@@ -1394,7 +1042,6 @@ class XRay(loader.Module):
             values = {
                 "version": ".".join(map(str, __version__)),
                 "users": len(self._users),
-                "subscriptions": len(self._sub),
                 "log_size": self.config["MAX_LOG_FILE_SIZE"],
                 "prefix": self.get_prefix(),
             }
@@ -1416,7 +1063,7 @@ class XRay(loader.Module):
             if user.pop("resume_on_module_load", False) and not user.get("restart_required"):
                 await self._start_user(name)
         for name in [n for n, u in self._users.items() if u.get("transport") not in ("tcp", "xhttp", "socks5")]:
-            for kind in ("xray", "site", "cf"):
+            for kind in ("xray", "site", "cf", "gate"):
                 try:
                     await self._stop_unit(self._unit_name(name, kind))
                 except Exception:
@@ -1426,8 +1073,18 @@ class XRay(loader.Module):
             logger.info("[XR] dropped outdated user %s", name)
             await self._cleanup_stale_units(name)
         self._start_monitor()
-        await self._sub_autostart()
-        self._sub_start_task()
+        try:
+            await self._stop_unit("xray-sub-tunnel.service")
+            stale = os.path.join(self._systemd_user_dir, "xray-sub-tunnel.service")
+            if os.path.exists(stale):
+                os.remove(stale)
+            os.remove(os.path.join(self._root, "sub-tunnel.log"))
+        except OSError:
+            pass
+        try:
+            await self._systemctl("daemon-reload")
+        except Exception:
+            pass
 
     async def _send_with_preview(self, chat_id, text, is_greeting=False):
         try:
@@ -1514,17 +1171,10 @@ class XRay(loader.Module):
     async def on_unload(self):
         self._closing = True
         try:
-            self._db.set("XR", "unload_ts", time.time())
-            asyncio.get_event_loop().create_task(self._deadman_sub_tunnel())
-        except Exception:
-            pass
-        try:
             await self._stop_monitor()
         except Exception as e:
             logger.warning("[XR] the monitor loop was not stopped cleanly: %s", e)
         for step in (
-            self._sub_stop_task,
-            self._sub_stop_server,
             self._stop_all_units,
         ):
             try:
@@ -1533,18 +1183,6 @@ class XRay(loader.Module):
                     await result
             except Exception as e:
                 logger.warning("[XR] unload step %s failed: %s", getattr(step, "__name__", step), e)
-
-    async def _deadman_sub_tunnel(self):
-        try:
-            await asyncio.sleep(90)
-            unloaded_at = self._db.get("XR", "unload_ts", 0.0) or 0.0
-            if (self._db.get("XR", "load_ts", 0.0) or 0.0) > unloaded_at:
-                return
-            if await self._unit_active(SUB_TUNNEL_UNIT):
-                await self._stop_unit(SUB_TUNNEL_UNIT)
-                logger.info("[XR] subscription tunnel stopped after a real module unload")
-        except Exception:
-            pass
 
     async def _stop_monitor(self):
         task = self._monitor_task
@@ -1608,7 +1246,8 @@ class XRay(loader.Module):
     def _unit_name(self, name: str, kind: str = "xray") -> str:
         """Return a stable user-systemd unit name for a module user."""
         safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", name)
-        return f"{safe}{'-cf-tunnel' if kind == 'cf' else '-site' if kind == 'site' else ''}.service"
+        suffix = {"xray": "", "site": "-site", "cf": "-cf-tunnel", "gate": "-gate"}.get(kind, "")
+        return f"{safe}{suffix}.service"
 
     @property
     def _systemd_user_dir(self) -> str:
@@ -1647,6 +1286,61 @@ class XRay(loader.Module):
         base = os.path.join(self._root, "users", name)
         for filename in ("start.log", "error.log", "access.log", "daemon.log"):
             self._trim_log(os.path.join(base, filename))
+
+    def _parse_ip_list(self, text: str):
+        out = []
+        bad = []
+        for raw in re.split(r"[\s,;]+", str(text or "").strip()):
+            if not raw:
+                continue
+            try:
+                net = ipaddress.ip_network(raw, strict=False)
+            except ValueError:
+                bad.append(raw)
+                continue
+            out.append(str(net))
+        return out, bad
+
+    async def _start_gate(self, name: str, user_dir: str) -> Tuple[bool, str]:
+        reason = _guard_reason()
+        if reason:
+            return False, reason
+        unit = self._unit_name(name, "gate")
+        if await self._unit_active(unit):
+            return True, ""
+        user = self._users[name]
+        ips = user.get("fw_ips") or []
+        script_path = os.path.join(user_dir, "gate.py")
+        content = (
+            GATE_TEMPLATE
+            .replace("__ALLOWED__", repr(list(ips)))
+            .replace("__BACKEND_PORT__", str(user["port"]))
+            .replace("__LISTEN_PORT__", str(user["port"]))
+        )
+        try:
+            _write_private(script_path, content)
+        except OSError as e:
+            return False, f"gate_write_failed: {e}"
+        log_path = os.path.join(user_dir, "daemon.log")
+        try:
+            self._write_unit(unit, f"XRay firewall gate for {name}", [sys.executable, script_path], log_path)
+            ok, output = await self._start_unit(unit)
+            if not ok:
+                return False, output
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                await asyncio.sleep(0.25)
+                try:
+                    with socket.create_connection(("127.0.0.1", user["port"]), timeout=0.5):
+                        return True, ""
+                except OSError:
+                    if not await self._unit_active(unit):
+                        tail = open(log_path, errors="replace").read()[-400:] if os.path.exists(log_path) else ""
+                        return False, tail or "gate_start_failed"
+            await self._stop_unit(unit)
+            return False, "gate_healthcheck_timeout"
+        except Exception as e:
+            return False, str(e)
 
     def _write_unit(self, unit: str, description: str, command: List[str], log_path: str):
         os.makedirs(self._systemd_user_dir, mode=0o700, exist_ok=True)
@@ -1778,131 +1472,6 @@ class XRay(loader.Module):
             parts.append(f"{m}m")
         parts.append(f"{s}s")
         return " ".join(parts)
-
-    def _cloudflared_installed(self) -> bool:
-        return (
-            getattr(self, "_cloudflared_path", None)
-            and os.path.isfile(self._cloudflared_path)
-            and os.access(self._cloudflared_path, os.X_OK)
-        )
-
-    def _cloudflared_asset(self) -> str:
-        arch = platform.machine().lower()
-        return {
-            "x86_64": "cloudflared-linux-amd64",
-            "amd64": "cloudflared-linux-amd64",
-            "aarch64": "cloudflared-linux-arm64",
-            "arm64": "cloudflared-linux-arm64",
-        }.get(arch, "")
-
-    def _cloudflared_tag(self, raw: str) -> str:
-        found = re.search(r"(\d{4}\.\d{1,2}\.\d{1,2})", str(raw or ""))
-        return found.group(1) if found else ""
-
-    def _cloudflared_digest(self, tag: str, asset: str, releases: List[Dict] = None) -> str:
-        tag = str(tag or "").strip()
-        for known in releases or []:
-            if known.get("tag_name") == tag:
-                found = known.get("digests", {}).get(asset, "")
-                if found:
-                    return found
-                break
-        return CLOUDFLARED_PINNED.get(tag, {}).get(asset, "")
-
-    async def _cloudflared_releases(self) -> List[Dict]:
-        cached = getattr(self, "_cf_releases", None)
-        if cached and time.time() - cached[0] < CLOUDFLARED_RELEASES_TTL:
-            return cached[1]
-        curl_cmd = ["curl", "-sL", "--max-time", "15", "-H", "Accept: application/json"]
-        extra, cfg = _curl_header_config(self._gh_token())
-        curl_cmd += extra
-        curl_cmd.append(f"https://api.github.com/repos/{CLOUDFLARED_REPO}/releases?per_page=30")
-        out = b""
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *curl_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            out, _ = await process.communicate()
-        except Exception:
-            return []
-        finally:
-            _drop_curl_config(cfg)
-        try:
-            data = json.loads(out.decode())
-        except Exception:
-            return []
-        if not isinstance(data, list):
-            return []
-        found = []
-        for release in data:
-            tag = str(release.get("tag_name") or "").strip().lstrip("v")
-            if not tag or release.get("draft") or release.get("prerelease"):
-                continue
-            numbers = _version_tuple(tag)
-            if numbers and numbers < CLOUDFLARED_MIN:
-                continue
-            digests = {}
-            for name, digest in re.findall(r"([\w.\-]+):\s*([0-9a-f]{64})", release.get("body") or ""):
-                digests[name.strip()] = digest
-            digests.update(CLOUDFLARED_PINNED.get(tag, {}))
-            found.append({"tag_name": tag, "digests": digests, "published_at": release.get("published_at", "")})
-            if len(found) >= CLOUDFLARED_RELEASE_LIMIT:
-                break
-        self._cf_releases = (time.time(), found)
-        return found
-
-    async def _install_cloudflared(self, version: str = "") -> Tuple[bool, str]:
-        reason = _guard_reason()
-        if reason:
-            return False, reason
-        asset = self._cloudflared_asset()
-        if not asset:
-            return False, f"Unsupported arch: {platform.machine().lower()}"
-        tag = self._cloudflared_tag(version) or CLOUDFLARED_VERSION
-        numbers = _version_tuple(tag)
-        if numbers and numbers < CLOUDFLARED_MIN:
-            return False, f"Refused: {tag} is below {CLOUDFLARED_MIN_TAG}, install a newer release"
-        releases = await self._cloudflared_releases()
-        expected = self._cloudflared_digest(tag, asset, releases)
-        if not expected:
-            return False, f"No published digest for {asset} in {tag}"
-        tmp_path = f"{self._cloudflared_path}.tmp"
-        try:
-            process = await asyncio.create_subprocess_exec(
-                "curl", "-fL", "--max-time", "120", "-o", tmp_path,
-                f"https://github.com/{CLOUDFLARED_REPO}/releases/download/{tag}/{asset}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, err = await process.communicate()
-            if process.returncode != 0 or not os.path.isfile(tmp_path):
-                return False, err.decode(errors="replace")[:200] or "Download failed"
-            got = _sha256_file(tmp_path)
-            if got != expected:
-                os.unlink(tmp_path)
-                return False, f"Digest mismatch for {asset}: {got}"
-            os.chmod(tmp_path, 0o755)
-            check = await asyncio.create_subprocess_exec(
-                tmp_path, "--version",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await check.communicate()
-            if check.returncode != 0:
-                return False, "Cloudflared validation failed"
-            os.replace(tmp_path, self._cloudflared_path)
-            self._cf_releases = None
-            return True, await self._get_version("cloudflared")
-        except Exception as e:
-            return False, str(e)
-        finally:
-            if os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
 
     def _xray_installed(self) -> bool:
         return (
@@ -2210,16 +1779,12 @@ class XRay(loader.Module):
                 shutil.rmtree(tmp, ignore_errors=True)
 
     async def _get_version(self, binary: str = "xray") -> str:
-        specs = {
-            "xray": (getattr(self, "_xray_path", None), self._xray_installed, ("version",)),
-            "cloudflared": (getattr(self, "_cloudflared_path", None), self._cloudflared_installed, ("--version",)),
-        }
-        path, installed, args = specs[binary]
-        if not installed():
+        path = self._xray_path
+        if not self._xray_installed():
             return "not installed"
         try:
             p = await asyncio.create_subprocess_exec(
-                path, *args,
+                path, "version",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -2287,8 +1852,6 @@ class XRay(loader.Module):
 
     async def _get_next_port(self) -> int:
         used_ports = {u["port"] for u in self._users.values()}
-        if self._sub.get("port"):
-            used_ports.add(int(self._sub["port"]))
         port = BASE_PORT
 
         if await self._check_port_available(port) and port not in used_ports:
@@ -2317,6 +1880,7 @@ class XRay(loader.Module):
         transport = user["transport"]
 
         if transport == "socks5":
+            behind_gate = bool(user.get("fw_enabled"))
             socks_config = {
                 "log": {
                     "loglevel": "warning",
@@ -2324,17 +1888,21 @@ class XRay(loader.Module):
                     "error": os.path.join(self._root, "users", user["name"], "error.log"),
                 },
                 "inbounds": [{
-                    "listen": "0.0.0.0",
+                    "listen": "127.0.0.1" if behind_gate else "0.0.0.0",
                     "port": user["port"],
                     "protocol": "socks",
-                    "settings": {
-                        "auth": "password",
-                        "accounts": [{
-                            "user": user.get("socks_user", ""),
-                            "pass": user.get("socks_pass", ""),
-                        }],
-                        "udp": True,
-                    },
+                    "settings": (
+                        {"auth": "noauth", "udp": True}
+                        if behind_gate
+                        else {
+                            "auth": "password",
+                            "accounts": [{
+                                "user": user.get("socks_user", ""),
+                                "pass": user.get("socks_pass", ""),
+                            }],
+                            "udp": True,
+                        }
+                    ),
                     "sniffing": {
                         "enabled": False,
                         "destOverride": ["http", "tls", "quic", "fakedns"],
@@ -2346,7 +1914,6 @@ class XRay(loader.Module):
                     {"protocol": "freedom", "tag": "direct"},
                 ],
             }
-            self._inject_stats_api(user, socks_config)
             return socks_config
 
         if transport == "tcp":
@@ -2421,7 +1988,6 @@ class XRay(loader.Module):
                 },
             }
 
-        self._inject_stats_api(user, config)
         return config
 
     def _build_vless_link(self, user: Dict) -> str:
@@ -2521,6 +2087,13 @@ class XRay(loader.Module):
             user["start_time"] = time.time()
             user["restart_required"] = False
 
+            if user["transport"] == "socks5" and user.get("fw_enabled"):
+                ok, error = await self._start_gate(name, user_dir)
+                if not ok:
+                    await self._stop_unit(unit)
+                    self._processes.pop(name, None)
+                    return False, error
+
             self._save_users()
             await self._send_log(
                 self.strings["log_user_started"].format(**self._log_user_data(user)),
@@ -2537,6 +2110,7 @@ class XRay(loader.Module):
         if name not in self._processes and not await self._unit_active(unit):
             return False
         await self._stop_unit(unit)
+        await self._stop_unit(self._unit_name(name, "gate"))
         self._processes.pop(name, None)
 
         if name in self._users:
@@ -2613,6 +2187,13 @@ class XRay(loader.Module):
                     name=name
                 )
 
+        for name, user in list(self._processes.items()):
+            if self._closing:
+                return
+            u = self._users.get(name)
+            if u and u.get("transport") == "socks5":
+                await self._ship_socks_events(name, u)
+
         if self._closing or not self._xray_installed():
             return
 
@@ -2625,6 +2206,65 @@ class XRay(loader.Module):
                 continue
 
             await self._start_user(name)
+
+    async def _ship_socks_events(self, name: str, user: Dict) -> None:
+        if self._closing or not self._logger_topic or not self._asset_channel:
+            return
+        base = os.path.join(self._root, "users", name)
+        sources = [(os.path.join(base, "access.log"), False)]
+        if user.get("fw_enabled"):
+            sources.append((os.path.join(base, "daemon.log"), True))
+        now = time.time()
+        for path, gate in sources:
+            if not os.path.exists(path):
+                continue
+            key = f"{name}:{os.path.basename(path)}"
+            size = os.path.getsize(path)
+            pos = self._event_offsets.get(key)
+            if pos is None or pos > size:
+                self._event_offsets[key] = size
+                continue
+            try:
+                with open(path, "r", errors="replace") as f:
+                    f.seek(pos)
+                    chunk = f.read(256 * 1024)
+                self._event_offsets[key] = size
+            except OSError:
+                continue
+            for line in chunk.splitlines():
+                if gate:
+                    m = re.match(r"gate (allow|block) (\S+)", line.strip())
+                    if not m:
+                        continue
+                    ip = m.group(2)
+                    if now - self._socks_seen.get(f"{name}:{ip}", 0) < SOCKS_EVENT_GAP:
+                        continue
+                    self._socks_seen[f"{name}:{ip}"] = now
+                    text = self.strings["log_socks_gate"].format(
+                        name=_escape(name), ip=_escape(ip),
+                        action=self.strings["log_socks_allowed"] if m.group(1) == "allow" else self.strings["log_socks_blocked"],
+                    )
+                else:
+                    m = re.search(r"from ([0-9A-Fa-f:.]+):\d+ accepted (\S+)", line)
+                    if not m:
+                        continue
+                    ip, target = m.group(1), m.group(2)
+                    if ip.startswith("127.") or ip == "::1":
+                        continue
+                    dedup = f"{name}:{ip}:{target}"
+                    if now - self._socks_seen.get(dedup, 0) < SOCKS_EVENT_GAP:
+                        continue
+                    self._socks_seen[dedup] = now
+                    text = self.strings["log_socks_conn"].format(
+                        name=_escape(name), ip=_escape(ip), target=_escape(target),
+                    )
+                try:
+                    await self._send_log(text, name=name)
+                except Exception as e:
+                    logger.warning("[XR] socks event was not logged: %s", e)
+        if len(self._socks_seen) > 8192:
+            cutoff = now - 3600
+            self._socks_seen = {k: v for k, v in self._socks_seen.items() if v > cutoff}
 
     def _start_monitor(self):
         async def monitor_loop():
@@ -2681,837 +2321,14 @@ class XRay(loader.Module):
 
         return " ".join(parts)
 
-    def _sub_save(self):
-        self._db.set("XR", "sub", self._sub)
-
-    def _sub_default(self) -> Dict:
-        return {
-            "enabled": False,
-            "port": 0,
-            "prefix": "",
-            "token": "",
-            "stats": True,
-            "interval": 12,
-            "title": "",
-            "primary": "",
-            "tunnel_host": "",
-            "traffic": {},
-            "baseline": {},
-        }
-
-    def _sub_ensure(self) -> Dict:
-        changed = False
-        for key, value in self._sub_default().items():
-            if key not in self._sub:
-                self._sub[key] = value
-                changed = True
-        if not self._sub.get("port"):
-            self._sub["port"] = self._sub_free_port(self._sub_taken_ports())
-            changed = True
-        if not self._sub.get("prefix"):
-            self._sub["prefix"] = _gen_secret(SUB_TOKEN_LEN)
-            changed = True
-        if not self._sub.get("token"):
-            self._sub["token"] = _gen_secret(SUB_TOKEN_LEN)
-            changed = True
-        if changed:
-            self._sub_save()
-        return self._sub
-
-    def _sub_b64(self, raw: str) -> str:
-        return base64.urlsafe_b64encode(str(raw).encode("utf-8")).decode("ascii").rstrip("=")
-
-    def _port_in_use(self, port: int) -> bool:
-        try:
-            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        except OSError:
-            return True
-        try:
-            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            probe.bind(("0.0.0.0", int(port)))
-        except OSError:
-            return True
-        finally:
-            probe.close()
-        return False
-
-    def _sub_taken_ports(self) -> set:
-        taken = set()
-        for user in self._users.values():
-            for key in ("port", "api_port"):
-                value = user.get(key)
-                if value:
-                    try:
-                        taken.add(int(value))
-                    except (TypeError, ValueError):
-                        continue
-        if self._sub.get("port"):
-            try:
-                taken.add(int(self._sub["port"]))
-            except (TypeError, ValueError):
-                pass
-        return taken
-
-    def _sub_free_port(self, taken: set) -> int:
-        busy = set(taken)
-        if self._sub.get("port"):
-            try:
-                busy.add(int(self._sub["port"]))
-            except (TypeError, ValueError):
-                pass
-        for port in SUB_PORT_CANDIDATES:
-            if port not in busy and not self._port_in_use(port):
-                return port
-        for _ in range(64):
-            port = random.randint(20000, 60000)
-            if port not in taken and not self._port_in_use(port):
-                return port
-        for _ in range(64):
-            port = self._find_free_loopback_port()
-            if port not in taken and not self._port_in_use(port):
-                return port
-        return random.randint(20000, 60000)
-
-    def _sub_forget_user(self, name: str):
-        if not self._sub:
-            return
-        self._sub.setdefault("traffic", {}).pop(name, None)
-        self._sub.setdefault("baseline", {}).pop(name, None)
-        self._sub_save()
-
-    def _sub_user_token(self, name: str) -> str:
-        user = self._users.get(name)
-        if not user:
-            return ""
-        token = user.get("sub_token")
-        if not token:
-            token = _gen_secret(SUB_TOKEN_LEN)
-            user["sub_token"] = token
-            self._save_users()
-        return token
-
-    def _sub_prefix(self) -> str:
-        return self._sub_b64(self._sub.get("prefix", ""))
-
-    def _sub_route(self, token: str) -> str:
-        return f"/{self._sub_prefix()}/{self._sub_b64(token)}"
-
-    def _sub_masked_path(self) -> str:
-        return f"/{self._sub_prefix()}/*"
-
-    def _sub_base_url(self) -> str:
-        host = self._sub.get("tunnel_host") or ""
-        if host:
-            return f"https://{host}"
-        if not self._external_ip:
-            return ""
-        return f"http://{self._external_ip}:{self._sub.get('port', 0)}"
-
-    def _sub_url(self, token: str = "") -> str:
-        base = self._sub_base_url()
-        if not base:
-            return ""
-        if not token:
-            token = self._sub.get("token", "")
-        return base + self._sub_route(token)
-
-    def _sub_link_host(self, link: str) -> str:
-        parts = link.split("@", 1)
-        if len(parts) < 2:
-            return ""
-        tail = parts[1].split("?", 1)[0]
-        if tail.startswith("["):
-            end = tail.find("]")
-            if end < 0:
-                return ""
-            return tail[1:end]
-        if ":" in tail:
-            return tail.rsplit(":", 1)[0]
-        return tail
-
-    def _sub_targets(self, only: str = "") -> List[Tuple]:
-        out = []
-        if not self._external_ip:
-            return out
-        primary = self._sub_primary()
-        ordered = list(self._users.items())
-        if not only and primary:
-            ordered.sort(key=lambda pair: pair[0] != primary)
-        for name, user in ordered:
-            if only and name != only:
-                continue
-            if user.get("transport") == "socks5":
-                continue
-            try:
-                link = self._build_vless_link(user)
-            except Exception:
-                continue
-            if not link or "@" not in link:
-                continue
-            host = self._sub_link_host(link)
-            if not host or host.lower() in ("none", "null", "0.0.0.0"):
-                continue
-            out.append((name, user, link))
-        return out
-
-    def _sub_body(self, only: str = "") -> str:
-        return "\n".join(link for _, _, link in self._sub_targets(only))
-
-    def _sub_traffic_for(self, only: str = "") -> Tuple[int, int]:
-        up = 0
-        down = 0
-        rows = self._sub.get("traffic") or {}
-        for name, row in rows.items():
-            if only and name != only:
-                continue
-            if not isinstance(row, dict):
-                continue
-            up += int(row.get("up") or 0)
-            down += int(row.get("down") or 0)
-        return up, down
-
-    def _sub_userinfo(self, only: str = "") -> str:
-        up, down = self._sub_traffic_for(only)
-        return f"upload={up}; download={down}; total=0; expire=0"
-
-    def _sub_resolve(self, presented: str) -> Tuple[bool, str]:
-        given = presented.encode("utf-8", "ignore")
-        for name, user in self._users.items():
-            token = user.get("sub_token")
-            if not token:
-                continue
-            if secrets.compare_digest(given, self._sub_b64(token).encode("ascii")):
-                return True, name
-        if secrets.compare_digest(given, self._sub_b64(self._sub.get("token", "")).encode("ascii")):
-            return True, ""
-        return False, ""
-
-    def _sub_outbound(self, name: str, user: Dict) -> Dict:
-        transport = user.get("transport")
-        uuid_str = user.get("uuid") or ""
-        if not uuid_str:
-            return {}
-        address = self._external_ip
-        port = int(user.get("port") or 0)
-        vnext_user = {
-            "id": uuid_str,
-            "encryption": user.get("vless_encryption") or "none",
-            "email": name,
-        }
-        settings = {"vnext": [{"address": address, "port": port, "users": [vnext_user]}]}
-
-        if transport == "xhttp":
-            path = user.get("path") or "/xhttps"
-            if not path.startswith("/"):
-                path = "/" + path
-            stream = {
-                "network": "xhttp",
-                "security": "reality",
-                "xhttpSettings": {"path": path},
-                "realitySettings": {
-                    "serverName": user.get("sni") or "www.cloudflare.com",
-                    "fingerprint": user.get("fingerprint") or "firefox",
-                    "publicKey": user.get("public_key") or "",
-                    "shortId": user.get("short_id") or "",
-                    "spiderX": "/",
-                },
-            }
-            return {
-                "tag": "proxy",
-                "protocol": "vless",
-                "settings": settings,
-                "streamSettings": stream,
-            }
-
-        stream = {
-            "network": "tcp",
-            "security": "reality",
-            "tcpSettings": {"header": {"type": "none"}},
-            "realitySettings": {
-                "serverName": user.get("sni") or "www.cloudflare.com",
-                "fingerprint": user.get("fingerprint") or "firefox",
-                "publicKey": user.get("public_key") or "",
-                "shortId": user.get("short_id") or "",
-                "spiderX": "/",
-            },
-        }
-        if (user.get("vless_decryption") or "none") == "none":
-            vnext_user["flow"] = "xtls-rprx-vision"
-        return {
-            "tag": "proxy",
-            "protocol": "vless",
-            "settings": settings,
-            "streamSettings": stream,
-        }
-
-    def _sub_client_config(self, name: str, user: Dict) -> Dict:
-        outbound = self._sub_outbound(name, user)
-        if not outbound:
-            return {}
-        return {
-            "log": {"loglevel": "warning"},
-            "inbounds": [
-                {
-                    "tag": "socks-in",
-                    "listen": "127.0.0.1",
-                    "port": 1080,
-                    "protocol": "socks",
-                    "settings": {"auth": "noauth", "udp": True},
-                },
-                {
-                    "tag": "http-in",
-                    "listen": "127.0.0.1",
-                    "port": 1081,
-                    "protocol": "http",
-                    "settings": {},
-                },
-            ],
-            "outbounds": [
-                outbound,
-                {"protocol": "freedom", "tag": "direct"},
-                {"protocol": "blackhole", "tag": "block"},
-            ],
-            "routing": {
-                "domainStrategy": "AsIs",
-                "rules": [
-                    {
-                        "type": "field",
-                        "ip": [
-                            "10.0.0.0/8",
-                            "172.16.0.0/12",
-                            "192.168.0.0/16",
-                            "127.0.0.0/8",
-                            "::1/128",
-                            "fc00::/7",
-                        ],
-                        "outboundTag": "direct",
-                    }
-                ],
-            },
-        }
-
-    def _sub_json_payload(self, only: str = "") -> bytes:
-        configs = []
-        for name, user, _ in self._sub_targets(only):
-            config = self._sub_client_config(name, user)
-            if config:
-                configs.append(config)
-        payload = configs[0] if len(configs) == 1 else configs
-        return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-
-    def _sub_info_payload(self, only: str = "", up: int = 0, down: int = 0) -> Dict:
-        targets = self._sub_targets(only)
-        return {
-            "profiles": [name for name, _, _ in targets],
-            "links": len(targets),
-            "upload": up,
-            "download": down,
-            "total": 0,
-            "expire": 0,
-            "unlimited": True,
-            "interval": self._sub.get("interval", 12),
-        }
-
-    def _sub_make_handler(self):
-        outer = self
-
-        class SubHandler(BaseHTTPRequestHandler):
-            server_version = "nginx"
-            sys_version = ""
-            protocol_version = "HTTP/1.1"
-            timeout = SUB_SOCKET_TIMEOUT
-
-            def log_message(self, fmt, *args):
-                return
-
-            def handle_one_request(self):
-                try:
-                    self.raw_requestline = self.rfile.readline(SUB_MAX_LINE + 1)
-                    if len(self.raw_requestline) > SUB_MAX_LINE:
-                        self.raw_requestline = self.raw_requestline[:SUB_MAX_LINE]
-                        self.requestline = ""
-                        self.request_version = ""
-                        self.command = ""
-                        _sub_record(self.client_address[0], True)
-                        _sub_security(self.client_address[0], "sub_request", "deny", "request line too long")
-                        self.send_error(414, "uri too long")
-                        self.close_connection = True
-                        return
-                    if not self.raw_requestline:
-                        self.close_connection = True
-                        return
-                    if not self.parse_request():
-                        return
-                    method = getattr(self, "do_" + self.command, None)
-                    if method is None:
-                        self.send_error(501, "unsupported method")
-                        return
-                    method()
-                    self.wfile.flush()
-                except (TimeoutError, OSError):
-                    self.close_connection = True
-
-            def _abort(self):
-                _sub_record(self.client_address[0], True)
-                _sub_security(self.client_address[0], "sub_request", "deny", "unknown subscription")
-                try:
-                    self.send_response(404)
-                    self.send_header("Content-Length", "0")
-                    self.send_header("Connection", "close")
-                    self.end_headers()
-                except Exception:
-                    pass
-
-            def _reply(self, code, payload, ctype, userinfo):
-                self.send_response(code)
-                self.send_header("Content-Type", ctype)
-                self.send_header("Content-Length", str(len(payload)))
-                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-                self.send_header("Pragma", "no-cache")
-                self.send_header("Subscription-Userinfo", userinfo)
-                self.send_header("Profile-Update-Interval", str(outer._sub.get("interval", 12)))
-                title = outer._sub.get("title") or ""
-                if title:
-                    self.send_header("Profile-Title", "base64:" + outer._sub_b64(title))
-                self.end_headers()
-                if self.command != "HEAD" and payload:
-                    self.wfile.write(payload)
-                if code == 200:
-                    _sub_record(self.client_address[0], False)
-
-            def do_HEAD(self):
-                self.do_GET()
-
-            def do_GET(self):
-                try:
-                    self._dispatch()
-                except Exception:
-                    self._abort()
-
-            def _dispatch(self):
-                allowed, reason = _sub_allowed(self.client_address[0])
-                if not allowed:
-                    if reason:
-                        _sub_security(self.client_address[0], "sub_rate", "block", reason)
-                    self._reply(429, b"slow down\n", "text/plain; charset=utf-8", "upload=0; download=0; total=0; expire=0")
-                    return
-                raw = self.path or "/"
-                query = ""
-                if "?" in raw:
-                    raw, query = raw.split("?", 1)
-                if "#" in raw:
-                    raw = raw.split("#", 1)[0]
-                segments = [part for part in raw.split("/") if part]
-                fmt = ""
-                if len(segments) == 3:
-                    fmt = segments[2].lower()
-                    segments = segments[:2]
-                for chunk in query.split("&"):
-                    if not chunk:
-                        continue
-                    key, _, value = chunk.partition("=")
-                    if key.lower() == "format":
-                        fmt = value.lower()
-                if len(segments) != 2:
-                    self._abort()
-                    return
-                if not secrets.compare_digest(
-                    segments[0].encode("utf-8", "ignore"),
-                    outer._sub_prefix().encode("ascii"),
-                ):
-                    self._abort()
-                    return
-                resolved, only = outer._sub_resolve(segments[1])
-                if not resolved:
-                    self._abort()
-                    return
-                userinfo = outer._sub_userinfo(only)
-                if fmt != "info" and not outer._sub_targets(only):
-                    self._abort()
-                    return
-                if fmt == "info":
-                    up, down = outer._sub_traffic_for(only)
-                    body = json.dumps(outer._sub_info_payload(only, up, down), ensure_ascii=False).encode("utf-8")
-                    self._reply(200, body, "application/json; charset=utf-8", userinfo)
-                    return
-                if fmt == "json":
-                    self._reply(200, outer._sub_json_payload(only), "application/json; charset=utf-8", userinfo)
-                    return
-                if fmt == "raw":
-                    self._reply(200, outer._sub_body(only).encode("utf-8"), "text/plain; charset=utf-8", userinfo)
-                    return
-                encoded = base64.b64encode(outer._sub_body(only).encode("utf-8"))
-                self._reply(200, encoded, "text/plain; charset=utf-8", userinfo)
-
-        return SubHandler
-
-    def _sub_primary(self) -> str:
-        name = str(self._sub.get("primary") or "")
-        if name and name in self._users:
-            return name
-        for key, user in self._users.items():
-            if user.get("transport") != "socks5":
-                return key
-        return ""
-
-    def _sub_tunnel_log(self) -> str:
-        root = self._root or os.path.expanduser("~")
-        return os.path.join(root, "sub-tunnel.log")
-
-    def _read_tunnel_host(self, log_path: str, start_size: int = 0) -> str:
-        try:
-            with open(log_path, "r", errors="replace") as f:
-                if start_size:
-                    f.seek(start_size)
-                text = f.read()
-        except OSError:
-            return ""
-        matches = re.findall(r"https://([a-z0-9-]+\.trycloudflare\.com)", text, re.I)
-        return matches[-1] if matches else ""
-
-    async def _announce_sub_link(self, host: str) -> None:
-        if not host or not self._logger_topic or not self._asset_channel:
-            return
-        try:
-            url = self._sub_url(self._sub.get("token") or "") or f"https://{host}"
-        except Exception:
-            url = f"https://{host}"
-        try:
-            await self._send_log(self.strings["sub_link_moved"].format(url=_escape(url)))
-        except Exception as e:
-            logger.warning("[XR] the subscription announcement was not sent: %s", e)
-
-    async def _sub_tunnel_start(self) -> Tuple[bool, str]:
-        self._sub_ensure()
-        if not self._sub.get("enabled"):
-            return False, "sub_disabled"
-        reason = _guard_reason()
-        if reason:
-            return False, reason
-        unit = SUB_TUNNEL_UNIT
-        if await self._unit_active(unit):
-            await self._sub_tunnel_refresh()
-            return True, ""
-        if not self._cloudflared_installed():
-            return False, "cloudflared_not_installed"
-        port = int(self._sub.get("port") or 0)
-        if not port:
-            return False, "sub_port_missing"
-        log_path = self._sub_tunnel_log()
-        start_size = os.path.getsize(log_path) if os.path.exists(log_path) else 0
-        cloudflared = self._cloudflared_path
-        try:
-            self._write_unit(
-                unit,
-                "XRay subscription tunnel",
-                [cloudflared, "tunnel", "--protocol", "http2", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"],
-                log_path,
-            )
-            ok, output = await self._start_unit(unit)
-            if not ok:
-                return False, output
-            deadline = time.time() + 40
-            hostname = ""
-            while time.time() < deadline:
-                await asyncio.sleep(1)
-                hostname = self._read_tunnel_host(log_path, start_size)
-                if hostname:
-                    break
-                if not await self._unit_active(unit):
-                    break
-            if not hostname:
-                await self._stop_unit(unit)
-                return False, "cloudflared_tunnel_failed"
-            self._sub["tunnel_host"] = hostname
-            self._sub_save()
-            logger.info("[XR] subscription tunnel is %s", hostname)
-            await self._announce_sub_link(hostname)
-            return True, ""
-        except Exception as e:
-            return False, str(e)
-
-    async def _sub_tunnel_refresh(self) -> str:
-        if not self._sub.get("port"):
-            return ""
-        host = self._read_tunnel_host(self._sub_tunnel_log())
-        if not host:
-            return ""
-        if host == self._sub.get("tunnel_host"):
-            return ""
-        self._sub["tunnel_host"] = host
-        self._sub_save()
-        logger.info("[XR] subscription tunnel moved to %s", host)
-        await self._announce_sub_link(host)
-        return host
-
-    async def _sub_tunnel_stop(self):
-        self._sub["tunnel_host"] = ""
-        self._sub_save()
-        try:
-            await self._stop_unit(SUB_TUNNEL_UNIT)
-        except Exception as e:
-            logger.debug("[XR] the subscription tunnel was not stopped: %s", e)
-
-    def _sub_start_server(self) -> Tuple[bool, str]:
-        reason = _guard_reason()
-        if reason:
-            return False, reason
-        if self._sub_server:
-            return True, ""
-        self._sub_ensure()
-        port = int(self._sub["port"])
-        if self._port_in_use(port):
-            port = self._sub_free_port(self._sub_taken_ports())
-            self._sub["port"] = port
-            self._sub_save()
-        try:
-            httpd = _SubServer((SUB_BIND, port), self._sub_make_handler())
-        except OSError as exc:
-            return False, str(exc)
-        httpd.daemon_threads = True
-        self._sub_server = httpd
-        self._sub_thread = threading.Thread(target=httpd.serve_forever, name="xray-sub", daemon=True)
-        self._sub_thread.start()
-        logger.info(f"[XR] subscription server listening on {port}")
-        return True, ""
-
-    def _sub_stop_server(self):
-        httpd = self._sub_server
-        self._sub_server = None
-        self._sub_thread = None
-        if not httpd:
-            return
-        try:
-            httpd.shutdown()
-        except Exception:
-            pass
-        try:
-            httpd.server_close()
-        except Exception:
-            pass
-
-    async def _sub_autostart(self):
-        if not self._sub.get("enabled"):
-            return
-        ok, err = self._sub_start_server()
-        if not ok:
-            logger.error(f"[XR] subscription server failed to start: {err}")
-            return
-        ok, err = await self._sub_tunnel_start()
-        if not ok:
-            logger.warning(f"[XR] the subscription tunnel is off: {err}, plain http is used")
-
-    async def _sub_enable(self) -> Tuple[bool, str]:
-        self._sub_ensure()
-        self._sub["enabled"] = True
-        self._sub_save()
-        ok, err = self._sub_start_server()
-        if not ok:
-            self._sub["enabled"] = False
-            self._sub_save()
-            return False, err
-        self._sub_start_task()
-        await self._sub_tunnel_start()
-        return True, ""
-
-    async def _sub_disable(self):
-        self._sub["enabled"] = False
-        self._sub_save()
-        await self._sub_stop_task()
-        await self._sub_tunnel_stop()
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._sub_stop_server)
-
-    def _sub_start_task(self):
-        if self._sub_task and not self._sub_task.done():
-            return
-        self._sub_task = asyncio.create_task(self._sub_traffic_loop())
-
-    async def _sub_stop_task(self):
-        task = self._sub_task
-        self._sub_task = None
-        if not task:
-            return
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            pass
-
-    async def _sub_traffic_loop(self):
-        while True:
-            await asyncio.sleep(SUB_POLL_INTERVAL)
-            try:
-                if self._sub.get("enabled") and self._sub.get("stats"):
-                    await self._sub_collect_traffic()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.error(f"[XR] traffic poll failed: {exc}")
-
-    async def _sub_collect_traffic(self):
-        if not self._xray_installed():
-            return
-        changed = False
-        for name, user in list(self._users.items()):
-            port = user.get("api_port")
-            if not port:
-                continue
-            if name not in self._processes:
-                try:
-                    if not await self._unit_active(self._unit_name(name)):
-                        continue
-                except Exception:
-                    continue
-            raw = await self._sub_query_stats(port)
-            if raw is None:
-                continue
-            totals = dict((self._sub["traffic"].get(name)) or {"up": 0, "down": 0})
-            baseline = self._sub["baseline"].get(name)
-            if not isinstance(baseline, dict):
-                self._sub["baseline"][name] = {"up": raw[0], "down": raw[1]}
-                self._sub["traffic"][name] = totals
-                changed = True
-                continue
-            for key, value in (("up", raw[0]), ("down", raw[1])):
-                previous = int(baseline.get(key) or 0)
-                current = int(totals.get(key) or 0)
-                if value < previous:
-                    totals[key] = current + value
-                else:
-                    totals[key] = current + (value - previous)
-                baseline[key] = value
-            self._sub["baseline"][name] = baseline
-            self._sub["traffic"][name] = totals
-            changed = True
-        if changed:
-            self._sub_save()
-
-    async def _sub_query_stats(self, port: int):
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                self._xray_path,
-                "api",
-                "statsquery",
-                f"--server=127.0.0.1:{int(port)}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except Exception:
-            return None
-        try:
-            out, _ = await asyncio.wait_for(proc.communicate(), timeout=SUB_XRAY_CALL_TIMEOUT)
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            return None
-        except Exception:
-            return None
-        if proc.returncode != 0:
-            return None
-        return self._sub_parse_stats(out.decode("utf-8", "replace"))
-
-    def _sub_parse_stats(self, text: str):
-        text = (text or "").strip()
-        if not text:
-            return None
-        start = text.find("{")
-        if start < 0:
-            return None
-        try:
-            data = json.loads(text[start:])
-        except Exception:
-            return None
-        user_up = 0
-        user_down = 0
-        seen_user = False
-        inbound_up = 0
-        inbound_down = 0
-        for item in data.get("stat") or []:
-            if not isinstance(item, dict):
-                continue
-            parts = str(item.get("name") or "").split(">>>")
-            if len(parts) != 4 or parts[2] != "traffic":
-                continue
-            try:
-                value = int(item.get("value") or 0)
-            except (TypeError, ValueError):
-                continue
-            kind, who, _, direction = parts
-            if kind == "user":
-                seen_user = True
-                if direction == "uplink":
-                    user_up += value
-                elif direction == "downlink":
-                    user_down += value
-            elif kind == "inbound" and who != "api":
-                if direction == "uplink":
-                    inbound_up += value
-                elif direction == "downlink":
-                    inbound_down += value
-        if seen_user:
-            return user_up, user_down
-        return inbound_up, inbound_down
-
-    def _inject_stats_api(self, user: Dict, config: Dict):
-        if not self._sub.get("enabled") or not self._sub.get("stats"):
-            return
-        if not user.get("api_port"):
-            user["api_port"] = self._sub_free_port(self._sub_taken_ports())
-        tag = f"in-{user.get('name', 'user')}"
-        for inbound in config.get("inbounds") or []:
-            if not isinstance(inbound, dict):
-                continue
-            if not inbound.get("tag"):
-                inbound["tag"] = tag
-            clients = (inbound.get("settings") or {}).get("clients")
-            if isinstance(clients, list):
-                for client in clients:
-                    if isinstance(client, dict) and not client.get("email"):
-                        client["email"] = user.get("name", "")
-        config["stats"] = {}
-        config["api"] = {"tag": "api", "services": ["StatsService"]}
-        config["policy"] = {
-            "levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}},
-            "system": {
-                "statsInboundUplink": True,
-                "statsInboundDownlink": True,
-                "statsOutboundUplink": True,
-                "statsOutboundDownlink": True,
-            },
-        }
-        config.setdefault("inbounds", []).append(
-            {
-                "tag": "api",
-                "listen": "127.0.0.1",
-                "port": int(user["api_port"]),
-                "protocol": "dokodemo-door",
-                "settings": {"address": "127.0.0.1"},
-            }
-        )
-        routing = config.setdefault("routing", {})
-        routing.setdefault("domainStrategy", "AsIs")
-        rules = routing.setdefault("rules", [])
-        if not any(rule.get("outboundTag") == "api" for rule in rules if isinstance(rule, dict)):
-            rules.append({"type": "field", "inboundTag": ["api"], "outboundTag": "api"})
-        outbounds = config.setdefault("outbounds", [])
-        if not any(outbound.get("tag") == "api" for outbound in outbounds if isinstance(outbound, dict)):
-            outbounds.append({"protocol": "blackhole", "tag": "api"})
-
     async def _cb_setup_menu(self, call: InlineCall):
         xray_status = await self._get_version("xray") if self._xray_installed() else "Not installed"
-        cloudflared_status = await self._get_version("cloudflared") if self._cloudflared_installed() else "Not installed"
 
         gh_token = self._gh_token()
         gh_status = "Authorized" if gh_token else "Not authorized"
 
         text = self.strings["setup_menu"].format(
             xray_status=xray_status,
-            cloudflared_status=cloudflared_status,
             gh_status=gh_status,
         )
         if self._xray_installed() and _core_too_old(xray_status):
@@ -3536,19 +2353,6 @@ class XRay(loader.Module):
                 "style": "primary",
             }])
 
-        if self._cloudflared_installed():
-            markup.append([{
-                "text": self.strings["btn_reinstall_cloudflared"],
-                "callback": self._cb_install_cloudflared,
-                "style": "primary",
-            }])
-        else:
-            markup.append([{
-                "text": self.strings["btn_install_cloudflared"],
-                "callback": self._cb_install_cloudflared,
-                "style": "primary",
-            }])
-
         markup.append([{
             "text": self.strings["btn_gh_auth"],
             "callback": self._gh_device_flow,
@@ -3562,54 +2366,6 @@ class XRay(loader.Module):
         }])
 
         await call.edit(text, reply_markup=markup)
-
-    async def _cb_install_cloudflared(self, call: InlineCall):
-        await call.edit(self.strings["collecting_versions"])
-        current = await self._get_version("cloudflared") if self._cloudflared_installed() else ""
-        current_tag = self._cloudflared_tag(current)
-        releases = await self._cloudflared_releases()
-        tags = [release["tag_name"] for release in releases]
-        if CLOUDFLARED_VERSION not in tags:
-            tags.append(CLOUDFLARED_VERSION)
-        text = self.strings["cf_install_menu"].format(
-            current=_escape(current or self.strings["not_installed"]),
-            min=CLOUDFLARED_MIN_TAG,
-        )
-        if not releases:
-            text += "\n" + self.strings["cf_no_releases"].format(version=CLOUDFLARED_VERSION)
-        markup = []
-        for tag in tags:
-            label = tag
-            if tag == current_tag:
-                label += self.strings["cf_installed_mark"]
-            markup.append([{
-                "text": label,
-                "callback": self._cb_cloudflared_version,
-                "args": (tag,),
-                "style": "primary",
-            }])
-        markup.append([{
-            "text": self.strings["btn_back"],
-            "callback": self._cb_setup_menu,
-            "style": "primary",
-        }])
-        await call.edit(text, reply_markup=markup)
-
-    async def _cb_cloudflared_version(self, call: InlineCall, tag: str):
-        await call.edit(self.strings["cf_installing"].format(version=_escape(tag)), reply_markup=[])
-        ok, result = await self._install_cloudflared(tag)
-        if ok:
-            text = self.strings["cf_installed"].format(version=_escape(result))
-        else:
-            text = self.strings["setup_fail"].format(error=_escape(result[:200]))
-        await call.edit(
-            text,
-            reply_markup=[[{
-                "text": self.strings["btn_back"],
-                "callback": self._cb_setup_menu,
-                "style": "primary",
-            }]],
-        )
 
     async def _cb_xray_install_menu(self, call: InlineCall):
         await call.edit(self.strings["collecting_versions"])
@@ -3732,24 +2488,17 @@ class XRay(loader.Module):
         total = len(self._users)
         active = await self._get_active_count()
         version = await self._get_version("xray")
-        cf_version = await self._get_version("cloudflared")
 
         text = self.strings["main_menu"].format(
             total=total,
             active=active,
             version=version,
-            cloudflared_version=cf_version,
         )
 
         markup = [
             [{
                 "text": self.strings["btn_users"],
                 "callback": self._cb_users_menu,
-                "style": "primary",
-            }],
-            [{
-                "text": self.strings["btn_sub"],
-                "callback": self._cb_sub_menu,
                 "style": "primary",
             }],
             [{
@@ -3766,17 +2515,8 @@ class XRay(loader.Module):
 
         await call.edit(text, reply_markup=markup)
 
-    async def _refresh_traffic_now(self) -> None:
-        if not self._sub.get("enabled") or not self._sub.get("stats"):
-            return
-        try:
-            await self._sub_collect_traffic()
-        except Exception as exc:
-            logger.debug("[XR] the on demand traffic poll failed: %s", exc)
-
     async def _cb_user_menu(self, call: InlineCall, name: str):
         await call.edit(self.strings["loading"])
-        await self._refresh_traffic_now()
 
         user = self._users.get(name)
         if not user:
@@ -3834,11 +2574,6 @@ class XRay(loader.Module):
             {"text": self.strings["btn_get_link"], "callback": self._cb_get_user_link, "args": (name,), "style": "primary"},
         ])
 
-        if user.get("transport") != "socks5":
-            markup.append([
-                {"text": self.strings["btn_sub"], "callback": self._cb_sub_user_link, "args": (name,), "style": "primary"},
-            ])
-
         markup.append([
             {"text": "Xray-core logs", "callback": self._cb_logs_menu, "args": (name, "xray"), "style": "primary"},
             {"text": "Daemon logs", "callback": self._cb_logs_menu, "args": (name, "daemon"), "style": "primary"},
@@ -3847,6 +2582,11 @@ class XRay(loader.Module):
         markup.append([
             {"text": self.strings["btn_settings"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"},
         ])
+
+        if user["transport"] == "socks5":
+            markup.append([
+                {"text": self.strings["btn_firewall"], "callback": self._cb_fw_menu, "args": (name,), "style": "primary"},
+            ])
 
         markup.append([
             {"text": self.strings["btn_delete"], "callback": self._cb_delete_user, "args": (name,), "style": "danger"},
@@ -3930,7 +2670,7 @@ class XRay(loader.Module):
             return
 
         await self._stop_user(name, self.strings["log_reason_manual"])
-        for kind in ("xray", "site", "cf"):
+        for kind in ("xray", "site", "cf", "gate"):
             unit = self._unit_name(name, kind)
             await self._stop_unit(unit, disable=True)
             try:
@@ -3949,7 +2689,6 @@ class XRay(loader.Module):
 
         del self._users[name]
         self._save_users()
-        self._sub_forget_user(name)
 
         await call.edit(
             self.strings["user_deleted"].format(name=_escape(name)),
@@ -3976,7 +2715,8 @@ class XRay(loader.Module):
             port = user["port"]
             socks_user = user.get("socks_user", "")
             socks_pass = user.get("socks_pass", "")
-            proxy_url = f"socks5://{socks_user}:{socks_pass}@{ip}:{port}"
+            behind_gate = bool(user.get("fw_enabled"))
+            proxy_url = f"socks5://{ip}:{port}" if behind_gate else f"socks5://{socks_user}:{socks_pass}@{ip}:{port}"
 
             proxies_text = (
                 "proxies = {\n"
@@ -4011,6 +2751,18 @@ class XRay(loader.Module):
             finally:
                 os.unlink(tmp.name)
 
+            if behind_gate:
+                ips_text = ", ".join(user.get("fw_ips") or []) or self.strings["fw_empty_hint"]
+                await call.edit(
+                    self.strings["socks5_sent_fw"].format(
+                        name=_escape(name),
+                        ip=ip,
+                        port=port,
+                        ips=_escape(ips_text),
+                    ),
+                    reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]]
+                )
+                return
             await call.edit(
                 self.strings["socks5_sent"].format(
                     name=_escape(name),
@@ -4502,6 +3254,75 @@ class XRay(loader.Module):
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_settings, "args": (name,), "style": "primary"}]]
         )
 
+    async def _cb_fw_menu(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if not user or user["transport"] != "socks5":
+            await call.answer("SOCKS5 user not found", show_alert=True)
+            return
+        ips = user.get("fw_ips") or []
+        enabled = bool(user.get("fw_enabled"))
+        lines = "\n".join(f"{i + 1}. <code>{_escape(ip)}</code>" for i, ip in enumerate(ips)) or self.strings["fw_empty_hint"]
+        text = self.strings["fw_menu"].format(
+            name=_escape(name),
+            state=self.strings["fw_state_on"] if enabled else self.strings["fw_state_off"],
+            ips=lines,
+        )
+        markup = [[{
+            "text": (self.strings["btn_fw_toggle_on"] if enabled else self.strings["btn_fw_toggle_off"]),
+            "callback": self._cb_fw_toggle,
+            "args": (name,),
+            "style": "success" if enabled else "danger",
+        }]]
+        markup.append([{
+            "text": self.strings["btn_fw_add"],
+            "input": self.strings["input_fw_add"],
+            "handler": self._cb_fw_add,
+            "args": (name,),
+            "style": "primary",
+        }])
+        for ip in ips:
+            markup.append([{
+                "text": f"{self.strings['btn_fw_del']}: {ip}",
+                "callback": self._cb_fw_del,
+                "args": (name, ip),
+                "style": "danger",
+            }])
+        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}])
+        await call.edit(text, reply_markup=markup)
+
+    async def _cb_fw_toggle(self, call: InlineCall, name: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        user["fw_enabled"] = not bool(user.get("fw_enabled"))
+        await self._mark_restart_required(name)
+        await self._cb_fw_menu(call, name)
+
+    async def _cb_fw_add(self, call: InlineCall, value: str, name: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        good, bad = self._parse_ip_list(value)
+        if bad:
+            await call.answer(self.strings["fw_bad_ip"].format(value=_escape(", ".join(bad[:3]))), show_alert=True)
+            return
+        ips = user.setdefault("fw_ips", [])
+        for ip in good:
+            if ip not in ips:
+                ips.append(ip)
+        await self._mark_restart_required(name)
+        await self._cb_fw_menu(call, name)
+
+    async def _cb_fw_del(self, call: InlineCall, name: str, ip: str):
+        user = self._users.get(name)
+        if not user:
+            return
+        ips = user.get("fw_ips") or []
+        if ip in ips:
+            ips.remove(ip)
+        await self._mark_restart_required(name)
+        await self._cb_fw_menu(call, name)
+
     async def _cb_add_user_name(self, call: InlineCall):
         await call.edit(
             self.strings["add_user_name"],
@@ -4518,7 +3339,7 @@ class XRay(loader.Module):
     async def _cleanup_stale_units(self, name: str) -> None:
         if name in self._users:
             return
-        for kind in ("xray", "site", "cf"):
+        for kind in ("xray", "site", "cf", "gate"):
             unit = self._unit_name(name, kind)
             path = os.path.join(self._systemd_user_dir, unit)
             if not os.path.exists(path):
@@ -4640,7 +3461,8 @@ class XRay(loader.Module):
             "fingerprint": "firefox",
             "socks_user": _gen_secret(8),
             "socks_pass": _gen_secret(14),
-            "sub_token": _gen_secret(SUB_TOKEN_LEN),
+            "fw_enabled": False,
+            "fw_ips": [],
             "autostart": False,
             "start_time": 0,
             "services": {
@@ -4663,361 +3485,6 @@ class XRay(loader.Module):
             reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_users_menu, "style": "primary"}]]
         )
 
-    async def _cb_sub_menu(self, call: InlineCall):
-        self._sub_ensure()
-        await self._refresh_traffic_now()
-        targets = self._sub_targets()
-        up, down = self._sub_traffic_for()
-        running = bool(self._sub_server)
-
-        markup = [
-            [{"text": self.strings["btn_sub_toggle"], "callback": self._cb_sub_toggle, "style": "primary"}],
-        ]
-
-        if self._sub.get("enabled"):
-            markup.append([
-                {"text": self.strings["btn_sub_url"], "callback": self._cb_sub_url, "style": "primary"},
-                {"text": self.strings["btn_sub_users"], "callback": self._cb_sub_users, "style": "primary"},
-            ])
-            markup.append([
-                {"text": self.strings["btn_sub_port"], "callback": self._cb_sub_port, "style": "primary"},
-                {"text": self.strings["btn_sub_path"], "callback": self._cb_sub_path, "style": "primary"},
-            ])
-            markup.append([
-                {"text": self.strings["btn_sub_title"], "callback": self._cb_sub_title, "style": "primary"},
-                {"text": self.strings["btn_sub_interval"], "callback": self._cb_sub_interval, "style": "primary"},
-            ])
-            markup.append([
-                {"text": self.strings["btn_sub_stats"], "callback": self._cb_sub_stats, "style": "primary"},
-                {"text": self.strings["btn_sub_reset"], "callback": self._cb_sub_reset, "style": "danger"},
-            ])
-            markup.append([
-                {"text": self.strings["btn_sub_tls"], "callback": self._cb_sub_tls, "style": "success"},
-                {"text": self.strings["btn_sub_apply"], "callback": self._cb_sub_apply, "style": "primary"},
-            ])
-
-        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_main_menu, "style": "primary"}])
-
-        text = self.strings["sub_menu"].format(
-                status=self.strings["sub_on"] if running else self.strings["sub_off"],
-                port=self._sub.get("port", 0),
-                path=_escape(self._sub_masked_path()),
-                links=len(targets),
-                traffic=f"{_fmt_bytes(up)} / {_fmt_bytes(down)}",
-                stats=self.strings["sub_on"] if self._sub.get("stats") else self.strings["sub_off"],
-                interval=self._sub.get("interval", 12),
-                title=_escape(self._sub.get("title") or "-"),
-        )
-
-        if self._sub.get("enabled"):
-            host = self._sub.get("tunnel_host") or ""
-            if host:
-                text += "\n" + self.strings["sub_tls_on"].format(host=_escape(host))
-            else:
-                text += "\n" + self.strings["sub_tls_off"].format(
-                    host=_escape(f"{self._external_ip or '?'}:{self._sub.get('port', 0)}")
-                )
-
-        if _in_docker():
-            text = text.replace("</blockquote>", self.strings["sub_docker_warn"] + "</blockquote>")
-
-        await call.edit(text, reply_markup=markup)
-
-    async def _cb_sub_tls(self, call: InlineCall):
-        if not self._sub.get("enabled"):
-            await call.answer(self.strings["sub_stopped"], show_alert=True)
-            return
-        if not self._sub_server:
-            await call.answer(self.strings["sub_stopped"], show_alert=True)
-            return
-        await call.edit(self.strings["loading"])
-        ok, error = await self._sub_tunnel_start()
-        if not ok:
-            await call.edit(
-                self.strings["sub_tls_fail"].format(error=_escape(str(error)[:200])),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-            )
-            return
-        await call.edit(
-            self.strings["sub_tls_done"].format(url=_escape(self._sub_url())),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-        )
-
-    async def _cb_sub_toggle(self, call: InlineCall):
-        await call.edit(self.strings["loading"], reply_markup=[])
-
-        if self._sub.get("enabled"):
-            await self._sub_disable()
-            await call.edit(
-                self.strings["sub_stopped"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-            )
-            return
-
-        if not self._external_ip:
-            self._external_ip = await self._detect_external_ip()
-        if not self._external_ip:
-            await call.edit(
-                self.strings["sub_no_ip"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-            )
-            return
-
-        ok, err = await self._sub_enable()
-        if not ok:
-            await call.edit(
-                self.strings["sub_err_start"].format(error=_escape(str(err)[:200])),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-            )
-            return
-
-        await call.edit(
-            self.strings["sub_started"].format(
-                port=self._sub.get("port", 0),
-                path=_escape(self._sub_masked_path()),
-                hint=self.strings["sub_apply_hint"],
-            ),
-            reply_markup=[
-                [{"text": self.strings["btn_sub_apply"], "callback": self._cb_sub_apply, "style": "primary"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}],
-            ],
-        )
-
-    async def _cb_sub_url(self, call: InlineCall):
-        if not self._sub_targets():
-            await call.edit(
-                self.strings["sub_empty"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-            )
-            return
-
-        url = self._sub_url()
-        if not url:
-            await call.edit(
-                self.strings["sub_no_ip"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-            )
-            return
-
-        json_url = f"{url}?format=json"
-        info_url = f"{url}?format=info"
-
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", prefix="sub_", delete=False)
-        try:
-            tmp.write(url + "\n" + json_url + "\n" + info_url + "\n")
-            tmp.close()
-            try:
-                await self._send_file_to_call_chat(call, tmp.name, force_document=True)
-            except Exception as exc:
-                logger.error(f"[XR] subscription url send failed: {exc}")
-        finally:
-            try:
-                os.unlink(tmp.name)
-            except OSError:
-                pass
-
-        await call.edit(
-            self.strings["sub_url_msg"].format(url=_escape(url), url_json=_escape(json_url)),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-        )
-
-    async def _cb_sub_users(self, call: InlineCall):
-        markup = []
-        for name, user, _ in self._sub_targets():
-            label = f"{name} ({self._transport_label(user.get('transport', ''))})"
-            markup.append([{
-                "text": label,
-                "callback": self._cb_sub_user,
-                "args": (name,),
-                "style": "primary",
-            }])
-
-        if not markup:
-            await call.edit(
-                self.strings["sub_empty"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-            )
-            return
-
-        markup.append([{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}])
-        await call.edit(self.strings["sub_users_menu"], reply_markup=markup)
-
-    async def _cb_sub_user(self, call: InlineCall, name: str):
-        user = self._users.get(name)
-        if not user:
-            await call.answer("Not found", show_alert=True)
-            return
-
-        token = self._sub_user_token(name)
-        up, down = self._sub_traffic_for(name)
-
-        await call.edit(
-            self.strings["sub_user_msg"].format(
-                name=_escape(name),
-                transport=_escape(self._transport_label(user.get("transport", ""))),
-                port=user.get("port", 0),
-                traffic=f"{_fmt_bytes(up)} / {_fmt_bytes(down)}",
-                url=_escape(self._sub_url(token)),
-            ),
-            reply_markup=[
-                [{"text": self.strings["btn_sub_regen"], "callback": self._cb_sub_regen, "args": (name,), "style": "danger"}],
-                [{"text": self.strings["btn_back"], "callback": self._cb_sub_users, "style": "primary"}],
-            ],
-        )
-
-    async def _cb_sub_regen(self, call: InlineCall, name: str):
-        user = self._users.get(name)
-        if user:
-            user["sub_token"] = _gen_secret(SUB_TOKEN_LEN)
-            self._save_users()
-        await self._cb_sub_user(call, name)
-
-    async def _cb_sub_port(self, call: InlineCall):
-        await call.edit(self.strings["loading"], reply_markup=[])
-
-        port = self._sub_free_port(self._sub_taken_ports())
-        self._sub["port"] = port
-        self._sub_save()
-
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._sub_stop_server)
-        ok, err = self._sub_start_server()
-        if not ok:
-            self._sub["enabled"] = False
-            self._sub_save()
-            await self._sub_stop_task()
-            await call.edit(
-                self.strings["sub_err_start"].format(error=_escape(str(err)[:200])),
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-            )
-            return
-
-        await call.edit(
-            self.strings["sub_port_done"].format(port=port),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-        )
-
-    async def _cb_sub_path(self, call: InlineCall):
-        self._sub["prefix"] = _gen_secret(SUB_TOKEN_LEN)
-        self._sub_save()
-        await call.edit(
-            self.strings["sub_path_done"].format(path=_escape(self._sub_masked_path())),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-        )
-
-    async def _cb_sub_stats(self, call: InlineCall):
-        self._sub["stats"] = not self._sub.get("stats")
-        self._sub_save()
-        await self._cb_sub_menu(call)
-
-    async def _cb_sub_reset(self, call: InlineCall):
-        self._sub["traffic"] = {}
-        self._sub["baseline"] = {}
-        self._sub_save()
-        await call.edit(
-            self.strings["sub_reset_done"],
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-        )
-
-    async def _cb_sub_apply(self, call: InlineCall):
-        await call.edit(self.strings["loading"], reply_markup=[])
-
-        restarted = 0
-        failed = 0
-
-        for name in list(self._processes.keys()):
-            await self._stop_user(name, reason="rebuild")
-            ok, _ = await self._start_user(name)
-            if ok:
-                restarted += 1
-            else:
-                failed += 1
-                user = self._users.get(name)
-                if user is not None:
-                    user["restart_required"] = True
-
-        self._save_users()
-
-        await call.edit(
-            self.strings["sub_apply_done"].format(restarted=restarted, pending=failed),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-        )
-
-    async def _cb_sub_interval(self, call: InlineCall):
-        await call.edit(
-            self.strings["sub_input_interval"],
-            reply_markup=[[
-                {
-                    "text": self.strings["btn_sub_interval"],
-                    "input": self.strings["sub_input_interval"],
-                    "handler": self._cb_set_sub_interval,
-                    "style": "primary",
-                }
-            ]],
-        )
-
-    async def _cb_set_sub_interval(self, call: InlineCall, raw: str):
-        try:
-            interval = int(str(raw).strip())
-        except (TypeError, ValueError):
-            await call.answer(self.strings["err_invalid_limit"], show_alert=True)
-            return
-
-        if interval < 1 or interval > 168:
-            await call.answer(self.strings["err_invalid_limit"], show_alert=True)
-            return
-
-        self._sub["interval"] = interval
-        self._sub_save()
-
-        await call.edit(
-            self.strings["sub_interval_set"].format(interval=interval),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-        )
-
-    async def _cb_sub_title(self, call: InlineCall):
-        await call.edit(
-            self.strings["sub_input_title"],
-            reply_markup=[[
-                {
-                    "text": self.strings["btn_sub_title"],
-                    "input": self.strings["sub_input_title"],
-                    "handler": self._cb_set_sub_title,
-                    "style": "primary",
-                }
-            ]],
-        )
-
-    async def _cb_set_sub_title(self, call: InlineCall, raw: str):
-        self._sub["title"] = _strip_md(str(raw)).strip()[:64]
-        self._sub_save()
-        await call.edit(
-            self.strings["sub_title_set"].format(title=_escape(self._sub["title"] or "-")),
-            reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_sub_menu, "style": "primary"}]],
-        )
-
-    async def _cb_sub_user_link(self, call: InlineCall, name: str):
-        user = self._users.get(name)
-        if not user:
-            await call.answer("Not found", show_alert=True)
-            return
-
-        if not self._sub.get("enabled"):
-            await call.edit(
-                self.strings["sub_stopped"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]],
-            )
-            return
-
-        if user.get("transport") == "socks5":
-            await call.edit(
-                self.strings["sub_empty"],
-                reply_markup=[[{"text": self.strings["btn_back"], "callback": self._cb_user_menu, "args": (name,), "style": "primary"}]],
-            )
-            return
-
-        await self._cb_sub_user(call, name)
-
     async def _cb_close(self, call: InlineCall):
         await call.delete()
 
@@ -5036,18 +3503,12 @@ class XRay(loader.Module):
                 total=len(self._users),
                 active=active_cnt,
                 version=await self._get_version("xray"),
-                cloudflared_version=await self._get_version("cloudflared"),
             ),
             message=message,
             reply_markup=[
                 [{
                     "text": self.strings["btn_users"],
                     "callback": self._cb_users_menu,
-                    "style": "primary",
-                }],
-                [{
-                    "text": self.strings["btn_sub"],
-                    "callback": self._cb_sub_menu,
                     "style": "primary",
                 }],
                 [{

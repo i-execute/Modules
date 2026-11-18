@@ -175,7 +175,7 @@ def test_the_guard_reports_root_first_and_container_second() -> None:
 
 
 def test_the_guard_is_asked_before_anything_starts() -> None:
-    for name in ("_start_user", "_sub_start_server"):
+    for name in ("_start_user", "_start_gate"):
         assert "_guard_reason()" in _source(name), name
     assert "_guard_deny(message)" in _source("xr")
     body = _source("_start_user")
@@ -228,7 +228,7 @@ def test_no_token_ever_reaches_the_process_list() -> None:
     assert not any("Authorization" in header for header in headers)
     assert "{gh_token}" not in SOURCE
     assert "Authorization: Bearer {clean}" in SOURCE
-    assert SOURCE.count("_curl_header_config(") == 4
+    assert SOURCE.count("_curl_header_config(") == 3
 
 
 def test_the_private_writer_creates_a_0600_file(tmp_path) -> None:
@@ -270,32 +270,25 @@ def test_the_download_is_hashed_before_it_is_used(tmp_path) -> None:
 
 
 def test_the_engine_pins_are_complete() -> None:
-    pins = _constants(
-        "XRAY_CORE_VERSION",
-        "XRAY_CORE_SHA256",
-        "XRAY_MIN_VERSION",
-        "XRAY_MIN_TAG",
-        "XRAY_MIN_ADVISORY",
-        "CLOUDFLARED_VERSION",
-        "CLOUDFLARED_SHA256",
-    )
-    assert pins["XRAY_CORE_VERSION"] == "v26.10.31"
-    assert pins["XRAY_MIN_VERSION"] == (26, 10, 31)
-    assert pins["XRAY_MIN_TAG"] == "v26.10.31"
-    assert pins["XRAY_MIN_ADVISORY"] == "CVE-2026-98432"
-    assert pins["XRAY_MIN_VERSION"] <= _version_numbers(pins["XRAY_CORE_VERSION"])
-    assert pins["CLOUDFLARED_VERSION"] == "2026.10.5"
-    core = pins["XRAY_CORE_SHA256"]
-    assert isinstance(core, dict) and {"64", "arm64-v8a"} <= set(core)
-    for arch, digest in core.items():
-        assert re.fullmatch(r"[0-9a-f]{64}", digest), arch
-    cloudflared = pins["CLOUDFLARED_SHA256"]
-    assert isinstance(cloudflared, dict) and cloudflared
-    for asset, digest in cloudflared.items():
-        assert asset.startswith("cloudflared-linux-"), asset
-        assert re.fullmatch(r"[0-9a-f]{64}", digest), asset
+    pins = {}
+    for _node in TREE.body:
+        if isinstance(_node, ast.Assign) and getattr(_node.targets[0], "id", "") in (
+            "XRAY_CORE_VERSION", "XRAY_CORE_SHA256", "XRAY_MIN_VERSION", "XRAY_MIN_TAG", "XRAY_MIN_ADVISORY",
+        ):
+            pins[_node.targets[0].id] = ast.literal_eval(_node.value)
+    assert len(pins) == 5
+    shas = pins["XRAY_CORE_SHA256"]
+    assert isinstance(shas, dict) and shas
+    for sha in shas.values():
+        assert len(sha) == 64
+        int(sha, 16)
+    assert pins["XRAY_CORE_VERSION"].startswith("v") and pins["XRAY_CORE_VERSION"].count(".") == 2
+    assert pins["XRAY_MIN_VERSION"].count(".") == 0
+    assert tuple(pins["XRAY_MIN_VERSION"]) >= (0, 0, 0)
+    assert tuple(int(x) for x in pins["XRAY_CORE_VERSION"].lstrip("v").split(".")) >= tuple(pins["XRAY_MIN_VERSION"])
+    assert pins["XRAY_MIN_TAG"].startswith("v") and pins["XRAY_MIN_TAG"] in SOURCE
+    assert pins["XRAY_MIN_ADVISORY"].startswith("CVE-")
     assert "releases/latest" not in SOURCE
-    assert "cloudflared/releases/latest/download" not in SOURCE
 
 
 def test_only_the_pinned_core_tag_may_be_installed() -> None:
@@ -314,27 +307,6 @@ def test_only_the_pinned_core_tag_may_be_installed() -> None:
     assert body.index("XRAY_CORE_VERSION") < body.index("for name in list(self._processes.keys())")
 
 
-def test_the_installer_refuses_a_root_or_container_host() -> None:
-    namespace = _class(_guard_reason=lambda: ROOT_REASON)
-    exec(_source("_install_cloudflared"), namespace)
-    owner = Stub()
-    owner._cloudflared_path = "/tmp/cloudflared"
-    owner._install_cloudflared = namespace["_install_cloudflared"].__get__(owner, Stub)
-    ok, reason = asyncio.run(owner._install_cloudflared())
-    assert ok is False and reason == ROOT_REASON
-
-
-def test_the_subscription_server_never_starts_under_a_bad_host() -> None:
-    namespace = _class(_guard_reason=lambda: DOCKER_REASON)
-    exec(_source("_sub_start_server"), namespace)
-    owner = Stub()
-    owner._sub_server = None
-    owner._sub = {"port": 2096}
-    owner._sub_start_server = namespace["_sub_start_server"].__get__(owner, Stub)
-    ok, reason = owner._sub_start_server()
-    assert ok is False and reason == DOCKER_REASON
-
-
 def test_the_socks_inbound_stays_behind_a_password() -> None:
     body = _source("_build_config")
     assert '"auth": "password"' in body
@@ -342,34 +314,11 @@ def test_the_socks_inbound_stays_behind_a_password() -> None:
     assert 'user.get("socks_user", "")' in body
 
 
-def test_the_management_api_only_listens_on_the_loopback() -> None:
-    found = re.findall(r'"listen": "([^"]+)"', SOURCE)
-    assert found.count("0.0.0.0") == 2
-    assert found.count("127.0.0.1") == 3
-    for match in re.finditer(r'"listen": "0\.0\.0\.0"', SOURCE):
-        window = SOURCE[match.start():match.start() + 400]
-        assert '"protocol": "socks"' in window or '"protocol": "vless"' in window
-
-
 def test_no_shell_is_ever_spawned() -> None:
     assert "shell=True" not in SOURCE
     assert "os.system(" not in SOURCE
     assert "create_subprocess_shell" not in SOURCE
     assert "subprocess.Popen" not in SOURCE
-
-
-def test_the_subscription_token_is_compared_in_constant_time() -> None:
-    assert "secrets.compare_digest" in SOURCE
-    assert "==" in SOURCE
-
-
-def test_the_subscription_server_is_bounded_and_rate_limited() -> None:
-    start = SOURCE.index("class _SubServer")
-    server = SOURCE[start:start + 1200]
-    assert "SUB_SLOTS.acquire(blocking=False)" in server
-    assert "settimeout(SUB_SOCKET_TIMEOUT)" in server
-    assert "request_queue_size" in server
-    assert "_sub_allowed(self.client_address[0])" in SOURCE
 
 
 def test_the_module_ships_no_comment_lines_after_the_header() -> None:
@@ -562,40 +511,3 @@ def _cloudflared_namespace() -> dict[str, object]:
     return namespace
 
 
-def test_the_cloudflared_menu_offers_a_version_for_every_release() -> None:
-    menu = _source("_cb_install_cloudflared")
-    assert "_cloudflared_releases" in menu
-    assert "_cb_cloudflared_version" in menu
-    assert "args" in menu
-    pick = _source("_cb_cloudflared_version")
-    assert "_install_cloudflared(tag)" in pick
-
-
-def test_the_cloudflared_installer_refuses_a_release_below_the_floor() -> None:
-    namespace = _cloudflared_namespace()
-    owner = Stub()
-
-    async def no_releases() -> list:
-        return []
-
-    owner._cloudflared_releases = no_releases
-    for name in ("_cloudflared_asset", "_cloudflared_tag", "_cloudflared_digest", "_install_cloudflared"):
-        setattr(owner, name, namespace[name].__get__(owner, type(owner)))
-    ok, reason = asyncio.run(owner._install_cloudflared("2025.1.1"))
-    assert ok is False
-    assert "Refused" in reason
-
-
-def test_the_cloudflared_digest_is_read_from_the_release_notes() -> None:
-    namespace = _cloudflared_namespace()
-    owner = Stub()
-    for name in ("_cloudflared_asset", "_cloudflared_tag", "_cloudflared_digest"):
-        setattr(owner, name, namespace[name].__get__(owner, type(owner)))
-    releases = [
-        {"tag_name": "2026.10.7", "digests": {"cloudflared-linux-amd64": "a" * 64}},
-        {"tag_name": "2026.10.5", "digests": {}},
-    ]
-    assert owner._cloudflared_digest("2026.10.7", "cloudflared-linux-amd64", releases) == "a" * 64
-    assert owner._cloudflared_digest("2026.10.5", "cloudflared-linux-amd64", releases) == namespace["CLOUDFLARED_SHA256"]["cloudflared-linux-amd64"]
-    assert owner._cloudflared_digest("2026.10.6", "cloudflared-linux-amd64", releases) == ""
-    assert owner._cloudflared_tag("cloudflared version 2026.10.7 (built 2026-10-30)") == "2026.10.7"

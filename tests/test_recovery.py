@@ -83,18 +83,11 @@ class _Unload:
     def __init__(self, task) -> None:
         self._monitor_task = task
         self._closing = False
-        self._sub = 0
         self._processes = {"a": "unit"}
         self._users = {"a": {"autostart": True}}
         self._tunnels = {}
         self._site_processes = {}
         self.saved = 0
-
-    async def _sub_stop_task(self) -> None:
-        self._sub += 1
-
-    def _sub_stop_server(self) -> None:
-        self._sub += 1
 
     async def _stop_user(self, name, reason="") -> None:
         self._processes.pop(name, None)
@@ -128,7 +121,6 @@ def test_a_crashed_monitor_does_not_break_the_unload() -> None:
     assert instance._closing is True
     assert instance._monitor_task is None
     assert task.done()
-    assert instance._sub == 2
     assert instance._users["a"]["resume_on_module_load"] is True
     assert instance.saved == 1
 

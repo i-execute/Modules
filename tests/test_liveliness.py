@@ -122,24 +122,6 @@ def test_the_guard_helper_never_sits_between_a_decorator_and_a_function() -> Non
             assert "_guard" not in lines[probe], (path.name, lines[probe])
 
 
-def test_the_tunnel_reader_takes_the_newest_host(tmp_path) -> None:
-    log = tmp_path / "daemon.log"
-    log.write_text(
-        "INF Requesting new quick Tunnel on trycloudflare.com...\n"
-        "INF +--------------------------------------------+\n"
-        "INF |  https://old-name-abc.trycloudflare.com    |\n"
-        "INF +--------------------------------------------+\n"
-        "INF Registered tunnel connection connIndex=0\n"
-        "INF |  https://new-name-xyz.trycloudflare.com    |\n",
-        encoding="utf-8",
-    )
-    owner = type("Owner", (), {})()
-    reader = _namespace(VPN, "_read_tunnel_host")["_read_tunnel_host"].__get__(owner, type(owner))
-    assert reader(str(log)) == "new-name-xyz.trycloudflare.com"
-    assert reader(str(log), os.path.getsize(log)) == ""
-    assert reader(str(tmp_path / "missing.log")) == ""
-
-
 def test_the_site_reader_returns_a_full_https_url(tmp_path) -> None:
     log = tmp_path / "cf.log"
     log.write_text(
