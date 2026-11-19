@@ -75,14 +75,20 @@ try:
                     spec.loader.exec_module(mod)
                     return mod
             import importlib.util
-            local = os.path.join(tempfile.gettempdir(), "KinoPoiskDL.py")
+            lib_dir = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "..", "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
+            lib_dir = os.path.normpath(lib_dir)
+            try:
+                os.makedirs(lib_dir, exist_ok=True)
+            except Exception:
+                lib_dir = os.path.dirname(os.path.abspath(__file__))
+            local = os.path.join(lib_dir, "KinoPoiskDL.py")
             req = _urllib_request.Request(_KINODL_URL, headers={"User-Agent": "Grabber/4.2"})
             with _urllib_request.urlopen(req, timeout=15) as r:
                 with open(local, "wb") as f:
                     f.write(r.read())
-            spec = importlib.util.spec_from_file_location("KinoPoiskDL", local)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
+            importlib.invalidate_caches()
+            import importlib
+            mod = importlib.import_module("KinoPoiskDL")
             return mod
         except Exception:
             return None
