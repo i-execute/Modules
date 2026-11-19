@@ -59,9 +59,10 @@ except ImportError:
 try:
     import urllib.request as _urllib_request
     _KINODL_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/KinoPoiskDL.py"
+    _KINODL_HERE = os.path.dirname(os.path.abspath(globals().get("__file__", os.getcwd())))
     _KINODL_LOCAL_CANDIDATES = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "KinoPoiskDL.py"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "Storage", "Grabber", "KinoPoiskDL.py"),
+        os.path.join(_KINODL_HERE, "KinoPoiskDL.py"),
+        os.path.join(_KINODL_HERE, "Storage", "Grabber", "KinoPoiskDL.py"),
         os.path.join("Storage", "Grabber", "KinoPoiskDL.py"),
     ]
 
@@ -80,7 +81,7 @@ try:
             try:
                 os.makedirs(lib_dir, exist_ok=True)
             except Exception:
-                lib_dir = os.path.dirname(os.path.abspath(__file__))
+                lib_dir = _KINODL_HERE
             local = os.path.join(lib_dir, "KinoPoiskDL.py")
             req = _urllib_request.Request(_KINODL_URL, headers={"User-Agent": "Grabber/4.2"})
             with _urllib_request.urlopen(req, timeout=15) as r:
