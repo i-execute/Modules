@@ -6,12 +6,9 @@ import os
 import re
 import json
 import time
-import random
-import shutil
 import tempfile
-import threading
 
-__version__ = (1, 0, 0)
+__version__ = (1, 1, 0)
 
 _KINO_URL_RE = re.compile(
     r"https?://(?:www\.|hd\.)?kinopoisk\.ru/(?:film|series|movie)/(\d+)", re.IGNORECASE
@@ -389,16 +386,13 @@ class KinopoiskDownloader:
         elif self.info.year:
             title = f"{title}_{self.info.year}"
         output_path = os.path.join(output_dir, f"{title}.mp4")
-        hdr = (
-            f"Accept: */*\r\n"
-            f"Accept-Language: ru,en-US;q=0.9,en;q=0.8\r\n"
-            f"Accepts-Controls: {WV}\r\n"
-            f"Authorizations: Bearer {guard}\r\n"
-            f"Origin: https://theatre.stravers.live\r\n"
-            f"Referer: {self.info.iframe_url}\r\n"
-            f"User-Agent: {UA}\r\n"
-        )
-        return _ffmpeg_download(m3u8, output_path, hdr, self.progress_cb), q
+        hdr_dict = {
+            "Accepts-Controls": WV,
+            "Authorizations": f"Bearer {guard}",
+            "Origin": "https://theatre.stravers.live",
+            "Referer": self.info.iframe_url,
+        }
+        return _ffmpeg_download(m3u8, output_path, hdr_dict, self.progress_cb), q
 
     def download_audio(self, output_dir=None, quality=None, season=None, episode=None, translation_id=None, bitrate="192k"):
         if self.info is None:
@@ -414,19 +408,16 @@ class KinopoiskDownloader:
         if self.info.is_series and season and episode:
             title = f"{title}_S{int(season):02d}E{int(episode):02d}"
         output_path = os.path.join(output_dir, f"{title}.mp3")
-        hdr = (
-            f"Accept: */*\r\n"
-            f"Accept-Language: ru,en-US;q=0.9,en;q=0.8\r\n"
-            f"Accepts-Controls: {WV}\r\n"
-            f"Authorizations: Bearer {guard}\r\n"
-            f"Origin: https://theatre.stravers.live\r\n"
-            f"Referer: {self.info.iframe_url}\r\n"
-            f"User-Agent: {UA}\r\n"
-        )
-        return _ffmpeg_download(m3u8, output_path, hdr, self.progress_cb, audio=True, bitrate=bitrate), q
+        hdr_dict = {
+            "Accepts-Controls": WV,
+            "Authorizations": f"Bearer {guard}",
+            "Origin": "https://theatre.stravers.live",
+            "Referer": self.info.iframe_url,
+        }
+        return _ffmpeg_download(m3u8, output_path, hdr_dict, self.progress_cb, audio=True, bitrate=bitrate), q
 
 
-def _ffmpeg_download(m3u8, output_path, headers, progress_cb=None, audio=False, bitrate="192k"):
+def _ffmpeg_download(m3u8, output_path, headers, progress_cb=None, audio=False, bitrate="192k", referer=None):
     import subprocess
 
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-headers", headers, "-i", m3u8]
@@ -437,20 +428,95 @@ def _ffmpeg_download(m3u8, output_path, headers, progress_cb=None, audio=False, 
     if progress_cb:
         cmd += ["-progress", "pipe:1"]
     cmd.append(output_path)
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if progress_cb:
-        for line in proc.stdout:
-            line = line.strip()
-            if line.startswith("out_time_ms="):
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if progress_cb:
+            for line in proc.stdout:
+                line = line.strip()
+                if line.startswith("out_time_ms="):
+                    try:
+                        progress_cb(int(line.split("=")[1]) / 1_000_000)
+                    except Exception:
+                        pass
+                elif line.startswith("progress=end"):
+                    break
+        proc.wait()
+        if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            return output_path
+    except Exception:
+        pass
+    try:
+        os.remove(output_path)
+    except Exception:
+        pass
+    return _segment_download(m3u8, output_path, headers, progress_cb, audio, bitrate)
+
+
+def _segment_download(m3u8, output_path, headers, progress_cb=None, audio=False, bitrate="192k"):
+    import requests
+    import subprocess
+
+    UA_H = {"User-Agent": UA}
+    s = requests.Session()
+    s.headers.update(UA_H)
+    hdr = dict(headers) if isinstance(headers, dict) else {}
+    r = s.get(m3u8, headers=hdr, timeout=20)
+    r.raise_for_status()
+    lines = [l.strip() for l in r.text.splitlines() if l.strip()]
+    base = m3u8.rsplit("/", 1)[0] + "/"
+    sub = lines[-1]
+    if not sub.endswith(".m3u8") and "#EXT" not in sub:
+        media_playlist = lines
+        media_base = base
+    else:
+        r2 = s.get(base + sub, headers=hdr, timeout=30)
+        r2.raise_for_status()
+        media_playlist = [l.strip() for l in r2.text.splitlines() if l.strip() and not l.startswith("#")]
+        media_base = base
+    init_url = None
+    r2text = r2.text if sub.endswith(".m3u8") or "#EXT" in sub else r.text
+    m_init = re.search(r'#EXT-X-MAP:URI="([^"]+)"', r2text)
+    if m_init:
+        init_url = m_init.group(1)
+    total = len(media_playlist)
+    init_frag = b""
+    if init_url:
+        ri = s.get(media_base + init_url if not init_url.startswith("http") else init_url, headers=hdr, timeout=30)
+        ri.raise_for_status()
+        init_frag = ri.content
+    tmp_path = output_path + ".ts"
+    downloaded = 0
+    with open(tmp_path, "wb") as f:
+        f.write(init_frag)
+        for i, seg in enumerate(media_playlist):
+            seg_url = seg if seg.startswith("http") else media_base + seg
+            for attempt in range(3):
                 try:
-                    progress_cb(int(line.split("=")[1]) / 1_000_000)
+                    rs = s.get(seg_url, headers=hdr, timeout=60)
+                    rs.raise_for_status()
+                    f.write(rs.content)
+                    downloaded += 1
+                    break
+                except Exception:
+                    if attempt == 2:
+                        raise
+                    time.sleep(1.0)
+            if progress_cb and total:
+                try:
+                    pass
                 except Exception:
                     pass
-            elif line.startswith("progress=end"):
-                break
-    proc.wait()
+    if audio:
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", tmp_path, "-vn", "-c:a", "libmp3lame", "-b:a", bitrate, output_path]
+    else:
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", tmp_path, "-c", "copy", "-bsf:a", "aac_adtstoasc", output_path]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+    try:
+        os.remove(tmp_path)
+    except Exception:
+        pass
     if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {proc.stderr.read()[-300:] if proc.stderr else ''}")
+        raise RuntimeError(f"ffmpeg remux failed: {proc.stderr[-300:]}")
     return output_path
 
 
