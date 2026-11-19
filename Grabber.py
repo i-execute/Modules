@@ -61,6 +61,7 @@ try:
     _KINODL_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/KinoPoiskDL.py"
     _KINODL_LOCAL_CANDIDATES = [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "KinoPoiskDL.py"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Storage", "KinoPoiskDL.py"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "Storage", "Grabber", "KinoPoiskDL.py"),
         os.path.join("Storage", "Grabber", "KinoPoiskDL.py"),
     ]
