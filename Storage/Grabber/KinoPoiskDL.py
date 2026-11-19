@@ -207,6 +207,16 @@ class KinopoiskInfo:
         self._collect_entries(self.file_list.get("all", {}))
         self.is_series = self.file_list.get("type", "movie") == "serial"
 
+    def reload(self):
+        fresh = _load_player(self.kp_id, self.player)
+        self.iframe_url = fresh.iframe_url
+        self.file_list = fresh.file_list
+        self.wl = fresh.wl
+        self.token = fresh.token
+        self._entries = []
+        self._collect_entries(self.file_list.get("all", {}))
+        return self
+
     def _collect_entries(self, data):
         if isinstance(data, dict):
             if "id" in data and "id_translation" in data:
@@ -321,10 +331,27 @@ def get_streams(info, season=None, episode=None, translation_id=None):
         "Referer": info.iframe_url,
     }
     data = f"token={info.token}&av1=true&autoplay=0&audio=&subtitle="
-    r = s.post(
-        f"https://theatre.stravers.live/bnsi/movies/{entry['id']}",
-        headers=headers, data=data, timeout=20,
-    )
+    def _post(entry, info):
+        headers = {
+            "User-Agent": UA,
+            "accept": "*/*",
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "x-requested-with": "XMLHttpRequest",
+            "borth": _borth(info.wl),
+            "Origin": "https://theatre.stravers.live",
+            "Referer": info.iframe_url,
+        }
+        data = f"token={info.token}&av1=true&autoplay=0&audio=&subtitle="
+        return s.post(
+            f"https://theatre.stravers.live/bnsi/movies/{entry['id']}",
+            headers=headers, data=data, timeout=20,
+        )
+
+    r = _post(entry, info)
+    if r.status_code == 404:
+        info.reload()
+        entry = info.entry_for(season, episode, translation_id)
+        r = _post(entry, info)
     if r.status_code != 200:
         raise RuntimeError(f"player API HTTP {r.status_code}")
     d = r.json()
