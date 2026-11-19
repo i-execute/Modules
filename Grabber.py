@@ -88,6 +88,8 @@ try:
             return None
 
     kinodl = _load_kinodl()
+    if kinodl is None:
+        logging.getLogger(__name__).warning("[GRABBER] KinoPoiskDL failed to load, Kinopoisk links will use yt-dlp")
 except Exception:
     kinodl = None
 
