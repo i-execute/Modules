@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (4, 1, 0)
+__version__ = (4, 2, 0)
 # meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/MetaBanner.jpeg
 
@@ -55,6 +55,41 @@ try:
     import aiohttp
 except ImportError:
     aiohttp = None
+
+try:
+    import urllib.request as _urllib_request
+    _KINODL_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/kinodl.py"
+    _KINODL_LOCAL_CANDIDATES = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "kinodl.py"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "Storage", "Grabber", "kinodl.py"),
+        os.path.join("Storage", "Grabber", "kinodl.py"),
+    ]
+
+    def _load_kinodl():
+        try:
+            for path in _KINODL_LOCAL_CANDIDATES:
+                if path and os.path.isfile(path):
+                    import importlib.util
+                    spec = importlib.util.spec_from_file_location("kinodl", path)
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    return mod
+            import importlib.util
+            local = os.path.join(tempfile.gettempdir(), "kinodl.py")
+            req = _urllib_request.Request(_KINODL_URL, headers={"User-Agent": "Grabber/4.2"})
+            with _urllib_request.urlopen(req, timeout=15) as r:
+                with open(local, "wb") as f:
+                    f.write(r.read())
+            spec = importlib.util.spec_from_file_location("kinodl", local)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+        except Exception:
+            return None
+
+    kinodl = _load_kinodl()
+except Exception:
+    kinodl = None
 
 logger = logging.getLogger(__name__)
 
@@ -2496,6 +2531,17 @@ class Grabber(loader.Module):
             (task_id, ev.chat_id, ev.message_id, url, mode, workdir, info, meta_dict, topic_id, orig_id)
         )
 
+    async def _yt_extract_info_async(self, url):
+        if kinodl and kinodl.is_kinopoisk_url(url):
+            try:
+                kp_info = await asyncio.get_event_loop().run_in_executor(
+                    self._executor, kinodl.get_info, url
+                )
+                return self._kinodl_to_info(kp_info)
+            except Exception as e:
+                return None, str(e)[:1024]
+        return None, None
+
     def _yt_extract_info(self, url):
         try:
             import yt_dlp
@@ -2513,8 +2559,60 @@ class Grabber(loader.Module):
         except Exception as e:
             return None, str(e)
 
+    def _kinodl_to_info(self, kp_info):
+        formats = []
+        try:
+            qualities, _streams = kinodl.get_streams(
+                kp_info, None, None, (kp_info.translations() or [{}])[0].get("id")
+            )
+        except Exception:
+            qualities = [720, 480, 360]
+        for h in (qualities or [720, 480, 360]):
+            formats.append({
+                "height": h,
+                "vcodec": "h264",
+                "acodec": "aac",
+                "ext": "mp4",
+            })
+        title = kp_info.title
+        if kp_info.year:
+            title = f"{title} ({kp_info.year})"
+        if kp_info.is_series:
+            seasons = kp_info.seasons()
+            if seasons:
+                title = f"{title} [S{seasons[0]}]"
+        return {
+            "title": title,
+            "duration": (kp_info.duration or 0) * 60,
+            "thumbnail": kp_info.poster,
+            "formats": formats,
+            "width": 0,
+            "height": max((f["height"] for f in formats), default=0),
+            "uploader": "Kinopoisk",
+            "is_kinopoisk": True,
+            "kp_obj": kp_info,
+        }
+
+    def _kinodl_pick_translation(self, kp_obj):
+        trs = kp_obj.translations()
+        if not trs:
+            return None
+        preferred = ["дубл", "кинопоиск", ".hd", "hd"]
+        for p in preferred:
+            for t in trs:
+                if p in t["name"].lower():
+                    return t["id"]
+        non_subs = [t for t in trs if "субтитр" not in t["name"].lower() and "субтитры" not in t["name"].lower()]
+        return (non_subs or trs)[0]["id"]
+
     async def _get_info(self, url):
         loop = asyncio.get_event_loop()
+        if kinodl and kinodl.is_kinopoisk_url(url):
+            kp_result, kp_err = await self._yt_extract_info_async(url)
+            if kp_result is not None:
+                return kp_result
+            if kp_err:
+                raise Exception(kp_err[:1024])
         result = await loop.run_in_executor(self._executor, self._yt_extract_info, url)
         if isinstance(result, tuple):
             _, err = result
@@ -2705,9 +2803,17 @@ class Grabber(loader.Module):
             import yt_dlp
             _patch_vk_extractor()
         except ImportError:
-            raise Exception("yt-dlp not installed")
+            if not (kinodl and kinodl.is_kinopoisk_url(url)):
+                raise Exception("yt-dlp not installed")
 
         if not self._bot or not self._running:
+            return
+
+        if kinodl and kinodl.is_kinopoisk_url(url):
+            await self._process_kinopoisk_download(
+                task_id, chat_id, msg_id, url, mode, workdir, info,
+                meta_dict, reply_to_topic, orig_msg_id,
+            )
             return
 
         title = (info.get("title") or "media")[:100]
@@ -3135,6 +3241,198 @@ class Grabber(loader.Module):
             title=_escape_html(title[:60]), size_mb=filesize, elapsed=_fmt_elapsed(time.time()-task_start)))
         upload_elapsed = time.time() - upload_start
         dl["upload_elapsed"] = upload_elapsed
+        dl["stage"] = "done"
+        await self._edit_progress(task_id, chat_id, msg_id)
+        await asyncio.sleep(3)
+        await self._safe_delete(chat_id, msg_id)
+        await self._try_delete_orig(chat_id, orig_msg_id)
+
+    async def _process_kinopoisk_download(
+        self, task_id, chat_id, msg_id, url, mode, workdir, info,
+        meta_dict=None, reply_to_topic=None, orig_msg_id=None,
+    ):
+        loop = asyncio.get_event_loop()
+        task_start = time.time()
+        is_audio = mode == "mp3"
+        height = 720
+        if not is_audio and str(mode).isdigit():
+            height = int(mode)
+
+        kp_obj = info.get("kp_obj") if isinstance(info, dict) else None
+        if kp_obj is None:
+            kp_obj = kinodl.get_info(url)
+
+        title = (kp_obj.title or "Kinopoisk")[:100]
+        if kp_obj.year:
+            title = f"{title} ({kp_obj.year})"
+
+        if task_id not in self._current_downloads:
+            dl = self._empty_progress()
+            self._current_downloads[task_id] = dl
+        else:
+            dl = self._current_downloads[task_id]
+        dl.update({
+            "active": True, "title": title,
+            "start_time": task_start, "stage": "init",
+            "is_audio_only": is_audio,
+        })
+        await self._log_to_topic(self.strings["log_processing"].format(
+            title=_escape_html(title[:60]),
+            user=str(chat_id),
+            url=url[:120],
+        ))
+        await self._edit_progress(task_id, chat_id, msg_id)
+
+        translation_id = self._kinodl_pick_translation(kp_obj)
+        season = None
+        episode = None
+        if kp_obj.is_series:
+            seasons = kp_obj.seasons()
+            if seasons:
+                season = seasons[0]
+                episodes = kp_obj.episodes(season)
+                if episodes:
+                    episode = episodes[0]
+
+        downloader = kinodl.KinopoiskDownloader(url)
+        downloader.info = kp_obj
+        dl["stage"] = "download"
+        dl["video_done"] = False
+        dl["audio_done"] = is_audio
+        if is_audio:
+            dl["audio_done"] = False
+        dl["is_combined"] = True
+        await self._edit_progress(task_id, chat_id, msg_id)
+
+        def do_kinodl():
+            def on_progress(sec):
+                try:
+                    total = (kp_obj.duration or 0) * 60
+                    if total > 0:
+                        pct = min(100.0, sec / total * 100.0)
+                        dl["video_percent"] = pct
+                        dl["audio_percent"] = pct
+                        dl["downloaded_bytes"] = int(pct * 10000)
+                except Exception:
+                    pass
+            downloader.progress_cb = on_progress
+            if is_audio:
+                return downloader.download_audio(
+                    output_dir=workdir, quality=str(height),
+                    season=season, episode=episode,
+                    translation_id=translation_id,
+                )
+            return downloader.download(
+                output_dir=workdir, quality=str(height),
+                season=season, episode=episode,
+                translation_id=translation_id,
+            )
+
+        done_event = asyncio.Event()
+        dl_error = [None]
+        result_path = [None]
+
+        def run_kinodl():
+            try:
+                result_path[0], used_q = do_kinodl()
+            except Exception as e:
+                dl_error[0] = e
+            finally:
+                loop.call_soon_threadsafe(done_event.set)
+
+        fut = loop.run_in_executor(self._executor, run_kinodl)
+        up_task = asyncio.create_task(self._progress_loop(task_id, chat_id, msg_id, done_event))
+        await done_event.wait()
+        await fut
+        up_task.cancel()
+        try:
+            await up_task
+        except Exception:
+            pass
+        if dl_error[0]:
+            raise dl_error[0]
+
+        filepath = result_path[0]
+        if not filepath or not os.path.exists(filepath):
+            raise Exception("Kinopoisk download produced no file")
+
+        filesize = os.path.getsize(filepath) / (1024 * 1024)
+        dl["final_size"] = filesize
+        dl["stage"] = "probe"
+        dl["ffmpeg_done"] = True
+        dl["video_done"] = True
+        dl["audio_done"] = True
+        await self._edit_progress(task_id, chat_id, msg_id)
+
+        real_width, real_height, real_duration = 0, height, (kp_obj.duration or 0) * 60
+        probe = self._get_video_info_ffprobe(filepath)
+        if probe:
+            real_width = probe["width"]
+            real_height = probe["height"]
+            if probe["duration"] > 0:
+                real_duration = probe["duration"]
+        if is_audio:
+            aprobe = self._get_audio_info_ffprobe(filepath)
+            if aprobe and aprobe["duration"] > 0:
+                real_duration = aprobe["duration"]
+
+        dl["stage"] = "upload"
+        dl["upload_started"] = True
+        upload_start = time.time()
+        await self._edit_progress(task_id, chat_id, msg_id)
+
+        fname = os.path.basename(filepath)
+        if is_audio:
+            attrs = [
+                DocumentAttributeFilename(file_name=fname),
+                DocumentAttributeAudio(
+                    duration=int(real_duration),
+                    title=title[:64],
+                    performer="Kinopoisk",
+                ),
+            ]
+            caption = self.strings["audio_caption"].format(
+                title=_escape_html(title[:120]),
+                size_mb=filesize,
+            )
+        else:
+            attrs = [
+                DocumentAttributeFilename(file_name=fname),
+                DocumentAttributeVideo(
+                    duration=int(real_duration), w=int(real_width), h=int(real_height),
+                    supports_streaming=True,
+                ),
+            ]
+            caption = self.strings["file_caption"].format(
+                title=_escape_html(title[:120]),
+                size_mb=filesize, width=real_width, height=real_height,
+                elapsed=self.strings["calc_label"],
+            )
+
+        up_loop = asyncio.create_task(self._upload_progress_loop(task_id, chat_id, msg_id, upload_start))
+        try:
+            sent_msg = await self._send_or_forward(
+                task_id, chat_id, filepath, caption, attrs,
+                filesize, reply_to_topic, is_audio,
+            )
+        finally:
+            up_loop.cancel()
+            try:
+                await up_loop
+            except Exception:
+                pass
+
+        if not is_audio:
+            final_caption = self.strings["file_caption"].format(
+                title=_escape_html(title[:120]),
+                size_mb=filesize, width=real_width, height=real_height,
+                elapsed=_fmt_elapsed(time.time() - task_start),
+            )
+            await self._finalize_caption_elapsed(sent_msg, chat_id, final_caption)
+
+        await self._log_to_topic(self.strings["log_done"].format(
+            title=_escape_html(title[:60]), size_mb=filesize, elapsed=_fmt_elapsed(time.time() - task_start)))
+        dl["upload_elapsed"] = time.time() - upload_start
         dl["stage"] = "done"
         await self._edit_progress(task_id, chat_id, msg_id)
         await asyncio.sleep(3)
