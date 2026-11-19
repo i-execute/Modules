@@ -2571,9 +2571,10 @@ class Grabber(loader.Module):
     def _kinodl_to_info(self, kp_info):
         formats = []
         try:
-            qualities, _streams = kinodl.get_streams(
+            streams = kinodl.get_streams(
                 kp_info, None, None, (kp_info.translations() or [{}])[0].get("id")
             )
+            qualities = sorted(int(q) for q in streams["quality"])
         except Exception:
             qualities = [720, 480, 360]
         for h in (qualities or [720, 480, 360]):
