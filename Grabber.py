@@ -2546,7 +2546,7 @@ class Grabber(loader.Module):
                 kp_info = await asyncio.get_event_loop().run_in_executor(
                     self._executor, kinodl.get_info, url
                 )
-                return self._kinodl_to_info(kp_info)
+                return self._kinodl_to_info(kp_info), None
             except Exception as e:
                 return None, str(e)[:1024]
         return None, None
