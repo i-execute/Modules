@@ -2,7 +2,7 @@
 # Author: I_execute.t.me
 # Licensed under AGPLv3.
 
-__version__ = (4, 2, 0)
+__version__ = (4, 2, 1)
 # meta developer: Execute_forge.t.me
 # meta banner: https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/MetaBanner.jpeg
 
@@ -57,43 +57,11 @@ except ImportError:
     aiohttp = None
 
 try:
-    import urllib.request as _urllib_request
-    _KINODL_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/KinoPoiskDL.py"
-    _KINODL_LOCAL_CANDIDATES = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "KinoPoiskDL.py"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Storage", "KinoPoiskDL.py"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "Storage", "Grabber", "KinoPoiskDL.py"),
-        os.path.join("Storage", "Grabber", "KinoPoiskDL.py"),
-    ]
-
-    def _load_kinodl():
-        try:
-            for path in _KINODL_LOCAL_CANDIDATES:
-                if path and os.path.isfile(path):
-                    import importlib.util
-                    spec = importlib.util.spec_from_file_location("KinoPoiskDL", path)
-                    mod = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(mod)
-                    return mod
-            import importlib.util
-            local = os.path.join(tempfile.gettempdir(), "KinoPoiskDL.py")
-            req = _urllib_request.Request(_KINODL_URL, headers={"User-Agent": "Grabber/4.2"})
-            with _urllib_request.urlopen(req, timeout=15) as r:
-                with open(local, "wb") as f:
-                    f.write(r.read())
-            spec = importlib.util.spec_from_file_location("KinoPoiskDL", local)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            return mod
-        except Exception:
-            return None
-
-    kinodl = _load_kinodl()
-    if kinodl is None:
-        logging.getLogger(__name__).warning("[GRABBER] KinoPoiskDL failed to load, Kinopoisk links will use yt-dlp")
+    import KinoPoiskDL as kinodl
+except ImportError:
+    kinodl = None
 except Exception:
     kinodl = None
-
 logger = logging.getLogger(__name__)
 
 async def _retry_topic_send(send, refresh):
@@ -1269,6 +1237,7 @@ class Grabber(loader.Module):
 
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(self._executor, _install_deps)
+        await loop.run_in_executor(self._executor, lambda: self._install_kinodl())
         await loop.run_in_executor(self._executor, _patch_vk_extractor)
         if self._get_setting("AUTORUNNER") and self.config["BOT_TOKEN"]:
             try:
@@ -1313,6 +1282,37 @@ class Grabber(loader.Module):
                     logger.error(f"[GRABBER] Failed to add preview: {e}")
         except Exception as e:
             logger.error(f"[GRABBER] Failed to send message with preview: {e}")
+
+    def _install_kinodl(self):
+        import importlib, subprocess
+        global kinodl
+        if kinodl is not None:
+            return "KinoPoiskDL: OK (already imported)"
+        try:
+            importlib.import_module("KinoPoiskDL")
+            globals()["kinodl"] = sys.modules["KinoPoiskDL"]
+            return "KinoPoiskDL: OK"
+        except ImportError:
+            pass
+        token = ""
+        try:
+            token = self._db.get("XR", "gh_token", "")
+        except Exception:
+            pass
+        url = "git+https://github.com/i-execute/KinoPoiskDL.git@main"
+        if token:
+            url = f"git+https://{token}@github.com/i-execute/KinoPoiskDL.git@main"
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--no-warn-script-location", url],
+                capture_output=True, text=True, timeout=300,
+            )
+            importlib.invalidate_caches()
+            importlib.import_module("KinoPoiskDL")
+            globals()["kinodl"] = sys.modules["KinoPoiskDL"]
+            return "KinoPoiskDL: OK (installed)"
+        except Exception as e:
+            return f"KinoPoiskDL: FAIL ({e})"
 
     async def _check_deps(self):
         deps = {"yt-dlp": "yt_dlp",
