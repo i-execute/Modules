@@ -58,11 +58,11 @@ except ImportError:
 
 try:
     import urllib.request as _urllib_request
-    _KINODL_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/kinodl.py"
+    _KINODL_URL = "https://raw.githubusercontent.com/i-execute/Modules/main/Storage/Grabber/KinoPoiskDL.py"
     _KINODL_LOCAL_CANDIDATES = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "kinodl.py"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "Storage", "Grabber", "kinodl.py"),
-        os.path.join("Storage", "Grabber", "kinodl.py"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "KinoPoiskDL.py"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "Storage", "Grabber", "KinoPoiskDL.py"),
+        os.path.join("Storage", "Grabber", "KinoPoiskDL.py"),
     ]
 
     def _load_kinodl():
@@ -70,17 +70,17 @@ try:
             for path in _KINODL_LOCAL_CANDIDATES:
                 if path and os.path.isfile(path):
                     import importlib.util
-                    spec = importlib.util.spec_from_file_location("kinodl", path)
+                    spec = importlib.util.spec_from_file_location("KinoPoiskDL", path)
                     mod = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(mod)
                     return mod
             import importlib.util
-            local = os.path.join(tempfile.gettempdir(), "kinodl.py")
+            local = os.path.join(tempfile.gettempdir(), "KinoPoiskDL.py")
             req = _urllib_request.Request(_KINODL_URL, headers={"User-Agent": "Grabber/4.2"})
             with _urllib_request.urlopen(req, timeout=15) as r:
                 with open(local, "wb") as f:
                     f.write(r.read())
-            spec = importlib.util.spec_from_file_location("kinodl", local)
+            spec = importlib.util.spec_from_file_location("KinoPoiskDL", local)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             return mod
