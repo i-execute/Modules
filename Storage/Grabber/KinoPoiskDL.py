@@ -7,6 +7,12 @@ import re
 import json
 import time
 import tempfile
+import shutil
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 __version__ = (1, 1, 0)
 
@@ -413,6 +419,34 @@ class KinopoiskDownloader:
         elif self.info.year:
             title = f"{title}_{self.info.year}"
         output_path = os.path.join(output_dir, f"{title}.mp4")
+        est = 0
+        try:
+            probe = requests.head(m3u8, headers={"User-Agent": UA}, timeout=15, allow_redirects=True) if requests else None
+            est = int(probe.headers.get("content-length", 0)) if probe else 0
+        except Exception:
+            est = 0
+        if requests and est == 0:
+            try:
+                _g = {
+                    "Accepts-Controls": WV,
+                    "Authorizations": f"Bearer {guard}",
+                    "Origin": "https://theatre.stravers.live",
+                    "Referer": self.info.iframe_url,
+                }
+                _t = requests.get(m3u8, headers=_g, timeout=20).text
+                _m = re.search(r"BANDWIDTH=(\d+)", _t)
+                if _m:
+                    _dur = (self.info.duration or 0) * 60
+                    est = int(int(_m.group(1)) * _dur / 8)
+            except Exception:
+                est = 0
+        if est > 0:
+            free = shutil.disk_usage(output_dir).free
+            if est * 2 + 64 * 2**20 > free:
+                need = est * 2 / 2**30
+                raise RuntimeError(
+                    f"not enough disk space: need ~{need:.1f} GiB (ts+mp4), free {free / 2**30:.1f} GiB"
+                )
         hdr_dict = {
             "Accepts-Controls": WV,
             "Authorizations": f"Bearer {guard}",
