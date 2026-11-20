@@ -442,10 +442,10 @@ class KinopoiskDownloader:
                 est = 0
         if est > 0:
             free = shutil.disk_usage(output_dir).free
-            if est * 2 + 64 * 2**20 > free:
-                need = est * 2 / 2**30
+            if est + 64 * 2**20 > free:
+                need = est / 2**30
                 raise RuntimeError(
-                    f"not enough disk space: need ~{need:.1f} GiB (ts+mp4), free {free / 2**30:.1f} GiB"
+                    f"not enough disk space: need ~{need:.1f} GiB , free {free / 2**30:.1f} GiB"
                 )
         hdr_dict = {
             "Accepts-Controls": WV,
@@ -547,26 +547,57 @@ def _segment_download(m3u8, output_path, headers, progress_cb=None, audio=False,
         init_frag = ri.content
     tmp_path = output_path + ".ts"
     downloaded = 0
-    with open(tmp_path, "wb") as f:
-        f.write(init_frag)
+    remux_popen = None
+    if not audio:
+        remux_cmd = [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", "pipe:0", "-c", "copy", "-bsf:a", "aac_adtstoasc",
+            "-movflags", "frag_keyframe+empty_moov", output_path,
+        ]
+        remux_popen = subprocess.Popen(
+            remux_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+    sink = open(tmp_path, "wb") if (audio or not remux_popen) else None
+    try:
+        if remux_popen:
+            remux_popen.stdin.write(init_frag)
+        if sink:
+            sink.write(init_frag)
         for i, seg in enumerate(media_playlist):
             seg_url = seg if seg.startswith("http") else media_base + seg
             for attempt in range(3):
                 try:
                     rs = s.get(seg_url, headers=hdr, timeout=60)
                     rs.raise_for_status()
-                    f.write(rs.content)
+                    if remux_popen:
+                        remux_popen.stdin.write(rs.content)
+                    if sink:
+                        sink.write(rs.content)
                     downloaded += 1
+                    if progress_cb and total:
+                        try:
+                            progress_cb(i + 1)
+                        except Exception:
+                            pass
                     break
                 except Exception:
                     if attempt == 2:
                         raise
                     time.sleep(1.0)
-            if progress_cb and total:
-                try:
-                    pass
-                except Exception:
-                    pass
+    finally:
+        if sink:
+            sink.close()
+    if remux_popen:
+        remux_popen.stdin.close()
+        rc = remux_popen.wait(timeout=1200)
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+        if rc != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            err = remux_popen.stderr.read()[-300:] if remux_popen.stderr else b""
+            raise RuntimeError(f"ffmpeg remux failed: {err.decode(errors='replace')}")
+        return output_path
     if audio:
         cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", tmp_path, "-vn", "-c:a", "libmp3lame", "-b:a", bitrate, output_path]
     else:
