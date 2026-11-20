@@ -453,7 +453,7 @@ class KinopoiskDownloader:
             "Origin": "https://theatre.stravers.live",
             "Referer": self.info.iframe_url,
         }
-        return _ffmpeg_download(m3u8, output_path, hdr_dict, self.progress_cb), q
+        return _segment_download(m3u8, output_path, hdr_dict, self.progress_cb), q
 
     def download_audio(self, output_dir=None, quality=None, season=None, episode=None, translation_id=None, bitrate="192k"):
         if self.info is None:
